@@ -17,20 +17,22 @@ X_train = X_train[..., np.newaxis]
 print(X_train.shape)
 print(y_train.shape)
 
+num_coeffs = 100
+
 # Gaussian Likelihood
 ll = Gaussian()
 
 # Layers definition
 rng = default_rng()
 noise_sampler = rng.standard_normal
-net = Linear(noise_sampler, 10, input_dim=1)
+net = Linear(noise_sampler, num_coeffs, input_dim=1)
 
 layers = [
-    VIPLayer(net, layer_noise=0.1, num_regression_coeffs=10,
+    VIPLayer(net, layer_noise=0.1, num_regression_coeffs=num_coeffs,
              num_outputs=1, input_dim=1)
 ]
 
-dvip = DVIP_Base(ll, layers, X_train.shape[0])
+dvip = DVIP_Base(ll, layers, X_train.shape[0], num_samples=1)
 
 print(dvip.trainable_variables)
 

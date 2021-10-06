@@ -321,13 +321,15 @@ class VIPLayer(Layer):
         # Compute mean value, shape (N, D)
         m = tf.reduce_mean(f, axis=0)
 
-        # Compute regresion function, shape (S, N, D)
+        # Compute regresion function, shape (num_coeffs, N, D)
         # NOTE Poner estimador insesgado (S-1) (?)
         sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype="float64"))
         phi = sqrt * (f - m)
 
         # Compute mean value using q_mu^T phi
+        # q_mu has shape (num_coeffs, D), now (num_coeffs, 1, D)
         q_mu = tf.expand_dims(self.q_mu, 1)
+        # shape (num_coeffs, N, D)
         q_mu = tf.tile(q_mu, [1, phi.shape[1], 1])
         # Shape (N, D)
         mean = m + tf.reduce_sum(q_mu * phi, axis=0)

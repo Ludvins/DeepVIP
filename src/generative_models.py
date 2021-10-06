@@ -4,7 +4,7 @@ import tensorflow as tf
 class Linear(tf.keras.layers.Layer):
     def __init__(self, noise_generator, num_samples, num_outputs=1, input_dim=32):
         """
-
+        TODO num_samples should be told by dvip, not in the main script
         """
         super(Linear, self).__init__(dtype="float64")
         self.noise_generator = noise_generator
