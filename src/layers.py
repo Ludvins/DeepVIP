@@ -2,7 +2,6 @@ import tensorflow as tf
 
 from .utils import reparameterize
 
-from tensorflow.python.keras.backend import batch_normalization
 import tensorflow_probability as tfp
 import numpy as np
 
@@ -20,6 +19,8 @@ class Layer(tf.keras.layers.Layer):
         dtype : data-type
                 The dtype of the layer's computations and weights.
                 Refer to tf.keras.layers.Layer for more information.
+
+
         **kwargs : dict, optional
                    Extra arguments to `Layer`.
                    Refer to tf.keras.layers.Layer for more information.
@@ -83,8 +84,10 @@ class Layer(tf.keras.layers.Layer):
         """
 
         if full_cov:
+
             def f(a):
                 return self.conditional_ND(a, full_cov=True)
+
             mean, var = tf.map_fn(f, X, dtype=(tf.float64, tf.float64))
             return tf.stack(mean), tf.stack(var)
         else:
@@ -94,9 +97,8 @@ class Layer(tf.keras.layers.Layer):
 
             X_flat = tf.reshape(X, [S * N, D])
             mean, var = self.conditional_ND(X_flat, full_cov=False)
-            # TODO Check this return shape
-            return [tf.reshape(m, [S, N, self.num_outputs])
-                    for m in [mean, var]]
+
+            return [tf.reshape(m, [S, N, self.num_outputs]) for m in [mean, var]]
 
     @tf.function
     def sample_from_conditional(self, X, z=None, full_cov=False):
@@ -134,8 +136,8 @@ class Layer(tf.keras.layers.Layer):
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
-            z = tf.random.normal(shape=tf.shape(mean),
-                                 seed=self.seed, dtype=self.dtype)
+            z = tf.random.normal(shape=tf.shape(mean), seed=self.seed,
+                                 dtype=self.dtype)
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
@@ -164,19 +166,18 @@ class Layer(tf.keras.layers.Layer):
 class VIPLayer(Layer):
     def __init__(
         self,
-        generative_f,
-        layer_noise,
+        noise_generator,
+        generative_function,
         num_regression_coeffs,
         num_outputs,
         input_dim,
+        log_layer_noise = -5,
         mean_function=None,
         dtype=tf.float64,
         **kwargs
     ):
         """
-        A variational implicit process layer in whitened representation.
-        This layer holds the kernel, variational parameters,
-        linear regression coefficients and mean function.
+        A variational implicit process layer.
 
         The underlying model performs a Bayesian linear regression
         approximation
@@ -204,6 +205,8 @@ class VIPLayer(Layer):
 
         Parameters
         ----------
+
+
         generative_f : callable
                        Generates function samples using the input locations X.
 
@@ -243,15 +246,22 @@ class VIPLayer(Layer):
         self.q_mu = tf.Variable(q_mu, name="q_mu")
 
         # Store class members
-        if mean_function == None:
+        if mean_function is None:
             self.mean_function = lambda x: 0
         else:
             self.mean_function = mean_function
 
         self.num_outputs = tf.constant(num_outputs, dtype=tf.int32)
-        self.generative_f = generative_f
+        self.generative_function = generative_function(
+            noise_generator, num_regression_coeffs, num_outputs, input_dim
+        )
 
-        self.layer_noise = layer_noise
+        self.log_layer_noise = tf.Variable(
+            initial_value=log_layer_noise,
+            dtype="float64",
+            trainable=True,
+            name="layer_log_noise",
+        )
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
@@ -317,22 +327,24 @@ class VIPLayer(Layer):
         """
 
         # Shape (num_coeffs, N, D)
-        f = self.generative_f(X, self.num_coeffs)
+        f = self.generative_function(X)
         # Compute mean value, shape (N, D)
         m = tf.reduce_mean(f, axis=0)
 
         # Compute regresion function, shape (num_coeffs, N, D)
         # NOTE Poner estimador insesgado (S-1) (?)
-        sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype="float64"))
-        phi = sqrt * (f - m)
+        inv_sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype="float64"))
+        phi = inv_sqrt * (f - m)
 
-        # Compute mean value using q_mu^T phi
-        # q_mu has shape (num_coeffs, D), now (num_coeffs, 1, D)
-        q_mu = tf.expand_dims(self.q_mu, 1)
-        # shape (num_coeffs, N, D)
-        q_mu = tf.tile(q_mu, [1, phi.shape[1], 1])
-        # Shape (N, D)
-        mean = m + tf.reduce_sum(q_mu * phi, axis=0)
+        # Compute mean value as m + q_mu^T phi per point and output dim
+        # q_mu has shape (num_coeffs, N, num_outputs)
+        # phi has shape (num_coeffs, num_outputs)
+        mean = m + tf.einsum("snd,sd->nd", phi, self.q_mu)
+
+        # Shape (num_outputs, num_coeffs, num_coeffs)
+        q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
+        # Shape (num_outputs, num_coeffs, num_coeffs)
+        Delta = tf.matmul(q_sqrt, q_sqrt, transpose_b=True)
 
         if full_cov:
             # Shape (N, N, D)
@@ -340,9 +352,9 @@ class VIPLayer(Layer):
             var = self.layer_noise + phi
         else:
             # Shape (N, D)
-            # TODO Square this?
-            K = tf.math.reduce_std(phi, 0)
-            var = K + self.layer_noise
+            K = tf.einsum("snd,dsk->snd", phi, Delta)
+            K = tf.einsum("snd,snd->nd", K, phi)
+            var = K + tf.math.exp(self.log_layer_noise)
 
         return mean + self.mean_function(X), var
 
@@ -352,12 +364,12 @@ class VIPLayer(Layer):
         Computes the KL divergence from the variational distribution of
         the linear regression coefficients to the prior.
 
-        That is from a Gaussian N(a_mu, a_sqrt) to N(0, I).
+        That is from a Gaussian N(q_mu, q_sqrt) to N(0, I).
         Uses formula for computing KL divergence between two
         multivariate normals, which in this case is:
         \[
-            KL = 0.5* ( tr(a_sqrt^T a_sqrt) +
-                 a_mu^T a_mu - M - \log |a_sqrt^T a_sqrt| )
+            KL = 0.5* ( tr(q_sqrt^T q_sqrt) +
+                 q_mu^T q_mu - M - \log |q_sqrt^T q_sqrt| )
         \]
         """
 
@@ -373,9 +385,9 @@ class VIPLayer(Layer):
         # Uses that sqrt(det(X)) = det(X^(1/2)) and
         # that the determinant of a upper triangular matrix (which a_sqrt is),
         # is the product of the diagonal entries (i.e. sum of their logarithm).
-        KL -= 0.5 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(q_sqrt) ** 2))
+        KL -= 0.5 * tf.reduce_sum(2*tf.math.log(tf.linalg.diag_part(q_sqrt)))
 
-        # Trace term
+        # Trace term, check this
         KL += 0.5 * tf.reduce_sum(tf.linalg.diag_part(tf.square(q_sqrt)))
 
         # Mean term

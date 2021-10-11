@@ -222,14 +222,15 @@ class DVIP_Base(tf.keras.Model):
         # Return arrays
         return Fs, Fmeans, Fvars
 
-    def predict_f(self, predict_at, num_samples = 1, full_cov=False):
+    def predict_f(self, predict_at, num_samples=1, full_cov=False):
         _, Fmeans, Fvars = self.propagate(
             predict_at, full_cov=full_cov, num_samples=num_samples
         )
         return Fmeans[-1], Fvars[-1]
 
     def predict_all_layers(self, predict_at, num_samples, full_cov=False):
-        return self.propagate(predict_at, full_cov=full_cov, num_samples=num_samples)
+        return self.propagate(predict_at, full_cov=full_cov,
+                              num_samples=num_samples)
 
     def predict_y(self, predict_at, num_samples=1):
         Fmean, Fvar = self.predict_f(
@@ -239,7 +240,6 @@ class DVIP_Base(tf.keras.Model):
 
     def predict_log_density(self, data, num_samples):
         Fmean, Fvar = self.predict_f(data[0], num_samples=num_samples, full_cov=False)
-        # TODO cambiar nombre a predict log density
         l = self.likelihood.predict_density(Fmean, Fvar, data[1])
         log_num_samples = tf.math.log(tf.cast(self.num_samples, self.dtype))
         return tf.reduce_logsumexp(l - log_num_samples, axis=0)
@@ -284,3 +284,7 @@ class DVIP_Base(tf.keras.Model):
         KL = tf.reduce_sum([layer.KL() for layer in self.vip_layers])
 
         return -scale * likelihood + KL
+
+    def print_variables(self):
+        for variable in self.trainable_variables:
+            print(variable)

@@ -5,21 +5,57 @@ import tensorflow_probability as tfp
 import numpy as np
 
 
-class Gaussian(tf.keras.layers.Layer):
-    def __init__(self, variance=1.0, dtype=tf.float64, **kwargs):
-        """"""
-        super().__init__(dtype=dtype)
+class Likelihood(tf.keras.layers.Layer):
+    def __init__(self, dtype=tf.float64, **kwargs):
+        """
 
-        transform = tfp.bijectors.Softplus()
-        self.variance = tfp.util.TransformedVariable(
-            variance, bijector=transform, dtype=self.dtype, name="lik_log_variance"
+        """
+        super().__init__(dtype=dtype)
+        self.build(0)
+
+    @property
+    def metrics(self):
+        raise NotImplementedError
+
+    @tf.autograph.experimental.do_not_convert
+    def update_metrics(self, y, mean_pred, std_pred):
+        raise NotImplementedError
+
+    def logdensity(self, x, mu, var):
+        raise NotImplementedError
+
+    def logp(self, F, Y):
+        raise NotImplementedError
+
+    def conditional_mean(self, F):
+        raise NotImplementedError
+
+    def conditional_variance(self, F):
+        raise NotImplementedError
+
+    def predict_mean_and_var(self, Fmu, Fvar):
+        raise NotImplementedError
+
+    def predict_logdensity(self, Fmu, Fvar, Y):
+        raise NotImplementedError
+
+    def variational_expectations(self, Fmu, Fvar, Y):
+        raise NotImplementedError
+
+
+class Gaussian(Likelihood):
+    def __init__(self, log_variance=-5.0, dtype=tf.float64, **kwargs):
+        """"""
+
+        self.log_variance = tf.Variable(
+            initial_value=log_variance, dtype=dtype, name="lik_log_variance"
         )
 
         self.rmse_metric = tf.keras.metrics.RootMeanSquaredError(name="rmse")
 
         self.nll_metric = tf.keras.metrics.Mean(name="nll")
 
-        self.build(0)
+        super().__init__(dtype=dtype, **kwargs)
 
     @property
     def metrics(self):
@@ -45,23 +81,24 @@ class Gaussian(tf.keras.layers.Layer):
         return -0.5 * (np.log(2 * np.pi) + tf.math.log(var) + tf.square(mu - x) / var)
 
     def logp(self, F, Y):
-        return self.logdensity(Y, F, self.variance)
+        return self.logdensity(Y, F, tf.math.exp(self.log_variance))
 
     def conditional_mean(self, F):
         return tf.identity(F)
 
     def conditional_variance(self, F):
-        return tf.fill(tf.shape(F), tf.squeeze(self.variance))
+        return tf.fill(tf.shape(F), tf.squeeze(tf.math.exp(self.log_variance)))
 
     def predict_mean_and_var(self, Fmu, Fvar):
-        return tf.identity(Fmu), Fvar + self.variance
+        return tf.identity(Fmu), Fvar + tf.math.exp(self.log_variance)
 
     def predict_logdensity(self, Fmu, Fvar, Y):
-        return self.logdensity(Y, Fmu, Fvar + self.variance)
+        return self.logdensity(Y, Fmu, Fvar + tf.math.exp(self.log_variance))
 
     def variational_expectations(self, Fmu, Fvar, Y):
+        variance = tf.math.exp(self.log_variance)
         return (
             -0.5 * np.log(2 * np.pi)
-            - 0.5 * tf.math.log(self.variance)
-            - 0.5 * (tf.square(Y - Fmu) + Fvar) / self.variance
+            - 0.5 * tf.math.log(variance)
+            - 0.5 * (tf.square(Y - Fmu) + Fvar) / variance
         )
