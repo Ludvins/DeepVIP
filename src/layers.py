@@ -166,7 +166,7 @@ class Layer(tf.keras.layers.Layer):
 class VIPLayer(Layer):
     def __init__(
         self,
-        noise_generator,
+        noise_sampler,
         generative_function,
         num_regression_coeffs,
         num_outputs,
@@ -205,14 +205,12 @@ class VIPLayer(Layer):
 
         Parameters
         ----------
+        noise_sampler : NoiseSampler
+                        Generates samples from a noise distribution.
 
-
-        generative_f : callable
-                       Generates function samples using the input locations X.
-
-        layer_noise : tf.tensor of shape (num_outputs)
-                      Contains the noise of each VIP contained in this layer,
-                      i.e, epsilon ~ N(0, layer_noise)
+        generative_function : GenerativeFunction
+                              Generates function samples using the input
+                              locations X and noise values.
 
         num_regression_coeffs : integer
                                 Indicates the amount of linear regression
@@ -227,6 +225,10 @@ class VIPLayer(Layer):
                     Dimensionality of the given features. Used to
                     pre-fix the shape of the different layers of the model.
 
+        log_layer_noise : float or tf.tensor of shape (num_outputs)
+                          Contains the noise of each VIP contained in this
+                          layer, i.e, epsilon ~ N(0, exp(log_layer_noise))
+
         mean_function : callable
                         Mean function added to the model.
 
@@ -240,22 +242,31 @@ class VIPLayer(Layer):
         """
         super().__init__(dtype=dtype, input_dim=input_dim, **kwargs)
 
-        # Regression Coefficients prior mean
         self.num_coeffs = num_regression_coeffs
+
+        # Regression Coefficients prior mean
         q_mu = np.zeros((self.num_coeffs, num_outputs))
         self.q_mu = tf.Variable(q_mu, name="q_mu")
 
-        # Store class members
+        # If no mean function is given, constant 0 is used
         if mean_function is None:
             self.mean_function = lambda x: 0
         else:
             self.mean_function = mean_function
 
+        # Verticality of the layer
         self.num_outputs = tf.constant(num_outputs, dtype=tf.int32)
-        self.generative_function = generative_function(
-            noise_generator, num_regression_coeffs, num_outputs, input_dim
-        )
 
+        # Initialize generative function
+        self.generative_function = generative_function(
+            num_regression_coeffs, num_outputs, input_dim
+        )
+        # Get the needed noise shape directly from the generative
+        # function
+        self.noise_shape = self.generative_function.get_noise_shape()
+        self.noise_sampler = noise_sampler
+
+        # Initialize the layer's noise
         self.log_layer_noise = tf.Variable(
             initial_value=log_layer_noise,
             dtype="float64",
@@ -266,10 +277,10 @@ class VIPLayer(Layer):
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
         # Shape (num_coeffs, num_coeffs)
-        I = np.eye(self.num_coeffs)
+        identity = np.eye(self.num_coeffs)
         # Replicate it num_outputs times
         # Shape (num_outputs, num_coeffs, num_coeffs)
-        I_tiled = np.tile(I[None, :, :], [num_outputs, 1, 1])
+        I_tiled = np.tile(identity[None, :, :], [num_outputs, 1, 1])
         # Create tensor with triangular representation.
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         triangular_I_tiled = tfp.math.fill_triangular_inverse(I_tiled)
@@ -282,57 +293,52 @@ class VIPLayer(Layer):
         Given that this distribution is Gaussian and Q(a) is also Gaussian
         the linear regression coefficients, a, can be marginalized, raising a
         Gaussian distribution as follows:
-        
-        Let 
-        \[
-            \phi(x) =  \frac{1}{\sqrt{S}}\Big(f_1(\bm x) - m^\star(\bm x), 
-                       \dots,f_S(\bm x) - m^\star(\bm x)\Big),
-        \]
-        with \(f_1, \dots, f_S \) the sampled functions. Then if
-        \[
-            Q^\star(y \mid \bm x, \bm a, \bm \theta) = 
-            \mathcal{N}\left(  
-                m^\star(\bm x_n) + \frac{1}{\sqrt{S}} \phi(x)^T a, \sigma^2 
-            \right)   
-        \]
+
+        Let
+
+        phi(x) =   1/sqrt{S}(f_1(x) - m^*(x),...,f_S(\bm x) - m^*(x)),
+
+        with f_1,..., f_S the sampled functions. Then if
+
+        Q^*(y|x,a,\theta) = N(m^*(x) + 1/sqrt{S} phi(x)^T a, sigma^2)
+
         and
-        \[
-            Q(a) = \mathcal{N}(q_mu, q_sigma q_sigma^T)   
-        \]
+
+        Q(a) = N(q_mu, q_sigma q_sigma^T)
+
         the marginalized distribution is
-        \[
-           Q^\star(y \mid \bm x \bm \theta) = 
-           \mathcal{N} \left( 
-               m^\star(\bm x_n) + \frac{1}{\sqrt{S}} \phi(x)^T q_mu \
-               \sigma^2 + \phi(x)^T q_sqrt q_sqrt^T \phi(x)
-           \right)
-        \]
-        
-        Parameters
-        ----------
+
+        Q^*(y | x, \theta) = N(
+            m^*(x) + 1/sqrt{S} phi(x)^T q_mu,
+            sigma^2 + phi(x)^T q_sqrt q_sqrt^T phi(x)
+        )
+
+        Parameters:
+        -----------
         X : tf.tensor of shape (N, D)
             Contains the input locations.
 
         full_cov : boolean
                    Wether to use full covariance matrix or not.
                    Determines the shape of the variance output.
-        
-        Returns
-        -------
+
+        Returns:
+        --------
         mean : tf.tensor of shape (N, num_outputs)
                Contains the mean value of the distribution for each input
-        
+
         var : tf.tensor of shape (N, num_outputs) or (N, N, num_outputs)
               Contains the variance value of the distribution for each input
         """
 
+        # Get noise samples
+        noise = self.noise_sampler(self.noise_shape)
         # Shape (num_coeffs, N, D)
-        f = self.generative_function(X)
+        f = self.generative_function(X, noise)
         # Compute mean value, shape (N, D)
         m = tf.reduce_mean(f, axis=0)
 
         # Compute regresion function, shape (num_coeffs, N, D)
-        # NOTE Poner estimador insesgado (S-1) (?)
         inv_sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype="float64"))
         phi = inv_sqrt * (f - m)
 
@@ -346,15 +352,21 @@ class VIPLayer(Layer):
         # Shape (num_outputs, num_coeffs, num_coeffs)
         Delta = tf.matmul(q_sqrt, q_sqrt, transpose_b=True)
 
+        # Compute variance matrix in two steps
+        # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
+        K = tf.einsum("snd,dsk->snd", phi, Delta)
+
         if full_cov:
-            # Shape (N, N, D)
-            # TODO
-            var = self.layer_noise + phi
+            # var shape (num_points, num_points, num_outputs)
+            # Multiply by phi again distinguishing data_points
+            K = tf.einsum("snd,smd->nmd", K, phi)
         else:
-            # Shape (N, D)
-            K = tf.einsum("snd,dsk->snd", phi, Delta)
+            # var shape (num_points, num_outputs)
+            # Multiply by phi again, using the same points twice
             K = tf.einsum("snd,snd->nd", K, phi)
-            var = K + tf.math.exp(self.log_layer_noise)
+
+        # Add layer noise to variance
+        var = K + tf.math.exp(self.log_layer_noise)
 
         return mean + self.mean_function(X), var
 
@@ -367,10 +379,9 @@ class VIPLayer(Layer):
         That is from a Gaussian N(q_mu, q_sqrt) to N(0, I).
         Uses formula for computing KL divergence between two
         multivariate normals, which in this case is:
-        \[
-            KL = 0.5* ( tr(q_sqrt^T q_sqrt) +
-                 q_mu^T q_mu - M - \log |q_sqrt^T q_sqrt| )
-        \]
+
+        KL = 0.5 * ( tr(q_sqrt^T q_sqrt) +
+                     q_mu^T q_mu - M - log |q_sqrt^T q_sqrt| )
         """
 
         D = tf.cast(self.num_outputs, dtype=self.dtype)
@@ -387,8 +398,9 @@ class VIPLayer(Layer):
         # is the product of the diagonal entries (i.e. sum of their logarithm).
         KL -= 0.5 * tf.reduce_sum(2*tf.math.log(tf.linalg.diag_part(q_sqrt)))
 
-        # Trace term, check this
-        KL += 0.5 * tf.reduce_sum(tf.linalg.diag_part(tf.square(q_sqrt)))
+        # Trace term.
+        # NOTE: I've checked this gives the same result as tf.linalg.trace
+        KL += 0.5 * tf.reduce_sum(tf.linalg.diag_part(q_sqrt))
 
         # Mean term
         KL += 0.5 * tf.reduce_sum(self.q_mu ** 2)
