@@ -132,7 +132,7 @@ class Layer(tf.keras.layers.Layer):
               Stacked tensor of variance values from conditional_ND applied to
               X.
         """
-        mean, var = self.conditional_SND(X, full_cov=full_cov)
+        mean, var = self.conditional_ND(X, full_cov=full_cov)
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
@@ -140,25 +140,6 @@ class Layer(tf.keras.layers.Layer):
                                  dtype=self.dtype)
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
-
-        # Apply input propagation if necessary
-        # if self.input_prop_dim:
-        #    # Get the slice of X to propagate
-        #    shape = [tf.shape(X)[0], tf.shape(X)[1], self.input_prop_dim]
-        #    X_prop = tf.reshape(X[:, :, :self.input_prop_dim], shape)
-
-        #    # Add it to the samples and mean values
-        #    samples = tf.concat([X_prop, samples], 2)
-        #    mean = tf.concat([X_prop, mean], 2)
-
-        #    # Add the corresponding zeros to the variance array
-        #    if full_cov:
-        #        shape = (tf.shape(X)[0], tf.shape(X)[1],
-        #                 tf.shape(X)[1], tf.shape(var)[3])
-        #        zeros = tf.zeros(shape, dtype=self.dtype)
-        #        var = tf.concat([zeros, var], 3)
-        #    else:
-        #        var = tf.concat([tf.zeros_like(X_prop), var], 2)
 
         return samples, mean, var
 
@@ -259,16 +240,12 @@ class VIPLayer(Layer):
 
         # Initialize generative function
         self.generative_function = generative_function(
-            num_regression_coeffs, num_outputs, input_dim
+            noise_sampler, num_regression_coeffs, num_outputs, input_dim
         )
-        # Get the needed noise shape directly from the generative
-        # function
-        self.noise_shape = self.generative_function.get_noise_shape()
-        self.noise_sampler = noise_sampler
 
         # Initialize the layer's noise
         self.log_layer_noise = tf.Variable(
-            initial_value=log_layer_noise,
+            initial_value=np.ones(num_outputs) * log_layer_noise,
             dtype="float64",
             trainable=True,
             name="layer_log_noise",
@@ -331,10 +308,8 @@ class VIPLayer(Layer):
               Contains the variance value of the distribution for each input
         """
 
-        # Get noise samples
-        noise = self.noise_sampler(self.noise_shape)
         # Shape (num_coeffs, N, D)
-        f = self.generative_function(X, noise)
+        f = self.generative_function(X)
         # Compute mean value, shape (N, D)
         m = tf.reduce_mean(f, axis=0)
 
@@ -354,7 +329,7 @@ class VIPLayer(Layer):
 
         # Compute variance matrix in two steps
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
-        K = tf.einsum("snd,dsk->snd", phi, Delta)
+        K = tf.einsum("snd,dsk->knd", phi, Delta)
 
         if full_cov:
             # var shape (num_points, num_points, num_outputs)
@@ -388,21 +363,31 @@ class VIPLayer(Layer):
 
         # Recover triangular matrix from array
         q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
+        diag = tf.linalg.diag_part(q_sqrt)
 
         # Constant dimensionality term
-        KL = -0.5 * D * self.num_coeffs
+        KL = - 0.5 * D * self.num_coeffs
 
         # Log of determinant of covariance matrix.
         # Uses that sqrt(det(X)) = det(X^(1/2)) and
-        # that the determinant of a upper triangular matrix (which a_sqrt is),
+        # that the determinant of a upper triangular matrix (which q_sqrt is),
         # is the product of the diagonal entries (i.e. sum of their logarithm).
-        KL -= 0.5 * tf.reduce_sum(2*tf.math.log(tf.linalg.diag_part(q_sqrt)))
+        KL -= 0.5 * tf.reduce_sum(2*tf.math.log(diag))
 
         # Trace term.
         # NOTE: I've checked this gives the same result as tf.linalg.trace
-        KL += 0.5 * tf.reduce_sum(tf.linalg.diag_part(q_sqrt))
+        KL += 0.5 * tf.reduce_sum(tf.square(diag))
 
         # Mean term
-        KL += 0.5 * tf.reduce_sum(self.q_mu ** 2)
-
+        KL += 0.5 * tf.reduce_sum(tf.square(self.q_mu))
         return KL
+
+    def print_variables(self):
+        print("Regression coefficients")
+        print("Mean: ")
+        print(self.q_mu.value().numpy())
+        q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
+        print("Covariance: ")
+        print(q_sqrt)
+        print("Generative model variables:")
+        print(self.generative_function.trainable_variables)

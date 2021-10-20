@@ -176,7 +176,7 @@ class DVIP_Base(tf.keras.Model):
         return mean, var
 
     @tf.function
-    def propagate(self, X, full_cov=False, bootstrap_replicates=1):
+    def propagate(self, X, full_cov=False):
         """
         Propagates the input trough the layer, using the output of the previous
         as the input for the next one.
@@ -188,8 +188,6 @@ class DVIP_Base(tf.keras.Model):
         full_cov : boolean
                    Whether to use the full covariance matrix or just
                    the diagonal values.
-        bootstrap_replicates : int
-                               Number of bootstrap replicates to use.
 
         Returns
         -------
@@ -202,13 +200,11 @@ class DVIP_Base(tf.keras.Model):
                 Contains the standard deviation of the predictions at
                 each layer.
         """
-        # Create bootstrap replicates
-        sX = tf.tile(tf.expand_dims(X, 0), [bootstrap_replicates, 1, 1])
         # Define arrays
         Fs, Fmeans, Fvars = [], [], []
 
         # First input corresponds to the original one
-        F = sX
+        F = X
 
         for layer in self.vip_layers:
             F, Fmean, Fvar = layer.sample_from_conditional(F,
@@ -221,7 +217,7 @@ class DVIP_Base(tf.keras.Model):
         # Return arrays
         return Fs, Fmeans, Fvars
 
-    def predict_f(self, predict_at, bootstrap_replicates=1, full_cov=False):
+    def predict_f(self, predict_at, full_cov=False):
         """
         Returns the predicted mean and variance at the last layer.
 
@@ -232,9 +228,7 @@ class DVIP_Base(tf.keras.Model):
         full_cov : boolean
                    Whether to use the full covariance matrix or just
                    the diagonal values.
-        bootstrap_replicates : int
-                               Number of bootstrap replicates to use.
-
+                   
         Returns
         -------
         Fmeans : tf.tensor of shape (num_data, output_dim)
@@ -247,11 +241,10 @@ class DVIP_Base(tf.keras.Model):
         """
         _, Fmeans, Fvars = self.propagate(
             predict_at, full_cov=full_cov,
-            bootstrap_replicates=bootstrap_replicates
         )
         return Fmeans[-1], Fvars[-1]
 
-    def predict_all_layers(self, predict_at, bootstrap_replicates,
+    def predict_all_layers(self, predict_at,
                            full_cov=False):
         """
         Propagates the input and returns all the predicted data.
@@ -263,8 +256,6 @@ class DVIP_Base(tf.keras.Model):
         full_cov : boolean
                    Whether to use the full covariance matrix or just
                    the diagonal values.
-        bootstrap_replicates : int
-                               Number of bootstrap replicates to use.
 
         Returns
         -------
@@ -278,10 +269,9 @@ class DVIP_Base(tf.keras.Model):
                 each layer.
         """
 
-        return self.propagate(predict_at, full_cov=full_cov,
-                              bootstrap_replicates=bootstrap_replicates)
+        return self.propagate(predict_at, full_cov=full_cov)
 
-    def predict_y(self, predict_at, bootstrap_replicates=1):
+    def predict_y(self, predict_at):
         """
         Computes the predicted labels for the given input.
 
@@ -289,8 +279,6 @@ class DVIP_Base(tf.keras.Model):
         ----------
         predict_at : tf.tensor of shape (num_data, data_dim)
                      Contains the input features.
-        bootstrap_replicates : int
-                               Number of bootstrap replicates to use.
 
         Returns
         -------
@@ -299,13 +287,13 @@ class DVIP_Base(tf.keras.Model):
         """
 
         Fmean, Fvar = self.predict_f(
-            predict_at, bootstrap_replicates=bootstrap_replicates,
+            predict_at,
             full_cov=False
         )
         return self.likelihood.predict_mean_and_var(Fmean, Fvar)
 
-    def predict_log_density(self, data, bootstrap_replicates):
-        Fmean, Fvar = self.predict_f(data[0], bootstrap_replicates=bootstrap_replicates, full_cov=False)
+    def predict_log_density(self, data):
+        Fmean, Fvar = self.predict_f(data[0], full_cov=False)
         l = self.likelihood.predict_density(Fmean, Fvar, data[1])
         log_num_samples = tf.math.log(tf.cast(self.num_samples, self.dtype))
         return tf.reduce_logsumexp(l - log_num_samples, axis=0)
@@ -318,9 +306,9 @@ class DVIP_Base(tf.keras.Model):
         """
         F_mean, F_var = self.predict_f(X,
                                        full_cov=False)
-        # Shape [S, N, D]
-        var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
         # Shape [N, D]
+        var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
+        # Shape [D]
         return tf.reduce_mean(var_exp, 0)
 
     @tf.function
@@ -338,7 +326,7 @@ class DVIP_Base(tf.keras.Model):
 
         Returns
         -------
-        nelbo : tf.tensor of shape (1)
+        nelbo : tf.tensor
                 Negative evidence lower bound
         """
         X, Y = inputs, outputs
@@ -349,8 +337,12 @@ class DVIP_Base(tf.keras.Model):
         scale /= tf.cast(tf.shape(X)[0], self.dtype)
         # Compute KL term
         KL = tf.reduce_sum([layer.KL() for layer in self.vip_layers])
-        return -scale * likelihood + KL
+
+        return - scale * likelihood + KL
 
     def print_variables(self):
-        for variable in self.trainable_variables:
-            print(variable)
+        print(" === MODEL VARIABLES === ")
+        print("Likelihood log variance: ", self.likelihood.log_variance.value().numpy())
+        for i, layer in enumerate(self.vip_layers):
+            print(" -- Layer ", i, " --")
+            layer.print_variables()

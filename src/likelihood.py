@@ -96,9 +96,17 @@ class Gaussian(Likelihood):
         return self.logdensity(Y, Fmu, Fvar + tf.math.exp(self.log_variance))
 
     def variational_expectations(self, Fmu, Fvar, Y):
+        # NOTE Y shape is (N,) when D is 1, this leads to Y - Fmu to be
+        #  (N, N)
+        if len(Y.shape) == 1:
+            Y = tf.expand_dims(Y, -1)
+
+        # Get variance
         variance = tf.math.exp(self.log_variance)
-        return (
-            -0.5 * np.log(2 * np.pi)
+        
+        # Compute variational expectations
+        var_exp = (- 0.5 * np.log(2 * np.pi)
             - 0.5 * tf.math.log(variance)
-            - 0.5 * (tf.square(Y - Fmu) + Fvar) / variance
-        )
+            - 0.5 * (tf.square(Y - Fmu) + Fvar) / variance)
+        
+        return var_exp
