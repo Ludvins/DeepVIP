@@ -251,6 +251,7 @@ class VIPLayer(Layer):
             name="layer_log_noise",
         )
 
+        # TODO reducir varianzas
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
         # Shape (num_coeffs, num_coeffs)

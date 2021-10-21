@@ -10,7 +10,7 @@ from src.generative_models import BayesianNN, get_bn
 
 import tensorflow as tf
 
-tf.config.run_functions_eagerly(True)
+# tf.config.run_functions_eagerly(True)
 
 ######################################################
 ################### LINEAR DATASET ###################
@@ -63,11 +63,11 @@ dvip = DVIP_Base(ll, layers, X_train.shape[0], y_mean=y_mean, y_std=y_std)
 
 print(dvip.print_variables())
 
-opt = tf.keras.optimizers.Adam(learning_rate=0.1)
+opt = tf.keras.optimizers.Adam(learning_rate=0.001)
 
 dvip.compile(opt)
 
-dvip.fit(X_train, (y_train - y_mean) / y_std, epochs=100, batch_size=8)
+dvip.fit(X_train, (y_train - y_mean) / y_std, epochs=10000, batch_size=300)
 
 print(dvip.print_variables())
 mean, var = dvip(X_train)
@@ -80,9 +80,9 @@ ax.scatter(X_train, y_train, color="blue", label="Data")
 ax.scatter(X_train, mean, color="red", label="Model fitting")
 
 mean = mean.numpy()[sort, 0]
-var = var.numpy()[sort, 0]
+std = np.sqrt(var.numpy()[sort, 0])
 
-ax.fill_between(X_train[sort, 0], mean - 3 * var, mean + 3 * var, color="b", alpha=0.1)
+ax.fill_between(X_train[sort, 0], mean - std, mean + std, color="b", alpha=0.1)
 
 plt.legend()
 plt.show()
