@@ -240,7 +240,8 @@ class VIPLayer(Layer):
 
         # Initialize generative function
         self.generative_function = generative_function(
-            noise_sampler, num_regression_coeffs, num_outputs, input_dim
+            noise_sampler = noise_sampler, num_samples = num_regression_coeffs,
+            num_outputs = num_outputs, input_dim = input_dim
         )
 
         # Initialize the layer's noise
@@ -251,7 +252,6 @@ class VIPLayer(Layer):
             name="layer_log_noise",
         )
 
-        # TODO reducir varianzas
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
         # Shape (num_coeffs, num_coeffs)
@@ -377,7 +377,7 @@ class VIPLayer(Layer):
 
         # Trace term.
         # NOTE: I've checked this gives the same result as tf.linalg.trace
-        KL += 0.5 * tf.reduce_sum(tf.square(diag))
+        KL += 0.5 * tf.reduce_sum(tf.square(self.q_sqrt_tri))
 
         # Mean term
         KL += 0.5 * tf.reduce_sum(tf.square(self.q_mu))

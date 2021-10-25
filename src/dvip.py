@@ -1,6 +1,5 @@
 import tensorflow as tf
 
-
 class DVIP_Base(tf.keras.Model):
     def __init__(
         self,
@@ -25,10 +24,10 @@ class DVIP_Base(tf.keras.Model):
                  Contains the different Variational Implicit Process layers
                  that make up this model.
         num_data : int
-                   Ammount of data samples
-        y_mean : float
+                   Ammount of data samples 
+        y_mean : float or array-like
                  Original value of the normalized labels
-        y_std : float
+        y_std : float or array-like
                 Original standar deviation of the normalized labels
         dtype : data-type
                 The dtype of the layer's computations and weights.

@@ -3,3 +3,4 @@ data/*
 src/__pycache__/*
 *.png
 __pycache__/*
+tests.py

@@ -207,7 +207,7 @@ class BayesianNN(GenerativeFunction):
         structure,
         activation,
         num_outputs=1,
-        input_dim=32,
+        input_dim=1,
     ):
         """
         Defines a Bayesian Neural Network
@@ -216,7 +216,7 @@ class BayesianNN(GenerativeFunction):
         -----------
 
         num_samples : int
-                      Ammount of samples to generate in each call.
+                      Amount of samples to generate in each call.
 
         num_outputs : int
                       Dimensionality of the function output.
@@ -275,7 +275,6 @@ class BayesianNN(GenerativeFunction):
             # Compute Gaussian variables
             w = z_w * tf.math.exp(w_log_std) + w_m
             b = z_b * tf.math.exp(b_log_std) + b_m
-
             x = self.activation(x @ w + b)
 
         w_m, w_log_std, b_m, b_log_std = self.vars[-1]
@@ -288,7 +287,7 @@ class BayesianNN(GenerativeFunction):
 
 
 def get_bn(structure, act):
-    def bn(noise_sampler, num_samples, input_dim, num_outputs):
+    def bn(noise_sampler, num_samples, num_outputs, input_dim):
         return BayesianNN(
             noise_sampler=noise_sampler,
             num_samples=num_samples,

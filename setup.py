@@ -2,7 +2,7 @@
 
 import numpy as np
 from numpy.random import default_rng
-
+import seaborn as sns
 
 import matplotlib.pyplot as plt
 
@@ -11,46 +11,47 @@ from src.dvip import DVIP_Base
 from src.layers import VIPLayer
 from src.generative_models import BayesianNN, get_bn
 
-from datetime import datetime
-
 
 import tensorflow as tf
 
-# tf.config.run_functions_eagerly(True)
-
-
 def experiment(
-    X_train,
-    y_train,
+    X,
+    y,
     regression_coeffs=20,
     lr=0.001,
     epochs=1000,
     batch_size=None,
-    verbose=1,
     structure=[10, 10],
     activation=tf.keras.activations.tanh,
-    n_layers=1,
+    layers_shape = [],
+    mean_function = None,
+    eager = False,
     plotting=False,
     fig_name=None,
+    show = False,
+    verbose=1,
 ):
 
-    assert X_train.shape[0] == y_train.shape[0]
+    # Set eager execution
+    tf.config.run_functions_eagerly(eager)
+    
+    assert X.shape[0] == y.shape[0]
 
-    y_mean = np.mean(y_train)
-    y_std = np.std(y_train)
+    y_mean = np.mean(y)
+    y_std = np.std(y)
 
     if verbose > 0:
         print("Data information")
-        print("Samples: ", X_train.shape[0])
-        print("Features dimension: ", X_train.shape[1])
-        print("Label dimension: ", y_train.shape[1])
+        print("Samples: ", X.shape[0])
+        print("Features dimension: ", X.shape[1])
+        print("Label dimension: ", y.shape[1])
         print("Labels mean value: ", y_mean)
         print("Labels deviation: ", y_std)
         print("press any key to continue...")
         input()
 
     if batch_size is None:
-        batch_size = X_train.shape[0]
+        batch_size = X.shape[0]
 
     # Gaussian Likelihood
     ll = Gaussian()
@@ -59,18 +60,21 @@ def experiment(
     rng = default_rng()
     noise_sampler = lambda x: rng.standard_normal(size=x)
 
+    dims = [X.shape[1]] + layers_shape + [y.shape[1]]
+    
     layers = [
         VIPLayer(
             noise_sampler,
             get_bn(structure, activation),
             num_regression_coeffs=regression_coeffs,
-            num_outputs=y_train.shape[1],
-            input_dim=X_train.shape[1],
+            num_outputs=_out,
+            input_dim=_in,
+            mean_function=mean_function
         )
-        for _ in range(n_layers)
+        for _in, _out in zip(dims, dims[1:])
     ]
-
-    dvip = DVIP_Base(ll, layers, X_train.shape[0], y_mean=y_mean, y_std=y_std)
+    
+    dvip = DVIP_Base(ll, layers, X.shape[0], y_mean=y_mean, y_std=y_std)
 
     if verbose > 1:
         print("Initial variable values:")
@@ -80,41 +84,40 @@ def experiment(
 
     dvip.compile(optimizer=opt)
 
-    dvip.fit(X_train, (y_train - y_mean) / y_std, epochs=epochs, 
+    dvip.fit(X, (y - y_mean) / y_std, epochs=epochs, 
              batch_size=batch_size, 
              )
 
     if verbose > 1:
         dvip.print_variables()
 
-    if plotting and X_train.shape[1] == 1:
+    if plotting and X.shape[1] == 1:
 
-        mean, var = dvip.predict_y(X_train)
+        mean, var = dvip.predict_y(X)
         mean = mean * y_std + y_mean
         
-        sort = np.argsort(X_train[:, 0])
+        sort = np.argsort(X[:, 0])
         _, ax = plt.subplots()
         
         
 
-        ax.scatter(X_train, y_train, color="blue", label="Data")
-        ax.scatter(X_train, mean, color="red", label="Model fitting")
-        
+        ax.scatter(X, y, color="blue", label="Data")
+        ax.scatter(X, mean, color="red", label="Model fitting")
         
         
         mean = mean.numpy()[sort, 0]
         std = np.sqrt(var.numpy()[sort, 0])
 
         ax.fill_between(
-            X_train[sort, 0], mean - 3 * std, mean + 3 * std, color="b", alpha=0.1
+            X[sort, 0], mean - 3 * std, mean + 3 * std, color="b", alpha=0.1
         )
 
         plt.legend()
         plt.savefig(
             "plots/"
             + fig_name
-            + "_nlayers="
-            + str(n_layers)
+            + "_layers="
+            + "-".join(str(a) for a in dims)
             + "_bnn="
             + "-".join(str(a) for a in structure)
             + "_epochs="
@@ -123,3 +126,5 @@ def experiment(
             + str(batch_size)
             + ".png"
         )
+        if show:
+            plt.show()
