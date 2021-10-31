@@ -208,6 +208,7 @@ class DVIP_Base(tf.keras.Model):
         for layer in self.vip_layers:
             F, Fmean, Fvar = layer.sample_from_conditional(F,
                                                            full_cov=full_cov)
+
             # Store values
             Fs.append(F)
             Fmeans.append(Fmean)

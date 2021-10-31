@@ -136,8 +136,7 @@ class Layer(tf.keras.layers.Layer):
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
-            z = tf.random.normal(shape=tf.shape(mean), seed=self.seed,
-                                 dtype=self.dtype)
+            z = tf.random.normal(shape=tf.shape(mean), seed=self.seed, dtype=self.dtype)
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
@@ -152,7 +151,7 @@ class VIPLayer(Layer):
         num_regression_coeffs,
         num_outputs,
         input_dim,
-        log_layer_noise = -5,
+        log_layer_noise=-5,
         mean_function=None,
         dtype=tf.float64,
         **kwargs
@@ -230,18 +229,18 @@ class VIPLayer(Layer):
         self.q_mu = tf.Variable(q_mu, name="q_mu")
 
         # If no mean function is given, constant 0 is used
-        if mean_function is None:
-            self.mean_function = lambda x: 0
-        else:
-            self.mean_function = mean_function
+        self.mean_function = mean_function
 
         # Verticality of the layer
         self.num_outputs = tf.constant(num_outputs, dtype=tf.int32)
 
         # Initialize generative function
         self.generative_function = generative_function(
-            noise_sampler = noise_sampler, num_samples = num_regression_coeffs,
-            num_outputs = num_outputs, input_dim = input_dim
+            noise_sampler=noise_sampler,
+            num_samples=num_regression_coeffs,
+            num_outputs=num_outputs,
+            input_dim=input_dim,
+            seed=self.seed,
         )
 
         # Initialize the layer's noise
@@ -344,7 +343,17 @@ class VIPLayer(Layer):
         # Add layer noise to variance
         var = K + tf.math.exp(self.log_layer_noise)
 
-        return mean + self.mean_function(X), var
+        if self.mean_function is not None:
+            mf = self.mean_function(X)
+
+            if mf.shape != mean.shape:
+                raise Exception(
+                    "Mean function of layer does not generate a valid output."
+                    "It cannot be added to the mean value in the propagate method."
+                )
+
+            mean = mean + mf
+        return mean, var
 
     @tf.function
     def KL(self):
@@ -367,16 +376,15 @@ class VIPLayer(Layer):
         diag = tf.linalg.diag_part(q_sqrt)
 
         # Constant dimensionality term
-        KL = - 0.5 * D * self.num_coeffs
+        KL = -0.5 * D * self.num_coeffs
 
         # Log of determinant of covariance matrix.
         # Uses that sqrt(det(X)) = det(X^(1/2)) and
         # that the determinant of a upper triangular matrix (which q_sqrt is),
         # is the product of the diagonal entries (i.e. sum of their logarithm).
-        KL -= 0.5 * tf.reduce_sum(2*tf.math.log(diag))
+        KL -= 0.5 * tf.reduce_sum(2 * tf.math.log(diag))
 
         # Trace term.
-        # NOTE: I've checked this gives the same result as tf.linalg.trace
         KL += 0.5 * tf.reduce_sum(tf.square(self.q_sqrt_tri))
 
         # Mean term
