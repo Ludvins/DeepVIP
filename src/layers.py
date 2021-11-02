@@ -98,7 +98,9 @@ class Layer(tf.keras.layers.Layer):
             X_flat = tf.reshape(X, [S * N, D])
             mean, var = self.conditional_ND(X_flat, full_cov=False)
 
-            return [tf.reshape(m, [S, N, self.num_outputs]) for m in [mean, var]]
+            return [
+                tf.reshape(m, [S, N, self.num_outputs]) for m in [mean, var]
+            ]
 
     @tf.function
     def sample_from_conditional(self, X, z=None, full_cov=False):
@@ -136,7 +138,9 @@ class Layer(tf.keras.layers.Layer):
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
-            z = tf.random.normal(shape=tf.shape(mean), seed=self.seed, dtype=self.dtype)
+            z = tf.random.normal(shape=tf.shape(mean),
+                                 seed=self.seed,
+                                 dtype=self.dtype)
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
@@ -144,18 +148,16 @@ class Layer(tf.keras.layers.Layer):
 
 
 class VIPLayer(Layer):
-    def __init__(
-        self,
-        noise_sampler,
-        generative_function,
-        num_regression_coeffs,
-        num_outputs,
-        input_dim,
-        log_layer_noise=-5,
-        mean_function=None,
-        dtype=tf.float64,
-        **kwargs
-    ):
+    def __init__(self,
+                 noise_sampler,
+                 generative_function,
+                 num_regression_coeffs,
+                 num_outputs,
+                 input_dim,
+                 log_layer_noise=-5,
+                 mean_function=None,
+                 dtype=tf.float64,
+                 **kwargs):
         """
         A variational implicit process layer.
 
@@ -344,15 +346,8 @@ class VIPLayer(Layer):
         var = K + tf.math.exp(self.log_layer_noise)
 
         if self.mean_function is not None:
-            mf = self.mean_function(X)
+            mean = mean + self.mean_function(X)
 
-            if mf.shape != mean.shape:
-                raise Exception(
-                    "Mean function of layer does not generate a valid output."
-                    "It cannot be added to the mean value in the propagate method."
-                )
-
-            mean = mean + mf
         return mean, var
 
     @tf.function
@@ -389,6 +384,7 @@ class VIPLayer(Layer):
 
         # Mean term
         KL += 0.5 * tf.reduce_sum(tf.square(self.q_mu))
+
         return KL
 
     def print_variables(self):

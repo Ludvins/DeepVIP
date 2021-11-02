@@ -1,16 +1,15 @@
 import tensorflow as tf
 
+
 class DVIP_Base(tf.keras.Model):
-    def __init__(
-        self,
-        likelihood,
-        layers,
-        num_data,
-        y_mean=0.0,
-        y_std=1.0,
-        dtype=tf.float64,
-        **kwargs
-    ):
+    def __init__(self,
+                 likelihood,
+                 layers,
+                 num_data,
+                 y_mean=0.0,
+                 y_std=1.0,
+                 dtype=tf.float64,
+                 **kwargs):
         """
         Defines a Base class for Deep Variational Implicit Processes as a
         particular Keras model.
@@ -92,9 +91,8 @@ class DVIP_Base(tf.keras.Model):
         self.loss_tracker.update_state(loss)
 
         # Update metrics
-        self.likelihood.update_metrics(
-            y * self.y_std + self.y_mean, mean_pred, var_pred
-        )
+        self.likelihood.update_metrics(y * self.y_std + self.y_mean, mean_pred,
+                                       var_pred)
 
         return {m.name: m.result() for m in self.metrics}
 
@@ -240,12 +238,12 @@ class DVIP_Base(tf.keras.Model):
 
         """
         _, Fmeans, Fvars = self.propagate(
-            predict_at, full_cov=full_cov,
+            predict_at,
+            full_cov=full_cov,
         )
         return Fmeans[-1], Fvars[-1]
 
-    def predict_all_layers(self, predict_at,
-                           full_cov=False):
+    def predict_all_layers(self, predict_at, full_cov=False):
         """
         Propagates the input and returns all the predicted data.
 
@@ -286,11 +284,9 @@ class DVIP_Base(tf.keras.Model):
         and the predicted mean and variance.
         """
 
-        Fmean, Fvar = self.predict_f(
-            predict_at,
-            full_cov=False
-        )
-        return self.likelihood.predict_mean_and_var(Fmean, Fvar)
+        Fmean, Fvar = self.predict_f(predict_at, full_cov=False)
+        mean, var = self.likelihood.predict_mean_and_var(Fmean, Fvar)
+        return mean * self.y_std + self.y_mean, var
 
     def predict_log_density(self, data):
         Fmean, Fvar = self.predict_f(data[0], full_cov=False)
@@ -304,8 +300,7 @@ class DVIP_Base(tf.keras.Model):
         Compute expectations of the data log likelihood under the variational
         distribution with MC samples
         """
-        F_mean, F_var = self.predict_f(X,
-                                       full_cov=False)
+        F_mean, F_var = self.predict_f(X, full_cov=False)
         # Shape [N, D]
         var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
         # Shape [D]
@@ -338,11 +333,12 @@ class DVIP_Base(tf.keras.Model):
         # Compute KL term
         KL = tf.reduce_sum([layer.KL() for layer in self.vip_layers])
 
-        return - scale * likelihood + KL
+        return -scale * likelihood + KL
 
     def print_variables(self):
         print(" === MODEL VARIABLES === ")
-        print("Likelihood log variance: ", self.likelihood.log_variance.value().numpy())
+        print("Likelihood log variance: ",
+              self.likelihood.log_variance.value().numpy())
         for i, layer in enumerate(self.vip_layers):
             print(" -- Layer ", i, " --")
             layer.print_variables()

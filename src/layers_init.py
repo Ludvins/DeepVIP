@@ -5,6 +5,15 @@ import numpy as np
 import tensorflow as tf
 from src.generative_models import get_bn
 from numpy.random import default_rng
+from src.generative_models import GaussianSampler
+
+
+class LinearProjection:
+    def __init__(self, matrix):
+        self.P = matrix
+
+    def __call__(self, inputs):
+        return inputs @ self.P.T
 
 
 def init_layers(
@@ -18,38 +27,33 @@ def init_layers(
 ):
 
     if noise_sampler is None:
+        noise_sampler = GaussianSampler(0)
 
-        def noise_sampler(x):
-            return default_rng().standard_normal(size=x)
-
-    if isinstance(inner_dims, int):
+    if isinstance(inner_dims, (int, np.integer)):
         dims = np.concatenate(
-            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1])
-        )
+            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1]))
     else:
         dims = [X.shape[1]] + inner_dims + [Y.shape[1]]
 
     layers = []
-
     X_running = np.copy(X)
-    for dim_in, dim_out in zip(dims[:-1], dims[1:]):
+    for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
+        if i == len(dims) - 1:
+            mf = None
 
-        if dim_in == dim_out:
+        elif dim_in == dim_out:
 
-            def mf(x):
-                return x
+            mf = LinearProjection(np.identity(n=dim_in))
+
+        elif dim_in > dim_out:
+            _, _, V = np.linalg.svd(X_running, full_matrices=False)
+
+            mf = LinearProjection(V[:dim_out, :])
+            X_running = mf(X_running)
 
         else:
-            if dim_in > dim_out:
-                _, _, V = np.linalg.svd(X_running, full_matrices=False)
-
-                def mf(x):
-                    return x @ V[:dim_out, :].T
-
-            else:
-                raise NotImplementedError
-
-        X_running = mf(X_running)
+            raise NotImplementedError("Dimensionality augmentation is not"
+                                      " handled currently.")
 
         layers.append(
             VIPLayer(
@@ -59,18 +63,6 @@ def init_layers(
                 num_outputs=dim_out,
                 input_dim=dim_in,
                 mean_function=mf,
-            )
-        )
-
-    layers.append(
-        VIPLayer(
-            noise_sampler,
-            get_bn(structure, activation),
-            num_regression_coeffs=regression_coeffs,
-            num_outputs=dims[-1],
-            input_dim=dims[-2],
-            mean_function=None,
-        )
-    )
+            ))
 
     return layers
