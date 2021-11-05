@@ -283,7 +283,7 @@ class VIPLayer(Layer):
 
         and
 
-        Q(a) = N(q_mu, q_sigma q_sigma^T)
+        Q(a) = N(q_mu, q_sqrt q_sqrt^T)
 
         the marginalized distribution is
 
@@ -314,14 +314,13 @@ class VIPLayer(Layer):
         f = self.generative_function(X)
         # Compute mean value, shape (N, D)
         m = tf.reduce_mean(f, axis=0)
-
         # Compute regresion function, shape (num_coeffs, N, D)
         inv_sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype="float64"))
         phi = inv_sqrt * (f - m)
 
         # Compute mean value as m + q_mu^T phi per point and output dim
-        # q_mu has shape (num_coeffs, N, num_outputs)
-        # phi has shape (num_coeffs, num_outputs)
+        # q_mu has shape (num_coeffs, num_outputs)
+        # phi has shape (num_coeffs, N, num_outputs)
         mean = m + tf.einsum("snd,sd->nd", phi, self.q_mu)
 
         # Shape (num_outputs, num_coeffs, num_coeffs)
@@ -331,7 +330,7 @@ class VIPLayer(Layer):
 
         # Compute variance matrix in two steps
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
-        K = tf.einsum("snd,dsk->knd", phi, Delta)
+        K = tf.einsum("knd,dks->snd", phi, Delta)
 
         if full_cov:
             # var shape (num_points, num_points, num_outputs)

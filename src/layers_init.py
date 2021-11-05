@@ -38,7 +38,7 @@ def init_layers(
     layers = []
     X_running = np.copy(X)
     for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
-        if i == len(dims) - 1:
+        if i == len(dims) - 2:
             mf = None
 
         elif dim_in == dim_out:

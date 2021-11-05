@@ -10,12 +10,12 @@ def SPGP():
     X_train = X_train[..., np.newaxis]
     y_train = y_train[..., np.newaxis]
 
-    n_test = int(0.2 * X_train.shape[0])
+    n_test = int(0.1 * X_train.shape[0])
 
-    X_test = X_train[n_test:]
-    y_test = y_train[n_test:]
-    X_train = X_train[:n_test]
-    y_train = y_train[:n_test]
+    X_test = X_train[:n_test]
+    y_test = y_train[:n_test]
+    X_train = X_train[n_test:]
+    y_train = y_train[n_test:]
 
     return X_train, y_train, X_test, y_test
 

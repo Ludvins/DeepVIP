@@ -7,9 +7,7 @@ import numpy as np
 
 class Likelihood(tf.keras.layers.Layer):
     def __init__(self, dtype=tf.float64, **kwargs):
-        """
-
-        """
+        """"""
         super().__init__(dtype=dtype)
         self.build(0)
 
@@ -103,10 +101,11 @@ class Gaussian(Likelihood):
 
         # Get variance
         variance = tf.math.exp(self.log_variance)
-        
+
         # Compute variational expectations
-        var_exp = (- 0.5 * np.log(2 * np.pi)
+        var_exp = (
+            -0.5 * np.log(2 * np.pi)
             - 0.5 * tf.math.log(variance)
-            - 0.5 * (tf.square(Y - Fmu) + Fvar) / variance)
-        
+            - 0.5 * (tf.square(Y - Fmu) + Fvar) / variance
+        )
         return var_exp

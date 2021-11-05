@@ -226,7 +226,6 @@ class DVIP_Base(tf.keras.Model):
         full_cov : boolean
                    Whether to use the full covariance matrix or just
                    the diagonal values.
-                   
         Returns
         -------
         Fmeans : tf.tensor of shape (num_data, output_dim)
@@ -269,7 +268,7 @@ class DVIP_Base(tf.keras.Model):
 
         return self.propagate(predict_at, full_cov=full_cov)
 
-    def predict_y(self, predict_at):
+    def predict_y(self, predict_at, full_cov = False):
         """
         Computes the predicted labels for the given input.
 
@@ -284,7 +283,7 @@ class DVIP_Base(tf.keras.Model):
         and the predicted mean and variance.
         """
 
-        Fmean, Fvar = self.predict_f(predict_at, full_cov=False)
+        Fmean, Fvar = self.predict_f(predict_at, full_cov=full_cov)
         mean, var = self.likelihood.predict_mean_and_var(Fmean, Fvar)
         return mean * self.y_std + self.y_mean, var
 
