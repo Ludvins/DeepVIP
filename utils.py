@@ -11,6 +11,7 @@ from src.layers_init import init_layers
 from src.generative_models import GaussianSampler
 
 import tensorflow as tf
+from tqdm.keras import TqdmCallback
 
 
 def check_data(X, y):
@@ -28,27 +29,42 @@ def check_data(X, y):
     return n_samples, input_dim, output_dim, y_mean, y_std
 
 
-def show_unidimensional_results(X, y, mean, var, path=None, fig_title=None, show=False):
+def show_unidimensional_results(X,
+                                y,
+                                mean,
+                                std,
+                                path=None,
+                                fig_title=None,
+                                show=False):
 
     sort = np.argsort(X[:, 0])
     _, ax = plt.subplots(2, 1, gridspec_kw={"height_ratios": [3, 1]})
 
-    ax[0].scatter(
-        X, y, color="blue", s=0.5, alpha=0.7, label="VIP - training noisy sample"
-    )
+    ax[0].scatter(X,
+                  y,
+                  color="blue",
+                  s=0.7,
+                  alpha=0.7,
+                  label="VIP - training noisy sample")
 
     mean = mean.numpy()[sort, 0]
-    std = np.sqrt(var.numpy()[sort, 0])
+    std = std.numpy()[sort, 0]
 
     ax[0].plot(X[sort], mean, color="teal", label="VIP - interpolation mean")
 
-    ax[0].fill_between(
-        X[sort, 0], mean - 2 * std, mean + 2 * std, color="teal", alpha=0.3
-    )
+    ax[0].fill_between(X[sort, 0],
+                       mean - 2 * std,
+                       mean + 2 * std,
+                       color="teal",
+                       alpha=0.3)
 
     plt.legend()
     ax[0].set_title(fig_title)
-    ax[1].fill_between(X[sort, 0], np.zeros(len(std)), std, color="teal", alpha=0.3)
+    ax[1].fill_between(X[sort, 0],
+                       np.zeros(len(std)),
+                       std,
+                       color="teal",
+                       alpha=0.3)
 
     if path is not None:
         plt.savefig(path)
@@ -68,13 +84,14 @@ def experiment(
     vip_layers=1,
     verbose=0,
     seed=0,
-        eager_execution = False,
+    eager_execution=False,
 ):
 
     # Set eager execution
     tf.config.run_functions_eagerly(eager_execution)
 
-    n_samples, input_dim, output_dim, y_mean, y_std = check_data(X_train, y_train)
+    n_samples, input_dim, output_dim, y_mean, y_std = check_data(
+        X_train, y_train)
 
     # If no batch size is set, use the full dataset
     if batch_size is None:
@@ -87,15 +104,14 @@ def experiment(
     noise_sampler = GaussianSampler(seed)
 
     # Get VIP layers
-    layers = init_layers(
-        X_train,
-        y_train,
-        vip_layers,
-        regression_coeffs,
-        structure,
-        activation,
-        noise_sampler,
-    )
+    layers = init_layers(X_train,
+                         y_train,
+                         vip_layers,
+                         regression_coeffs,
+                         structure,
+                         activation=activation,
+                         noise_sampler=noise_sampler,
+                         seed=seed)
 
     dvip = DVIP_Base(ll, layers, input_dim, y_mean=y_mean, y_std=y_std)
 
@@ -108,6 +124,6 @@ def experiment(
         epochs=epochs,
         batch_size=batch_size,
         verbose=verbose,
-    )
+        callbacks=[TqdmCallback(verbose=0)])
 
     return dvip

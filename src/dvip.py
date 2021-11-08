@@ -73,7 +73,7 @@ class DVIP_Base(tf.keras.Model):
 
         with tf.GradientTape() as tape:
             # Forward pass
-            mean_pred, var_pred = self(x, training=True)
+            mean_pred, std_pred = self(x, training=True)
 
             # Compute loss function
             loss = self.nelbo(x, y)
@@ -92,7 +92,7 @@ class DVIP_Base(tf.keras.Model):
 
         # Update metrics
         self.likelihood.update_metrics(y * self.y_std + self.y_mean, mean_pred,
-                                       var_pred)
+                                       std_pred)
 
         return {m.name: m.result() for m in self.metrics}
 
@@ -122,14 +122,14 @@ class DVIP_Base(tf.keras.Model):
             y = tf.cast(y, self.dtype)
 
         # Compute predictions
-        mean_pred, var_pred = self(x, training=False)
+        mean_pred, std_pred = self(x, training=False)
 
         # Compute the loss
         loss = self.nelbo(x, (y - self.y_mean) / self.y_std)
 
         # Update the metrics
         self.loss_tracker.update_state(loss)
-        self.likelihood.update_metrics(y, mean_pred, var_pred)
+        self.likelihood.update_metrics(y, mean_pred, std_pred)
 
         # Return a dict mapping metric names to current value.
         # Note that it will include the loss (tracked in self.metrics).
@@ -150,8 +150,7 @@ class DVIP_Base(tf.keras.Model):
     @tf.function
     def call(self, inputs):
         """
-        Computes the prediction of the model. Calls `predict_y` and scales
-        the output.
+        Computes the prediction of the model. Calls `predict_y`.
 
         Parameters
         ----------
@@ -161,16 +160,10 @@ class DVIP_Base(tf.keras.Model):
         -------
         mean : tf.tensor of shape (num_data, output_dim)
                Contains the mean value of the predictive distribution
-        var : tf.tensor of shape (num_data, output_dim)
-              Contains the variance of the predictive distribution
+        std : tf.tensor of shape (num_data, output_dim)
+              Contains the std of the predictive distribution
         """
-        # Make prediction
-        output_means, output_vars = self.predict_y(inputs)
-
-        # Scale output
-        mean = output_means * self.y_std + self.y_mean
-        var = tf.math.sqrt(output_vars) * self.y_std
-        return mean, var
+        return self.predict_y(inputs)
 
     @tf.function
     def propagate(self, X, full_cov=False):
@@ -268,7 +261,7 @@ class DVIP_Base(tf.keras.Model):
 
         return self.propagate(predict_at, full_cov=full_cov)
 
-    def predict_y(self, predict_at, full_cov = False):
+    def predict_y(self, predict_at, full_cov=False):
         """
         Computes the predicted labels for the given input.
 
@@ -283,13 +276,13 @@ class DVIP_Base(tf.keras.Model):
         and the predicted mean and variance.
         """
 
-        Fmean, Fvar = self.predict_f(predict_at, full_cov=full_cov)
-        mean, var = self.likelihood.predict_mean_and_var(Fmean, Fvar)
-        return mean * self.y_std + self.y_mean, var
+        mean, var = self.predict_f(predict_at, full_cov=full_cov)
+        mean, var = self.likelihood.predict_mean_and_var(mean, var)
+        return mean * self.y_std + self.y_mean, tf.math.sqrt(var) * self.y_std
 
     def predict_log_density(self, data):
         Fmean, Fvar = self.predict_f(data[0], full_cov=False)
-        l = self.likelihood.predict_density(Fmean, Fvar, data[1])
+        l = self.likelihood.predict_logdensity(Fmean, Fvar, data[1])
         log_num_samples = tf.math.log(tf.cast(self.num_samples, self.dtype))
         return tf.reduce_logsumexp(l - log_num_samples, axis=0)
 

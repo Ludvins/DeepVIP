@@ -40,6 +40,15 @@ def synthetic():
     return X_train, y_train, X_test, y_test
 
 
+def synthetic2():
+    rng = default_rng(seed=0)
+    X_train = np.linspace(0, 10, 500)
+    y_train = X_train + rng.standard_normal(X_train.shape) * np.abs(X_train)
+    X_train = X_train[..., np.newaxis]
+    y_train = y_train[..., np.newaxis]
+    return X_train, y_train, None, None
+
+
 def boston():
     (X_train,
      y_train), (X_test, y_test) = tf.keras.datasets.boston_housing.load_data()

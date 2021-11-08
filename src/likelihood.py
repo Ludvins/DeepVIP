@@ -45,9 +45,9 @@ class Gaussian(Likelihood):
     def __init__(self, log_variance=-5.0, dtype=tf.float64, **kwargs):
         """"""
 
-        self.log_variance = tf.Variable(
-            initial_value=log_variance, dtype=dtype, name="lik_log_variance"
-        )
+        self.log_variance = tf.Variable(initial_value=log_variance,
+                                        dtype=dtype,
+                                        name="lik_log_variance")
 
         self.rmse_metric = tf.keras.metrics.RootMeanSquaredError(name="rmse")
 
@@ -76,7 +76,8 @@ class Gaussian(Likelihood):
         self.nll_metric.update_state(nll)
 
     def logdensity(self, x, mu, var):
-        return -0.5 * (np.log(2 * np.pi) + tf.math.log(var) + tf.square(mu - x) / var)
+        return -0.5 * (np.log(2 * np.pi) + tf.math.log(var) +
+                       tf.square(mu - x) / var)
 
     def logp(self, F, Y):
         return self.logdensity(Y, F, tf.math.exp(self.log_variance))
@@ -101,11 +102,7 @@ class Gaussian(Likelihood):
 
         # Get variance
         variance = tf.math.exp(self.log_variance)
-
         # Compute variational expectations
-        var_exp = (
-            -0.5 * np.log(2 * np.pi)
-            - 0.5 * tf.math.log(variance)
-            - 0.5 * (tf.square(Y - Fmu) + Fvar) / variance
-        )
+        var_exp = (-0.5 * np.log(2 * np.pi) - 0.5 * self.log_variance - 0.5 *
+                   (tf.square(Y - Fmu) + Fvar) / variance)
         return var_exp
