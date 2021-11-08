@@ -271,25 +271,26 @@ class BayesianNN(GenerativeFunction):
         dims = [input_dim] + structure + [num_outputs]
         for _in, _out in zip(dims, dims[1:]):
             w_mean = tf.Variable(
-                initial_value=0.01 *
-                initializer(shape=(_in, _out), dtype="float64"),
+                initial_value=0.1 +
+                0.01 * initializer(shape=(_in, _out), dtype="float64"),
                 trainable=True,
                 name="w_mean_" + str(_in) + "-" + str(_out),
             )
             w_log_std = tf.Variable(
-                initial_value=-5 +
-                initializer(shape=(_in, _out), dtype="float64"),
+                initial_value=-1 +
+                0.01 * initializer(shape=(_in, _out), dtype="float64"),
                 trainable=True,
                 name="w_log_std_" + str(_in) + "-" + str(_out),
             )
             b_mean = tf.Variable(
-                initial_value=0.01 *
-                initializer(shape=[_out], dtype="float64"),
+                initial_value=0.1 +
+                0.01 * initializer(shape=(1, _out), dtype="float64"),
                 trainable=True,
                 name="b_mean_" + str(_in) + "-" + str(_out),
             )
             b_log_std = tf.Variable(
-                initial_value=-5 + initializer(shape=[_out], dtype="float64"),
+                initial_value=-1 +
+                0.01 * initializer(shape=(1, _out), dtype="float64"),
                 trainable=True,
                 name="b_log_std_" + str(_in) + "-" + str(_out),
             )
@@ -317,7 +318,7 @@ class BayesianNN(GenerativeFunction):
         for (w_m, w_log_std, b_m, b_log_std) in self.vars[:-1]:
             # Get noise
             z_w = self.noise_sampler((self.num_samples, *w_log_std.shape))
-            z_b = self.noise_sampler((self.num_samples, 1, *b_log_std.shape))
+            z_b = self.noise_sampler((self.num_samples, *b_log_std.shape))
 
             # Compute Gaussian variables
             w = z_w * tf.math.exp(w_log_std) + w_m
@@ -326,8 +327,7 @@ class BayesianNN(GenerativeFunction):
 
         w_m, w_log_std, b_m, b_log_std = self.vars[-1]
         z_w = self.noise_sampler((self.num_samples, *w_log_std.shape))
-        z_b = self.noise_sampler((self.num_samples, 1, *b_log_std.shape))
-
+        z_b = self.noise_sampler((self.num_samples, *b_log_std.shape))
         w = z_w * tf.math.exp(w_log_std) + w_m
         b = z_b * tf.math.exp(b_log_std) + b_m
         return x @ w + b

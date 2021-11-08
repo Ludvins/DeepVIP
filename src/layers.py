@@ -149,7 +149,6 @@ class Layer(tf.keras.layers.Layer):
 
 class VIPLayer(Layer):
     def __init__(self,
-                 noise_sampler,
                  generative_function,
                  num_regression_coeffs,
                  num_outputs,
@@ -187,9 +186,6 @@ class VIPLayer(Layer):
 
         Parameters
         ----------
-        noise_sampler : NoiseSampler
-                        Generates samples from a noise distribution.
-
         generative_function : GenerativeFunction
                               Generates function samples using the input
                               locations X and noise values.
@@ -227,8 +223,12 @@ class VIPLayer(Layer):
         self.num_coeffs = num_regression_coeffs
 
         # Regression Coefficients prior mean
-        q_mu = np.zeros((self.num_coeffs, num_outputs))
-        self.q_mu = tf.Variable(q_mu, name="q_mu")
+        #self.q_mu_prior = np.ones(
+        #    (self.num_coeffs, num_outputs)) / self.num_coeffs
+        self.q_mu = tf.Variable(
+            np.zeros((self.num_coeffs, num_outputs)),
+            name="q_mu",
+        )
 
         # If no mean function is given, constant 0 is used
         self.mean_function = mean_function
@@ -237,13 +237,7 @@ class VIPLayer(Layer):
         self.num_outputs = tf.constant(num_outputs, dtype=tf.int32)
 
         # Initialize generative function
-        self.generative_function = generative_function(
-            noise_sampler=noise_sampler,
-            num_samples=num_regression_coeffs,
-            num_outputs=num_outputs,
-            input_dim=input_dim,
-            seed=self.seed,
-        )
+        self.generative_function = generative_function
 
         # Initialize the layer's noise
         self.log_layer_noise = tf.Variable(
@@ -256,14 +250,15 @@ class VIPLayer(Layer):
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
         # Shape (num_coeffs, num_coeffs)
-        identity = np.eye(self.num_coeffs)
+        q_var = np.eye(self.num_coeffs)
         # Replicate it num_outputs times
         # Shape (num_outputs, num_coeffs, num_coeffs)
-        I_tiled = np.tile(identity[None, :, :], [num_outputs, 1, 1])
+        q_var = np.tile(q_var[None, :, :], [num_outputs, 1, 1])
         # Create tensor with triangular representation.
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
-        triangular_I_tiled = tfp.math.fill_triangular_inverse(I_tiled)
-        self.q_sqrt_tri = tf.Variable(triangular_I_tiled, name="q_sqrt_tri")
+        q_sqrt_tri_prior = tfp.math.fill_triangular_inverse(q_var)
+        self.q_sqrt_tri = tf.Variable(q_sqrt_tri_prior, name="q_sqrt_tri")
+        #self.q_var_inv = tf.linalg.inv(q_var)
 
     @tf.function
     def conditional_ND(self, X, full_cov=False):
@@ -386,6 +381,47 @@ class VIPLayer(Layer):
 
         return KL
 
+    @tf.function
+    def KL2(self):
+        """
+        Computes the KL divergence from the variational distribution of
+        the linear regression coefficients to the prior.
+
+        That is from a Gaussian N(q_mu, q_sqrt) to N(q_mu_prior, q_sqrt_prior).
+        Uses formula for computing KL divergence between two
+        multivariate normals, which in this case is:
+        """
+
+        D = tf.cast(self.num_outputs, dtype=self.dtype)
+
+        # Recover triangular matrix from array
+        q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
+        diag = tf.linalg.diag_part(q_sqrt)
+
+        q_sqrt_prior = tfp.math.fill_triangular(self.q_sqrt_tri_prior)
+        diag_prior = tf.linalg.diag_part(q_sqrt_prior)
+
+        # Constant dimensionality term
+        KL = -0.5 * D * self.num_coeffs
+
+        # Log of determinant of covariance matrix.
+        # Uses that sqrt(det(X)) = det(X^(1/2)) and
+        # that the determinant of a upper triangular matrix (which q_sqrt is),
+        # is the product of the diagonal entries (i.e. sum of their logarithm).
+        KL += 0.5 * tf.reduce_sum(2 * tf.math.log(diag_prior))
+        KL -= 0.5 * tf.reduce_sum(2 * tf.math.log(diag))
+
+        # Trace term.
+        KL += 0.5 * tf.linalg.trace(
+            self.q_var_inv @ (tf.matmul(q_sqrt, q_sqrt, transpose_b=True)))
+
+        # Mean term
+        KL += 0.5 * tf.transpose(self.q_mu_prior -
+                                 self.q_mu) @ self.q_var_inv @ (
+                                     self.q_mu_prior - self.q_mu)
+
+        return KL
+
     def print_variables(self):
         print("Regression coefficients")
         print("Mean: ")
@@ -393,5 +429,7 @@ class VIPLayer(Layer):
         q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
         print("Covariance: ")
         print(q_sqrt)
+        print("Layer noise:")
+        print(self.log_layer_noise)
         print("Generative model variables:")
         print(self.generative_function.trainable_variables)
