@@ -1,20 +1,21 @@
 import numpy as np
 
-import argparse
-from utils import experiment, show_unidimensional_results
+from utils import plot_train_test, check_data, build_plot_name
 from load_data import SPGP, synthetic
-import matplotlib.pyplot as plt
 import tensorflow as tf
 
-# Parse dataset
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--dataset",
-    type=str,
-    default="SPGP",
-    help="Dataset to use (SPGP, synthethic or boston)",
-)
+from parser import get_parser
 
+from src.likelihood import Gaussian
+from src.dvip import DVIP_Base
+from src.layers_init import init_layers
+from src.generative_models import GaussianSampler
+
+from tqdm.keras import TqdmCallback
+
+
+# Parse dataset
+parser = get_parser()
 args = parser.parse_args()
 
 # Load data
@@ -23,41 +24,100 @@ if args.dataset == "SPGP":
 elif args.dataset == "synthetic":
     X_train, y_train, X_test, y_test = synthetic()
 
-epochs = 20000
-vip_layers = 1
-bnn_structure = [10, 10]
+# Get experiments variables
+epochs = args.epochs
+bnn_structure = args.bnn_structure
+seed = args.seed
+regression_coeffs = args.regression_coeffs
+lr = args.lr
+verbose = args.verbose
+warmup = args.warmup
 
-dvip = experiment(
+if len(args.vip_layers) == 1:
+    vip_layers = args.vip_layers[0]
+
+if args.activation == "tanh":
+    activation = tf.keras.activations.tanh
+elif args.activation == "relu":
+    activation = tf.keras.activations.relu
+
+# Set eager execution
+tf.config.run_functions_eagerly(args.eager)
+
+n_samples, input_dim, output_dim, y_mean, y_std = check_data(X_train, y_train)
+batch_size = args.batch_size or n_samples
+
+# Gaussian Likelihood
+ll = Gaussian()
+
+# Define the noise sampler
+noise_sampler = GaussianSampler(seed)
+
+# Get VIP layers
+layers = init_layers(
     X_train,
     y_train,
-    vip_layers=vip_layers,
-    structure=bnn_structure,
-    epochs=epochs,
-    activation=tf.keras.activations.tanh,
-    # batch_size = 100,
-    seed=1,
-    verbose=0,
-    #eager_execution=True,
-    regression_coeffs=20,
+    vip_layers,
+    regression_coeffs,
+    bnn_structure,
+    activation=activation,
+    noise_sampler=noise_sampler,
+    trainable_parameters=True,
+    trainable_prior=True,
+    seed=seed,
 )
 
-dvip.print_variables()
+# Create DVIP object
+dvip = DVIP_Base(
+    ll, layers, input_dim, y_mean=y_mean, y_std=y_std, warmup_iterations=warmup
+)
 
-mean, std = dvip.predict_y(X_train)
+print(dvip.trainable_variables)
 
-dims = np.concatenate(
-    ([X_train.shape[1]], np.ones(vip_layers, dtype=int) * y_train.shape[1]))
+# Define optimizer and compile model
+opt = tf.keras.optimizers.Adam(learning_rate=lr)
+dvip.compile(optimizer=opt)
 
-dims_name = "-".join(map(str, dims))
-bnn_name = "-".join(map(str, bnn_structure))
-path = "plots/{}_layers={}_bnn={}_epochs={}_batchsize={}.png".format(
-    args.dataset, dims_name, bnn_name, epochs, X_train.shape[0])
-fig_title = "Layers: {}  BNN: {}".format(dims_name, bnn_name)
+# Perform training
+dvip.fit(
+    X_train,
+    (y_train - y_mean) / y_std,  # Provide normalized outputs
+    epochs=epochs,
+    batch_size=batch_size,
+    verbose=verbose,
+    callbacks=[TqdmCallback(verbose=0)],
+)
 
-show_unidimensional_results(X_train,
-                            y_train,
-                            mean,
-                            std,
-                            path=None,
-                            fig_title=fig_title,
-                            show=True)
+print(dvip.trainable_variables)
+
+# Predict Train and Test
+train_pred = dvip.predict(X_train, batch_size=batch_size)
+test_pred = dvip.predict(X_test, batch_size=batch_size)
+
+train_samples = dvip.predict_prior_samples(X_train)
+test_samples = dvip.predict_prior_samples(X_test)
+
+# Create plot title and path
+fig_title, path = build_plot_name(
+    vip_layers,
+    bnn_structure,
+    input_dim,
+    output_dim,
+    epochs,
+    n_samples,
+    args.dataset,
+    args.name_flag,
+)
+
+plot_train_test(
+    train_pred,
+    test_pred,
+    X_train,
+    y_train,
+    X_test,
+    y_test,
+    train_samples,
+    test_samples,
+    fig_title,
+    path,
+)

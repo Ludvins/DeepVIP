@@ -56,8 +56,15 @@ class GaussianSampler(NoiseSampler):
 
 
 class GenerativeFunction(tf.keras.layers.Layer):
-    def __init__(self, noise_sampler, num_samples, num_outputs, input_dim,
-                 seed):
+    def __init__(
+        self,
+        noise_sampler,
+        num_samples,
+        num_outputs,
+        input_dim,
+        trainable,
+        seed,
+    ):
         """
         Generates samples from a stochastic function using sampled
         noise values and input values.
@@ -71,12 +78,19 @@ class GenerativeFunction(tf.keras.layers.Layer):
         noise_sampler : NoiseSampler
                         Instance of NoiseSampler used to generate the noise
                         values.
+
         num_samples : int
                       Amount of samples to generate in each call.
+
         num_outputs : int
                       Dimensionality of the function output.
+
         input_dim : int or array
                     Dimensionality of the input values `x`.
+
+        trainable : boolean
+                    Determines wether the variables are trainable or not.
+
         seed : int
                Integer value used to generate reproducible results.
         """
@@ -86,6 +100,7 @@ class GenerativeFunction(tf.keras.layers.Layer):
         self.num_outputs = num_outputs
         self.input_dim = input_dim
         self.seed = seed
+        self.trainable = trainable
 
     def call(self):
         """
@@ -95,7 +110,14 @@ class GenerativeFunction(tf.keras.layers.Layer):
 
 
 class Linear(GenerativeFunction):
-    def __init__(self, num_samples=10, num_outputs=1, input_dim=32, *args):
+    def __init__(
+        self,
+        num_samples=10,
+        num_outputs=1,
+        input_dim=32,
+        trainable=True,
+        *args
+    ):
         """
         Generates samples from a linear deterministic function.
 
@@ -110,17 +132,21 @@ class Linear(GenerativeFunction):
 
         input_dim : int or array
                     Dimensionality of the input values `x`.
+
+        trainable : boolean
+                    Determines wether the variables are trainable or not.
+
         """
 
         # Initialize tf variables
         self.w = tf.Variable(
             initial_value=1.0 * np.ones((input_dim, num_outputs)),
-            trainable=True,
+            trainable=trainable,
             name="w",
         )
         self.b = tf.Variable(
             initial_value=0.01 * np.ones((input_dim, num_outputs)),
-            trainable=True,
+            trainable=trainable,
             name="b",
         )
 
@@ -129,9 +155,9 @@ class Linear(GenerativeFunction):
     def call(self, inputs):
         """
         Generates the output of the Linear transformation as
-        \[
-            y = w^T x + b
-        \]
+
+        y = w^T x + b
+
         """
         b = tf.expand_dims(self.b, 0)
         w = tf.expand_dims(self.w, 0)
@@ -141,27 +167,27 @@ class Linear(GenerativeFunction):
 
 
 class BayesianLinearNN(GenerativeFunction):
-    def __init__(self,
-                 noise_sampler,
-                 num_samples,
-                 num_outputs=1,
-                 input_dim=32,
-                 seed=0):
+    def __init__(
+        self,
+        noise_sampler,
+        num_samples,
+        num_outputs=1,
+        input_dim=32,
+        trainable=True,
+        seed=0,
+    ):
         """
         Defines a Bayesian Neural Network with 1 layer as a generative model.
         The defined model is the following:
-        \[
-            w \sim \mathcal{N}(w_mean, \exp(2*w_log_std))
-        \]
-        \[
-            b \sim \mathcal{N}(b_mean, \exp(2*b_log_std))
-        \]
-        where given an input location `x` and two noise values z_w, z_b,
+
+        w ~ N(w_mean, exp(2*w_log_std))
+        b ~ N(b_mean, exp(2*b_log_std))
+
+        where given an input location x and two noise values z_w, z_b,
         a function sample is computed as:
-        \[
-            f(x, z) = (w_mean + z_w * \exp(w_log_std)) x \ 
-            + (b_mean + z_b * \exp(b_log_std))
-        \]
+
+        f(x, z) = (w_mean + z_w * exp(w_log_std)) x
+                + (b_mean + z_b * exp(b_log_std))
 
         Parameters:
         -----------
@@ -173,55 +199,57 @@ class BayesianLinearNN(GenerativeFunction):
         num_outputs : int
                       Dimensionality of the function output.
         input_dim : int or array
-                    Dimensionality of the input values `x`.
+                    Dimensionality of the input values x.
         seed : int
                Integer value used to generate reproducible results.
         """
-        initializer = tf.random_normal_initializer(mean=0,
-                                                   stddev=1.0,
-                                                   seed=seed)
+        initializer = tf.random_normal_initializer(
+            mean=0, stddev=1.0, seed=seed
+        )
 
         # Initialize tf variables
         self.w_mean = tf.Variable(
-            initial_value=0.01 *
-            initializer(shape=(input_dim, num_outputs), dtype="float64"),
-            trainable=True,
+            initial_value=0.01
+            * initializer(shape=(input_dim, num_outputs), dtype="float64"),
+            trainable=trainable,
             name="w_mean",
         )
         self.w_log_std = tf.Variable(
-            initial_value=-5 +
-            initializer(shape=(input_dim, num_outputs), dtype="float64"),
-            trainable=True,
+            initial_value=-5
+            + initializer(shape=(input_dim, num_outputs), dtype="float64"),
+            trainable=trainable,
             name="w_log_std",
         )
         self.b_mean = tf.Variable(
-            initial_value=0.01 *
-            initializer(shape=[num_outputs], dtype="float64"),
-            trainable=True,
+            initial_value=0.01
+            * initializer(shape=[num_outputs], dtype="float64"),
+            trainable=trainable,
             name="b_mean",
         )
         self.b_log_std = tf.Variable(
-            initial_value=-5 +
-            initializer(shape=[num_outputs], dtype="float64"),
-            trainable=True,
+            initial_value=-5
+            + initializer(shape=[num_outputs], dtype="float64"),
+            trainable=trainable,
             name="b_log_std",
         )
 
-        super().__init__(noise_sampler, num_samples, num_outputs, input_dim,
-                         seed)
+        super().__init__(
+            noise_sampler, num_samples, num_outputs, input_dim, trainable, seed
+        )
 
     def call(self, inputs):
         """
         Generates the output of the stochastic function
-        \[
-            f(x, z) = (w_mean + z_w * \exp(w_log_std)) x \ 
-            + (b_mean + z_b * \exp(b_log_std)).
-        \]
+
+        f(x, z) = (w_mean + z_w * \exp(w_log_std)) x
+                + (b_mean + z_b * \exp(b_log_std)).
         """
         z_w = self.noise_sampler(
-            (self.num_samples, self.input_dim, self.num_outputs))
+            (self.num_samples, self.input_dim, self.num_outputs)
+        )
         z_b = self.noise_sampler(
-            (self.num_samples, self.input_dim, self.num_outputs))
+            (self.num_samples, self.input_dim, self.num_outputs)
+        )
 
         w = z_w * tf.math.exp(self.w_log_std) + self.w_mean
         b = z_b * tf.math.exp(self.b_log_std) + self.b_mean
@@ -238,6 +266,11 @@ class BayesianNN(GenerativeFunction):
         activation,
         num_outputs=1,
         input_dim=1,
+        trainable=True,
+        w_mean_prior=0.0,
+        w_std_prior=-4.6,
+        b_mean_prior=0.01,
+        b_std_prior=0.0,
         seed=0,
     ):
         """
@@ -252,7 +285,7 @@ class BayesianNN(GenerativeFunction):
                       Amount of samples to generate in each call.
         structure : array-like
                     Contains the inner dimensions of the Bayesian Neural
-                    network. For example, [10, 10] symbolizes a Bayesian 
+                    network. For example, [10, 10] symbolizes a Bayesian
                     network with 2 inner layers of width 10.
         activation : function
                      Activation function to use between inner layers.
@@ -260,38 +293,40 @@ class BayesianNN(GenerativeFunction):
                       Dimensionality of the function output.
         input_dim : int or array
                     Dimensionality of the input values `x`.
+        trainable : boolean
+                    Determines wether the variables are trainable or not.
         seed : int
                Integer value used to generate reproducible results.
         """
-        initializer = tf.random_normal_initializer(mean=0,
-                                                   stddev=1.0,
-                                                   seed=seed)
+        initializer = tf.random_normal_initializer(
+            mean=0, stddev=1.0, seed=seed
+        )
 
         vars = []
         dims = [input_dim] + structure + [num_outputs]
         for _in, _out in zip(dims, dims[1:]):
             w_mean = tf.Variable(
-                initial_value=0.1 +
-                0.01 * initializer(shape=(_in, _out), dtype="float64"),
-                trainable=True,
+                initial_value=w_mean_prior
+                + 0.01 * initializer(shape=(_in, _out), dtype="float64"),
+                trainable=trainable,
                 name="w_mean_" + str(_in) + "-" + str(_out),
             )
             w_log_std = tf.Variable(
-                initial_value=-1 +
-                0.01 * initializer(shape=(_in, _out), dtype="float64"),
-                trainable=True,
+                initial_value=w_std_prior + 4.6
+                + 0.0 * initializer(shape=(_in, _out), dtype="float64"),
+                trainable=trainable,
                 name="w_log_std_" + str(_in) + "-" + str(_out),
             )
             b_mean = tf.Variable(
-                initial_value=0.1 +
-                0.01 * initializer(shape=(1, _out), dtype="float64"),
-                trainable=True,
+                initial_value=b_mean_prior
+                + 0.1 * initializer(shape=(1, _out), dtype="float64"),
+                trainable=trainable,
                 name="b_mean_" + str(_in) + "-" + str(_out),
             )
             b_log_std = tf.Variable(
-                initial_value=-1 +
-                0.01 * initializer(shape=(1, _out), dtype="float64"),
-                trainable=True,
+                initial_value=b_std_prior
+                + 0.1 * initializer(shape=(1, _out), dtype="float64"),
+                trainable=trainable,
                 name="b_log_std_" + str(_in) + "-" + str(_out),
             )
 
@@ -301,8 +336,9 @@ class BayesianNN(GenerativeFunction):
         # the variables to the trainable_variables array
         self.vars = vars
         self.activation = activation
-        super().__init__(noise_sampler, num_samples, num_outputs, input_dim,
-                         seed)
+        super().__init__(
+            noise_sampler, num_samples, num_outputs, input_dim, trainable, seed
+        )
 
     def call(self, inputs):
         """
@@ -320,29 +356,16 @@ class BayesianNN(GenerativeFunction):
             z_w = self.noise_sampler((self.num_samples, *w_log_std.shape))
             z_b = self.noise_sampler((self.num_samples, *b_log_std.shape))
 
-            # Compute Gaussian variables
+            # Compute Gaussian samples
             w = z_w * tf.math.exp(w_log_std) + w_m
             b = z_b * tf.math.exp(b_log_std) + b_m
             x = self.activation(x @ w + b)
 
+        # Last layer has no activation function
         w_m, w_log_std, b_m, b_log_std = self.vars[-1]
         z_w = self.noise_sampler((self.num_samples, *w_log_std.shape))
         z_b = self.noise_sampler((self.num_samples, *b_log_std.shape))
         w = z_w * tf.math.exp(w_log_std) + w_m
         b = z_b * tf.math.exp(b_log_std) + b_m
+
         return x @ w + b
-
-
-def get_bn(structure, act):
-    def bn(noise_sampler, num_samples, num_outputs, input_dim, seed):
-        return BayesianNN(
-            noise_sampler=noise_sampler,
-            num_samples=num_samples,
-            input_dim=input_dim,
-            structure=structure,
-            activation=act,
-            num_outputs=num_outputs,
-            seed=seed,
-        )
-
-    return bn

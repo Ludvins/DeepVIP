@@ -19,8 +19,8 @@ class Layer(tf.keras.layers.Layer):
         dtype : data-type
                 The dtype of the layer's computations and weights.
                 Refer to tf.keras.layers.Layer for more information.
-
-
+        seed : int
+               integer to use as seed for randomness.
         **kwargs : dict, optional
                    Extra arguments to `Layer`.
                    Refer to tf.keras.layers.Layer for more information.
@@ -58,51 +58,6 @@ class Layer(tf.keras.layers.Layer):
         """
         raise NotImplementedError
 
-    @tf.function
-    def conditional_SND(self, X, full_cov=False):
-        """
-        A multisample conditional.
-
-        Parameters
-        ----------
-        X : tf.tensor of shape (S, N, D_in)
-            Input locations.
-            S independent draws of N samples with dimension D_in
-        full_cov : boolean
-                   Wether to compute or not the full covariance matrix or just
-                   the diagonal.
-
-        Returns
-        -------
-        mean : tf.tensor of shape (S, N, self.num_outputs)
-               Stacked tensor of mean values from conditional_ND applied to
-               each sample.
-        var : tf.tensor of shape (S, N, self.num_outputs or
-                                  S, N, N, self.num_outputs)
-              Stacked tensor of variance values from conditional_ND applied to
-              each sample.
-        """
-
-        if full_cov:
-
-            def f(a):
-                return self.conditional_ND(a, full_cov=True)
-
-            mean, var = tf.map_fn(f, X, dtype=(tf.float64, tf.float64))
-            return tf.stack(mean), tf.stack(var)
-        else:
-            S = tf.shape(X)[0]
-            N = tf.shape(X)[1]
-            D = tf.shape(X)[2]
-
-            X_flat = tf.reshape(X, [S * N, D])
-            mean, var = self.conditional_ND(X_flat, full_cov=False)
-
-            return [
-                tf.reshape(m, [S, N, self.num_outputs]) for m in [mean, var]
-            ]
-
-    @tf.function
     def sample_from_conditional(self, X, z=None, full_cov=False):
         """
         Calculates self.conditional and also draws a sample.
@@ -122,7 +77,6 @@ class Layer(tf.keras.layers.Layer):
                    Wether to compute or not the full covariance matrix or just
                    the diagonal.
 
-
         Returns
         -------
         samples : tf.tensor of shape (S, N, self.num_outputs)
@@ -134,29 +88,31 @@ class Layer(tf.keras.layers.Layer):
               Stacked tensor of variance values from conditional_ND applied to
               X.
         """
-        mean, var = self.conditional_ND(X, full_cov=full_cov)
+
+        mean, var, f = self.conditional_ND(X, full_cov=full_cov)
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
-            z = tf.random.normal(shape=tf.shape(mean),
-                                 seed=self.seed,
-                                 dtype=self.dtype)
+            z = tf.random.normal(shape=tf.shape(mean), seed=self.seed, dtype=self.dtype)
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
-        return samples, mean, var
+        return samples, mean, var, f
 
 
 class VIPLayer(Layer):
-    def __init__(self,
-                 generative_function,
-                 num_regression_coeffs,
-                 num_outputs,
-                 input_dim,
-                 log_layer_noise=-5,
-                 mean_function=None,
-                 dtype=tf.float64,
-                 **kwargs):
+    def __init__(
+        self,
+        generative_function,
+        num_regression_coeffs,
+        num_outputs,
+        input_dim,
+        log_layer_noise=-5,
+        mean_function=None,
+        trainable = True,
+        dtype=tf.float64,
+        **kwargs
+    ):
         """
         A variational implicit process layer.
 
@@ -208,7 +164,12 @@ class VIPLayer(Layer):
                           layer, i.e, epsilon ~ N(0, exp(log_layer_noise))
 
         mean_function : callable
-                        Mean function added to the model.
+                        Mean function added to the model. If no mean function
+                        is specified, no value is added.
+
+        trainable : boolean
+                    Determines whether the regression parameters
+                    q_mu and q_sqrt are trainable or not.
 
         dtype : data-type
                 The dtype of the layer's computations and weights.
@@ -223,10 +184,9 @@ class VIPLayer(Layer):
         self.num_coeffs = num_regression_coeffs
 
         # Regression Coefficients prior mean
-        #self.q_mu_prior = np.ones(
-        #    (self.num_coeffs, num_outputs)) / self.num_coeffs
         self.q_mu = tf.Variable(
             np.zeros((self.num_coeffs, num_outputs)),
+            trainable=trainable,
             name="q_mu",
         )
 
@@ -257,8 +217,9 @@ class VIPLayer(Layer):
         # Create tensor with triangular representation.
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         q_sqrt_tri_prior = tfp.math.fill_triangular_inverse(q_var)
-        self.q_sqrt_tri = tf.Variable(q_sqrt_tri_prior, name="q_sqrt_tri")
-        #self.q_var_inv = tf.linalg.inv(q_var)
+        self.q_sqrt_tri = tf.Variable(
+            q_sqrt_tri_prior, trainable=trainable, name="q_sqrt_tri"
+        )
 
     @tf.function
     def conditional_ND(self, X, full_cov=False):
@@ -304,9 +265,9 @@ class VIPLayer(Layer):
         var : tf.tensor of shape (N, num_outputs) or (N, N, num_outputs)
               Contains the variance value of the distribution for each input
         """
-
         # Shape (num_coeffs, N, D)
         f = self.generative_function(X)
+
         # Compute mean value, shape (N, D)
         m = tf.reduce_mean(f, axis=0)
         # Compute regresion function, shape (num_coeffs, N, D)
@@ -339,10 +300,11 @@ class VIPLayer(Layer):
         # Add layer noise to variance
         var = K + tf.math.exp(self.log_layer_noise)
 
+        # Add mean function
         if self.mean_function is not None:
             mean = mean + self.mean_function(X)
 
-        return mean, var
+        return mean, var, f
 
     @tf.function
     def KL(self):
@@ -380,56 +342,3 @@ class VIPLayer(Layer):
         KL += 0.5 * tf.reduce_sum(tf.square(self.q_mu))
 
         return KL
-
-    @tf.function
-    def KL2(self):
-        """
-        Computes the KL divergence from the variational distribution of
-        the linear regression coefficients to the prior.
-
-        That is from a Gaussian N(q_mu, q_sqrt) to N(q_mu_prior, q_sqrt_prior).
-        Uses formula for computing KL divergence between two
-        multivariate normals, which in this case is:
-        """
-
-        D = tf.cast(self.num_outputs, dtype=self.dtype)
-
-        # Recover triangular matrix from array
-        q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
-        diag = tf.linalg.diag_part(q_sqrt)
-
-        q_sqrt_prior = tfp.math.fill_triangular(self.q_sqrt_tri_prior)
-        diag_prior = tf.linalg.diag_part(q_sqrt_prior)
-
-        # Constant dimensionality term
-        KL = -0.5 * D * self.num_coeffs
-
-        # Log of determinant of covariance matrix.
-        # Uses that sqrt(det(X)) = det(X^(1/2)) and
-        # that the determinant of a upper triangular matrix (which q_sqrt is),
-        # is the product of the diagonal entries (i.e. sum of their logarithm).
-        KL += 0.5 * tf.reduce_sum(2 * tf.math.log(diag_prior))
-        KL -= 0.5 * tf.reduce_sum(2 * tf.math.log(diag))
-
-        # Trace term.
-        KL += 0.5 * tf.linalg.trace(
-            self.q_var_inv @ (tf.matmul(q_sqrt, q_sqrt, transpose_b=True)))
-
-        # Mean term
-        KL += 0.5 * tf.transpose(self.q_mu_prior -
-                                 self.q_mu) @ self.q_var_inv @ (
-                                     self.q_mu_prior - self.q_mu)
-
-        return KL
-
-    def print_variables(self):
-        print("Regression coefficients")
-        print("Mean: ")
-        print(self.q_mu.value().numpy())
-        q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
-        print("Covariance: ")
-        print(q_sqrt)
-        print("Layer noise:")
-        print(self.log_layer_noise)
-        print("Generative model variables:")
-        print(self.generative_function.trainable_variables)
