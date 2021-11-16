@@ -78,7 +78,7 @@ class DVIP_Base(tf.keras.Model):
 
         with tf.GradientTape() as tape:
             # Forward pass
-            mean_pred, std_pred = self(x, training=True)
+            mean_pred, std_pred = self(x, training=True)[0]
 
             # Compute loss function
             loss = self.nelbo(x, y, self.optimizer.iterations)
@@ -127,7 +127,7 @@ class DVIP_Base(tf.keras.Model):
             y = tf.cast(y, self.dtype)
 
         # Compute predictions
-        mean_pred, std_pred = self(x, training=False)
+        mean_pred, std_pred = self(x, training=False)[0]
 
         # Compute the loss. Scale test sample using training standarization
         loss = self.nelbo(x, (y - self.y_mean) / self.y_std)
@@ -167,7 +167,8 @@ class DVIP_Base(tf.keras.Model):
         std : tf.tensor of shape (num_data, output_dim)
               Contains the std of the predictive distribution
         """
-        return self.predict_y(inputs)
+        return self.predict_y(inputs), self.predict_prior_samples(inputs)
+        return self.predict_y(inputs), tf.transpose(self.predict_prior_samples(inputs), (1,0,2))
 
     @tf.function
     def propagate(self, X, full_cov=False):
@@ -201,11 +202,11 @@ class DVIP_Base(tf.keras.Model):
         Fs, Fmeans, Fvars, Fprior = [], [], [], []
 
         # First input corresponds to the original one
-        F = X
+        Fmean = X
 
         for layer in self.vip_layers:
             F, Fmean, Fvar, prior_samples = layer.sample_from_conditional(
-                F, full_cov=full_cov
+                Fmean, full_cov=full_cov
             )
 
             # Store values
@@ -266,7 +267,8 @@ class DVIP_Base(tf.keras.Model):
             predict_at,
             full_cov=full_cov,
         )
-        return Fprior[-1] * self.y_std + self.y_mean
+        Fprior = tf.convert_to_tensor(Fprior)
+        return tf.transpose(Fprior, (1,0,2,3)) * self.y_std + self.y_mean
 
     def predict_y(self, predict_at, full_cov=False):
         """

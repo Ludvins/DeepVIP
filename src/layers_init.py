@@ -1,7 +1,7 @@
 from src.layers import VIPLayer
 import numpy as np
 import tensorflow as tf
-from src.generative_models import GaussianSampler, BayesianNN
+from src.generative_models import GaussianSampler, BayesianNN, BayesianLinearNN
 
 
 class LinearProjection:
@@ -142,6 +142,8 @@ def init_layers(
             trainable=trainable_prior,
             seed=seed,
         )
+        # bayesian_network = BayesianLinearNN(noise_sampler, regression_coeffs, dim_out, dim_in, seed = seed)
+
         # Create layer
         layers.append(
             VIPLayer(

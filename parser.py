@@ -41,7 +41,7 @@ def get_parser():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=None,
+        default=128,
         help="Number of regression coefficients to use",
     )
 
@@ -72,7 +72,7 @@ def get_parser():
     parser.add_argument(
         "--verbose",
         type=int,
-        default=0,
+        default=1,
     )
     parser.add_argument(
         "--name_flag",

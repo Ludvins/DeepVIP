@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow_addons as tfa
 
 from utils import plot_train_test, check_data, build_plot_name
 from load_data import SPGP, synthetic, boston
@@ -33,12 +34,16 @@ epochs = 20000
 vip_layers = np.arange(1, 5)
 bn_structures = [[10]]
 seeds = np.arange(0, 1)
-
+batch_size = args.batch_size
 combs = list(product(vip_layers, bn_structures, seeds))
 
+if args.activation == "tanh":
+    activation = tf.keras.activations.tanh
+elif args.activation == "relu":
+    activation = tf.keras.activations.relu
 
-n_samples, input_dim, output_dim, y_mean, y_std = check_data(X_train, y_train)
-batch_size = n_samples
+
+n_samples, input_dim, output_dim, y_mean, y_std = check_data(X_train, y_train, verbose = args.verbose)
 
 # Gaussian Likelihood
 ll = Gaussian()
@@ -57,8 +62,10 @@ for i, (vip_layers, bnn_structure, seed) in enumerate(combs):
         vip_layers,
         args.regression_coeffs,
         bnn_structure,
-        activation=args.activation,
+        activation=activation,
         noise_sampler=noise_sampler,
+        trainable_parameters=True,
+        trainable_prior=True,
         seed=seed,
     )
 
@@ -66,7 +73,7 @@ for i, (vip_layers, bnn_structure, seed) in enumerate(combs):
     dvip = DVIP_Base(ll, layers, input_dim, y_mean=y_mean, y_std=y_std)
 
     # Define optimizer and compile model
-    opt = tf.keras.optimizers.Adam(learning_rate=lr)
+    opt = tf.keras.optimizers.Adam(learning_rate=args.lr)
     dvip.compile(optimizer=opt)
 
     # Perform training
@@ -76,6 +83,7 @@ for i, (vip_layers, bnn_structure, seed) in enumerate(combs):
         epochs=epochs,
         batch_size=batch_size,
         verbose=0,
+        validation_data = (X_test, y_test),
         callbacks=[TqdmCallback(verbose=0)],
     )
 

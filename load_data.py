@@ -12,7 +12,7 @@ def SPGP():
     X_test = X_test[..., np.newaxis]
     y_train = y_train[..., np.newaxis]
 
-    return X_train, y_train, X_train, y_train
+    return X_train, y_train, X_test, None
 
 
 def synthetic():

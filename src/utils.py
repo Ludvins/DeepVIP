@@ -36,7 +36,7 @@ def reparameterize(mean, var, z, full_cov=False):
 
     # Diagonal covariances -> Pointwise scale
     if full_cov is False:
-        return mean + z * (var + default_jitter) ** 0.5
+        return mean + z * tf.math.sqrt(var + default_jitter)
     # Full covariance matrix
     else:
         # Get shapes

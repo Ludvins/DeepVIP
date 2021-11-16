@@ -1,6 +1,6 @@
 import numpy as np
 
-from utils import plot_train_test, check_data, build_plot_name
+from utils import plot_train_test, check_data, build_plot_name, plot_prior_over_layers
 from load_data import SPGP, synthetic
 import tensorflow as tf
 
@@ -44,7 +44,7 @@ elif args.activation == "relu":
 # Set eager execution
 tf.config.run_functions_eagerly(args.eager)
 
-n_samples, input_dim, output_dim, y_mean, y_std = check_data(X_train, y_train)
+n_samples, input_dim, output_dim, y_mean, y_std = check_data(X_train, y_train, verbose)
 batch_size = args.batch_size or n_samples
 
 # Gaussian Likelihood
@@ -72,11 +72,13 @@ dvip = DVIP_Base(
     ll, layers, input_dim, y_mean=y_mean, y_std=y_std, warmup_iterations=warmup
 )
 
-print(dvip.trainable_variables)
-
 # Define optimizer and compile model
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
 dvip.compile(optimizer=opt)
+
+# train_pred, train_samples = dvip.predict(X_train, batch_size=batch_size)
+# plot_prior_over_layers(X_train, train_samples)
+# exit()
 
 # Perform training
 dvip.fit(
@@ -84,18 +86,13 @@ dvip.fit(
     (y_train - y_mean) / y_std,  # Provide normalized outputs
     epochs=epochs,
     batch_size=batch_size,
-    verbose=verbose,
+    verbose=0,
     callbacks=[TqdmCallback(verbose=0)],
 )
 
-print(dvip.trainable_variables)
-
 # Predict Train and Test
-train_pred = dvip.predict(X_train, batch_size=batch_size)
-test_pred = dvip.predict(X_test, batch_size=batch_size)
-
-train_samples = dvip.predict_prior_samples(X_train)
-test_samples = dvip.predict_prior_samples(X_test)
+train_pred, train_samples = dvip.predict(X_train, batch_size=batch_size)
+test_pred, test_samples = dvip.predict(X_test, batch_size=batch_size)
 
 # Create plot title and path
 fig_title, path = build_plot_name(

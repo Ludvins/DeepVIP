@@ -65,11 +65,10 @@ class Layer(tf.keras.layers.Layer):
 
         Parameters
         ----------
-        X : tf.tensor of shape (S, N, D_in)
+        X : tf.tensor of shape (N, D_in)
             Input locations.
-            S independent draws of N samples with dimension D_in
 
-        z : tf.tensor of shape (S, N, D)
+        z : tf.tensor of shape (N, D)
             Contains a sample from a Gaussian distribution, ideally from a
             standardized Gaussian.
 
@@ -265,37 +264,42 @@ class VIPLayer(Layer):
         var : tf.tensor of shape (N, num_outputs) or (N, N, num_outputs)
               Contains the variance value of the distribution for each input
         """
-        # Shape (num_coeffs, N, D)
+
+        # Let S = num_coeffs, D = num_outputs and N = num_samples
+
+        # Shape (N, S, D)
         f = self.generative_function(X)
 
-        # Compute mean value, shape (N, D)
-        m = tf.reduce_mean(f, axis=0)
-        # Compute regresion function, shape (num_coeffs, N, D)
-        inv_sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype="float64"))
+        # Compute mean value, shape (N, 1, D)
+        m = tf.reduce_mean(f, axis=1, keepdims = True)
+        inv_sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype=self.dtype))
+        # Compute regresion function, shape (N, S, D)
         phi = inv_sqrt * (f - m)
 
         # Compute mean value as m + q_mu^T phi per point and output dim
-        # q_mu has shape (num_coeffs, num_outputs)
-        # phi has shape (num_coeffs, N, num_outputs)
-        mean = m + tf.einsum("snd,sd->nd", phi, self.q_mu)
+        # q_mu has shape (S, D)
+        # phi has shape (N, S, D)
+        mean = tf.squeeze(m, axis = 1) + tf.einsum("nsd,sd->nd", phi, self.q_mu)
 
-        # Shape (num_outputs, num_coeffs, num_coeffs)
+        # Shape (D, S, S)
         q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
-        # Shape (num_outputs, num_coeffs, num_coeffs)
+        # Shape (D, S, S)
         Delta = tf.matmul(q_sqrt, q_sqrt, transpose_b=True)
+        # Shape (S, S, D)
+        Delta = tf.transpose(Delta, (1, 2, 0))
 
         # Compute variance matrix in two steps
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
-        K = tf.einsum("knd,dks->snd", phi, Delta)
+        K = tf.einsum("nsd,skd->nkd", phi, Delta)
 
         if full_cov:
             # var shape (num_points, num_points, num_outputs)
             # Multiply by phi again distinguishing data_points
-            K = tf.einsum("snd,smd->nmd", K, phi)
+            K = tf.einsum("nsd,msd->nmd", K, phi)
         else:
             # var shape (num_points, num_outputs)
             # Multiply by phi again, using the same points twice
-            K = tf.einsum("snd,snd->nd", K, phi)
+            K = tf.einsum("nsd,nsd->nd", K, phi)
 
         # Add layer noise to variance
         var = K + tf.math.exp(self.log_layer_noise)

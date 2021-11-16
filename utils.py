@@ -75,7 +75,7 @@ def plot_train_test(
         mean=mean_train.flatten(),
         std=std_train.flatten(),
         y=y_train.flatten(),
-        prior_samples=train_prior_samples,
+        prior_samples=train_prior_samples[:,-1,:,:],
         ax=ax.T[0],
     )
 
@@ -87,7 +87,7 @@ def plot_train_test(
         mean=mean_test.flatten(),
         std=std_test.flatten(),
         y=y_test,
-        prior_samples=test_prior_samples,
+        prior_samples=test_prior_samples[:,-1,:,:],
         ax=ax.T[1],
     )
 
@@ -148,6 +148,29 @@ def plot_standard_deviation(
 
     return ax
 
+def plot_prior_samples(X, prior_samples, ax):
+
+    for i in range(prior_samples.shape[1]):
+        plot_prediction(
+            X,
+            prior_samples[:,i].flatten(),
+            label="Prior samples" if i == 0 else "",
+            mean_color="red",
+            alpha=0.1,
+            ax=ax,
+        )
+    ax.legend()
+
+def plot_prior_over_layers(X, prior_samples, n = 2):
+    n_layers = prior_samples.shape[1]
+    _, ax = plt.subplots(n, n_layers//2, figsize = (5, 15))
+
+    for i in range(n_layers):
+        plot_prior_samples(X.flatten(), prior_samples[:,i,:,:], ax[i//n][i%n])
+
+        ax[i//n][i%n].set_title("Layer {}".format(i+1))
+    plt.suptitle("Prior Samples")
+    plt.show()
 
 def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
     if ax is None:
@@ -175,16 +198,9 @@ def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
         ax=ax[1],
     )
 
+
     if prior_samples is not None:
-        for i in range(prior_samples.shape[0]):
-            plot_prediction(
-                X,
-                prior_samples[i].numpy().flatten(),
-                label="Prior samples" if i == 0 else "",
-                mean_color="red",
-                alpha=0.1,
-                ax=ax[0],
-            )
+        plot_prior_samples(X, prior_samples, ax[0])
 
     ax[0].legend()
     ax[1].legend()
