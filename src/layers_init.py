@@ -1,7 +1,7 @@
 from src.layers import VIPLayer
 import numpy as np
-import tensorflow as tf
-from src.generative_models import GaussianSampler, BayesianNN, BayesianLinearNN
+import torch
+from src.generative_models import GaussianSampler, BayesianNN
 
 
 class LinearProjection:
@@ -11,7 +11,7 @@ class LinearProjection:
 
         Parameters
         ----------
-        matrix : np.darray of shape (N, M)
+        matrix : Torch tensor of shape (N, M)
                  Contains the linear projection
         """
         self.P = matrix
@@ -20,7 +20,7 @@ class LinearProjection:
         """
         Applies the linear transformation to the given input.
         """
-        return inputs @ self.P.T
+        return torch.matmul(inputs, torch.tensor(self.P.T))
 
 
 def init_layers(
@@ -29,7 +29,7 @@ def init_layers(
     inner_dims,
     regression_coeffs=20,
     structure=[10, 10],
-    activation=tf.keras.activations.tanh,
+    activation=torch.tanh,
     noise_sampler=None,
     trainable_parameters=True,
     trainable_prior=True,
@@ -97,8 +97,7 @@ def init_layers(
     # Create VIP layers. If integer, replicate output dimension
     if isinstance(inner_dims, (int, np.integer)):
         dims = np.concatenate(
-            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1])
-        )
+            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1]))
     # Otherwise, append thedata dimensions to the array.
     else:
         dims = [X.shape[1]] + inner_dims + [Y.shape[1]]
@@ -127,9 +126,8 @@ def init_layers(
             X_running = mf(X_running)
 
         else:
-            raise NotImplementedError(
-                "Dimensionality augmentation is not" " handled currently."
-            )
+            raise NotImplementedError("Dimensionality augmentation is not"
+                                      " handled currently.")
 
         # Create the Generation function, i.e, the Bayesian Neural Network
         bayesian_network = BayesianNN(
@@ -153,7 +151,6 @@ def init_layers(
                 input_dim=dim_in,
                 mean_function=mf,
                 trainable=trainable_parameters,
-            )
-        )
+            ))
 
     return layers

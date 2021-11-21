@@ -1,6 +1,88 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import tensorflow as tf
+import argparse
+
+
+def get_parser():
+    """
+    Defines and returns a parser for DeepVIP experiments.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="SPGP",
+        help="Dataset to use (SPGP, synthethic or boston)",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=20000,
+        help="Training epochs",
+    )
+    parser.add_argument(
+        "--vip_layers",
+        type=int,
+        default=[1],
+        nargs="+",
+        help="Variational implicit layers structure",
+    )
+    parser.add_argument(
+        "--bnn_structure",
+        type=int,
+        default=[10, 10],
+        nargs="+",
+        help="Prior Bayesian network inner layers.",
+    )
+    parser.add_argument(
+        "--regression_coeffs",
+        type=int,
+        default=20,
+        help="Number of regression coefficients to use",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=128,
+        help="Number of regression coefficients to use",
+    )
+
+    parser.add_argument(
+        "--activation",
+        type=str,
+        default="tanh",
+        help="Activation function to use in the Bayesian NN",
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=0.001,
+        help="Training learning rate",
+    )
+    parser.add_argument("--warmup", type=int, default=0)
+    parser.add_argument(
+        "--eager",
+        type=bool,
+        default=False,
+        help="Tensorflow Eager execution",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--verbose",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--name_flag",
+        type=str,
+        default="",
+    )
+
+    return parser
 
 
 def check_data(X, y, verbose=0):
@@ -37,14 +119,12 @@ def build_plot_name(
 ):
     # Create title name
     dims = np.concatenate(
-        ([input_dim], np.ones(vip_layers, dtype=int) * [output_dim])
-    )
+        ([input_dim], np.ones(vip_layers, dtype=int) * [output_dim]))
 
     dims_name = "-".join(map(str, dims))
     bnn_name = "-".join(map(str, bnn_structure))
     path = "plots/{}_{}_layers={}_bnn={}_epochs={}_batchsize={}.svg".format(
-        dataset, name_flag, dims_name, bnn_name, epochs, n_samples
-    )
+        dataset, name_flag, dims_name, bnn_name, epochs, n_samples)
     title = "Layers: {}({})  BNN: {}".format(vip_layers, dims_name, bnn_name)
     return title, path
 
@@ -64,9 +144,15 @@ def plot_train_test(
     mean_train, std_train = train_pred
     mean_test, std_test = test_pred
 
-    fig, ax = plt.subplots(
-        2, 2, gridspec_kw={"height_ratios": [3, 1]}, figsize=(20, 10)
-    )
+    if train_prior_samples is not None:
+        train_prior_samples = train_prior_samples[:, -1, :, :]
+    if test_prior_samples is not None:
+        test_prior_samples = test_prior_samples[:, -1, :, :]
+
+    _, ax = plt.subplots(2,
+                         2,
+                         gridspec_kw={"height_ratios": [3, 1]},
+                         figsize=(20, 10))
 
     plt.suptitle(title)
 
@@ -75,7 +161,7 @@ def plot_train_test(
         mean=mean_train.flatten(),
         std=std_train.flatten(),
         y=y_train.flatten(),
-        prior_samples=train_prior_samples[:,-1,:,:],
+        prior_samples=train_prior_samples,
         ax=ax.T[0],
     )
 
@@ -87,7 +173,7 @@ def plot_train_test(
         mean=mean_test.flatten(),
         std=std_test.flatten(),
         y=y_test,
-        prior_samples=test_prior_samples[:,-1,:,:],
+        prior_samples=test_prior_samples,
         ax=ax.T[1],
     )
 
@@ -126,34 +212,43 @@ def plot_prediction(
     ax.plot(X, mean, color=mean_color, alpha=alpha, label=label)
     if std is not None:
         std = std[sort]
-        ax.fill_between(
-            X, mean - 2 * std, mean + 2 * std, color=std_color, alpha=alpha / 2
-        )
+        ax.fill_between(X,
+                        mean - 2 * std,
+                        mean + 2 * std,
+                        color=std_color,
+                        alpha=alpha / 2)
 
     return ax
 
 
-def plot_standard_deviation(
-    X, std, color=None, alpha=1.0, label=None, ax=None
-):
+def plot_standard_deviation(X,
+                            std,
+                            color=None,
+                            alpha=1.0,
+                            label=None,
+                            ax=None):
     if ax is None:
         fig, ax = plt.subplots()
 
     sort = np.argsort(X)
     X = X[sort]
     std = std[sort]
-    ax.fill_between(
-        X, np.zeros_like(std), std, color=color, label=label, alpha=alpha
-    )
+    ax.fill_between(X,
+                    np.zeros_like(std),
+                    std,
+                    color=color,
+                    label=label,
+                    alpha=alpha)
 
     return ax
+
 
 def plot_prior_samples(X, prior_samples, ax):
 
     for i in range(prior_samples.shape[1]):
         plot_prediction(
             X,
-            prior_samples[:,i].flatten(),
+            prior_samples[:, i].flatten(),
             label="Prior samples" if i == 0 else "",
             mean_color="red",
             alpha=0.1,
@@ -161,16 +256,26 @@ def plot_prior_samples(X, prior_samples, ax):
         )
     ax.legend()
 
-def plot_prior_over_layers(X, prior_samples, n = 2):
+
+def plot_prior_over_layers(X, prior_samples, n=2):
+
     n_layers = prior_samples.shape[1]
-    _, ax = plt.subplots(n, n_layers//2, figsize = (5, 15))
+    if n_layers == 1:
+        print("asdsad")
+        _, ax = plt.subplots(figsize=(5, 15))
+        plot_prior_samples(X.flatten(), prior_samples[:, 0, :, :], ax)
+        ax.set_title("Layer")
+    else:
+        _, ax = plt.subplots(n, n_layers // n, figsize=(5, 15))
 
-    for i in range(n_layers):
-        plot_prior_samples(X.flatten(), prior_samples[:,i,:,:], ax[i//n][i%n])
+        for i in range(n_layers):
+            plot_prior_samples(X.flatten(), prior_samples[:, i, :, :],
+                               ax[i // n][i % n])
 
-        ax[i//n][i%n].set_title("Layer {}".format(i+1))
+            ax[i // n][i % n].set_title("Layer {}".format(i + 1))
     plt.suptitle("Prior Samples")
     plt.show()
+
 
 def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
     if ax is None:
@@ -197,7 +302,6 @@ def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
         label="VIP Prediction Standard Deviation",
         ax=ax[1],
     )
-
 
     if prior_samples is not None:
         plot_prior_samples(X, prior_samples, ax[0])

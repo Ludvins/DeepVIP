@@ -1,13 +1,10 @@
-import tensorflow as tf
-
+import torch
 from .utils import reparameterize
-
-import tensorflow_probability as tfp
 import numpy as np
 
 
-class Layer(tf.keras.layers.Layer):
-    def __init__(self, input_dim=None, dtype=None, seed=0, **kwargs):
+class Layer(torch.nn.Module):
+    def __init__(self, input_dim=None, dtype=None, device=None, seed=0):
         """
         A base class for VIP layers. Basic functionality for multisample
         conditional and input propagation.
@@ -25,13 +22,15 @@ class Layer(tf.keras.layers.Layer):
                    Extra arguments to `Layer`.
                    Refer to tf.keras.layers.Layer for more information.
         """
-        super().__init__(dtype=dtype, **kwargs)
+        super().__init__()
         self.seed = seed
-        self.build(input_dim)
+        self.dtype = dtype
+        self.device = device
+        self.input_dim = input_dim
 
     def conditional_ND(self, X, full_cov=False):
         """
-        Computes the conditional probability \(Q^{\tar}(y \mid x, \theta)\).
+        Computes the conditional probability \(Q^{\star}(y \mid x, \theta)\).
 
         Parameters
         ----------
@@ -57,6 +56,41 @@ class Layer(tf.keras.layers.Layer):
         The KL divergence from the variational distribution to the prior.
         """
         raise NotImplementedError
+
+    def conditional_SND(self, X, full_cov=False):
+        """
+        A multisample conditional, where X is shape (S,N,D_out), independent over samples S
+
+        if full_cov is True
+            mean is (S,N,D_out), var is (S,N,N,D_out)
+
+        if full_cov is False
+            mean and var are both (S,N,D_out)
+
+        :param X:  The input locations (S,N,D_in)
+        :param full_cov: Whether to calculate full covariance or just diagonal
+        :return: mean (S,N,D_out), var (S,N,D_out or S,N,N,D_out)
+        """
+
+        S, N, D = X.shape
+
+        if full_cov:
+            raise NotImplementedError
+        else:
+
+            X_flat = X.reshape([S * N, D])
+            mean, var, f = self.conditional_ND(X_flat)
+
+        num_outputs = self.num_outputs
+
+        mean = mean.reshape((S, N, num_outputs))
+        f = f.reshape((S, N, -1, num_outputs))
+        if full_cov:
+            var = var.reshape((S, N, N, num_outputs))
+        else:
+            var = var.reshape((S, N, num_outputs))
+
+        return mean, var, f
 
     def sample_from_conditional(self, X, z=None, full_cov=False):
         """
@@ -88,30 +122,26 @@ class Layer(tf.keras.layers.Layer):
               X.
         """
 
-        mean, var, f = self.conditional_ND(X, full_cov=full_cov)
+        mean, var, f = self.conditional_SND(X, full_cov=full_cov)
 
-        # If no sample is given, generate it from a standardized Gaussian
         if z is None:
-            z = tf.random.normal(shape=tf.shape(mean), seed=self.seed, dtype=self.dtype)
-        # Apply re-parameterization trick to z
+            z = torch.randn(mean.shape).to(self.dtype).to(self.device)
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
         return samples, mean, var, f
 
 
 class VIPLayer(Layer):
-    def __init__(
-        self,
-        generative_function,
-        num_regression_coeffs,
-        num_outputs,
-        input_dim,
-        log_layer_noise=-5,
-        mean_function=None,
-        trainable = True,
-        dtype=tf.float64,
-        **kwargs
-    ):
+    def __init__(self,
+                 generative_function,
+                 num_regression_coeffs,
+                 num_outputs,
+                 input_dim,
+                 log_layer_noise=-5,
+                 mean_function=None,
+                 trainable=True,
+                 dtype=torch.float64,
+                 **kwargs):
         """
         A variational implicit process layer.
 
@@ -183,44 +213,42 @@ class VIPLayer(Layer):
         self.num_coeffs = num_regression_coeffs
 
         # Regression Coefficients prior mean
-        self.q_mu = tf.Variable(
-            np.zeros((self.num_coeffs, num_outputs)),
-            trainable=trainable,
-            name="q_mu",
-        )
+        self.q_mu = torch.nn.Parameter(
+            torch.tensor(np.zeros((self.num_coeffs, num_outputs)),
+                         dtype=self.dtype,
+                         device=self.device))
 
         # If no mean function is given, constant 0 is used
         self.mean_function = mean_function
 
         # Verticality of the layer
-        self.num_outputs = tf.constant(num_outputs, dtype=tf.int32)
+        self.num_outputs = torch.tensor(num_outputs, dtype=torch.int32)
 
         # Initialize generative function
         self.generative_function = generative_function
 
         # Initialize the layer's noise
-        self.log_layer_noise = tf.Variable(
-            initial_value=np.ones(num_outputs) * log_layer_noise,
-            dtype="float64",
-            trainable=True,
-            name="layer_log_noise",
-        )
+        self.log_layer_noise = torch.nn.Parameter(
+            torch.tensor(np.ones(num_outputs) * log_layer_noise,
+                         dtype=self.dtype,
+                         device=self.device))
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
         # Shape (num_coeffs, num_coeffs)
-        q_var = np.eye(self.num_coeffs)
+        q_sqrt = np.eye(self.num_coeffs)
         # Replicate it num_outputs times
         # Shape (num_outputs, num_coeffs, num_coeffs)
-        q_var = np.tile(q_var[None, :, :], [num_outputs, 1, 1])
+        q_sqrt = np.tile(q_sqrt[None, :, :], [num_outputs, 1, 1])
         # Create tensor with triangular representation.
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
-        q_sqrt_tri_prior = tfp.math.fill_triangular_inverse(q_var)
-        self.q_sqrt_tri = tf.Variable(
-            q_sqrt_tri_prior, trainable=trainable, name="q_sqrt_tri"
-        )
+        li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
+        triangular_q_sqrt = q_sqrt[:, li, lj]
+        self.q_sqrt_tri = torch.nn.Parameter(
+            torch.tensor(triangular_q_sqrt,
+                         dtype=self.dtype,
+                         device=self.device))
 
-    @tf.function
     def conditional_ND(self, X, full_cov=False):
         """
         Computes Q*(y|x, a) using the linear regression approximation.
@@ -271,38 +299,44 @@ class VIPLayer(Layer):
         f = self.generative_function(X)
 
         # Compute mean value, shape (N, 1, D)
-        m = tf.reduce_mean(f, axis=1, keepdims = True)
-        inv_sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype=self.dtype))
+        m = torch.mean(f, dim=1, keepdims=True)
+
+        inv_sqrt = 1 / torch.sqrt(
+            torch.tensor(self.num_coeffs).type(self.dtype))
         # Compute regresion function, shape (N, S, D)
         phi = inv_sqrt * (f - m)
 
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (N, S, D)
-        mean = tf.squeeze(m, axis = 1) + tf.einsum("nsd,sd->nd", phi, self.q_mu)
+        mean = m.squeeze(axis=1) + torch.einsum("nsd,sd->nd", phi, self.q_mu)
 
         # Shape (D, S, S)
-        q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
+        q_sqrt = torch.zeros((self.num_outputs, self.num_coeffs,
+                              self.num_coeffs)).to(self.dtype).to(self.device)
+        li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
+        q_sqrt[:, li, lj] = self.q_sqrt_tri
+
         # Shape (D, S, S)
-        Delta = tf.matmul(q_sqrt, q_sqrt, transpose_b=True)
+        Delta = torch.matmul(q_sqrt, torch.transpose(q_sqrt, 1, 2))
         # Shape (S, S, D)
-        Delta = tf.transpose(Delta, (1, 2, 0))
+        Delta = torch.permute(Delta, (1, 2, 0))
 
         # Compute variance matrix in two steps
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
-        K = tf.einsum("nsd,skd->nkd", phi, Delta)
+        K = torch.einsum("nsd,skd->nkd", phi, Delta)
 
         if full_cov:
             # var shape (num_points, num_points, num_outputs)
             # Multiply by phi again distinguishing data_points
-            K = tf.einsum("nsd,msd->nmd", K, phi)
+            K = torch.einsum("nsd,msd->nmd", K, phi)
         else:
             # var shape (num_points, num_outputs)
             # Multiply by phi again, using the same points twice
-            K = tf.einsum("nsd,nsd->nd", K, phi)
+            K = torch.einsum("nsd,nsd->nd", K, phi)
 
         # Add layer noise to variance
-        var = K + tf.math.exp(self.log_layer_noise)
+        var = K + torch.exp(self.log_layer_noise)
 
         # Add mean function
         if self.mean_function is not None:
@@ -310,7 +344,6 @@ class VIPLayer(Layer):
 
         return mean, var, f
 
-    @tf.function
     def KL(self):
         """
         Computes the KL divergence from the variational distribution of
@@ -324,25 +357,27 @@ class VIPLayer(Layer):
                      q_mu^T q_mu - M - log |q_sqrt^T q_sqrt| )
         """
 
-        D = tf.cast(self.num_outputs, dtype=self.dtype)
-
         # Recover triangular matrix from array
-        q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
-        diag = tf.linalg.diag_part(q_sqrt)
+        q_sqrt = torch.zeros((self.num_outputs, self.num_coeffs,
+                              self.num_coeffs)).to(self.dtype).to(self.device)
+        li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
+        q_sqrt[:, li, lj] = self.q_sqrt_tri
+
+        diag = torch.diagonal(q_sqrt, dim1=1, dim2=2)
 
         # Constant dimensionality term
-        KL = -0.5 * D * self.num_coeffs
+        KL = -0.5 * self.num_outputs * self.num_coeffs
 
         # Log of determinant of covariance matrix.
         # Uses that sqrt(det(X)) = det(X^(1/2)) and
         # that the determinant of a upper triangular matrix (which q_sqrt is),
         # is the product of the diagonal entries (i.e. sum of their logarithm).
-        KL -= 0.5 * tf.reduce_sum(2 * tf.math.log(diag))
+        KL -= 0.5 * torch.sum(2 * torch.log(diag))
 
         # Trace term.
-        KL += 0.5 * tf.reduce_sum(tf.square(self.q_sqrt_tri))
+        KL += 0.5 * torch.sum(torch.square(self.q_sqrt_tri))
 
         # Mean term
-        KL += 0.5 * tf.reduce_sum(tf.square(self.q_mu))
+        KL += 0.5 * torch.sum(torch.square(self.q_mu))
 
         return KL

@@ -1,6 +1,5 @@
 import numpy as np
 from numpy.random import default_rng
-import tensorflow as tf
 
 
 def SPGP():
@@ -18,12 +17,13 @@ def SPGP():
 def synthetic():
     rng = default_rng(seed=0)
 
-    def f(x, noise=True):
-        return np.cos(5 * x) / (np.abs(x) + 1) + rng.standard_normal(x.shape) * 0.1
+    def f(x):
+        return np.cos(5 * x) / (np.abs(x) + 1) + rng.standard_normal(
+            x.shape) * 0.1
 
     X_train = rng.standard_normal(300)
     y_train = f(X_train)
-    X_test = rng.standard_normal(400)*2
+    X_test = rng.standard_normal(400) * 2
     y_test = f(X_test)
 
     X_train = X_train[..., np.newaxis]

@@ -1,18 +1,21 @@
-import tensorflow as tf
+import torch
 
 
-class DVIP_Base(tf.keras.Model):
-    def __init__(
-        self,
-        likelihood,
-        layers,
-        num_data,
-        y_mean=0.0,
-        y_std=1.0,
-        warmup_iterations=1,
-        dtype=tf.float64,
-        **kwargs
-    ):
+class DVIP_Base(torch.nn.Module):
+    def name(self):
+        return "Deep VIP Base"
+
+    def __init__(self,
+                 likelihood,
+                 layers,
+                 num_data,
+                 num_samples=1,
+                 y_mean=0.0,
+                 y_std=1.0,
+                 warmup_iterations=1,
+                 device=None,
+                 dtype=torch.float64,
+                 **kwargs):
         """
         Defines a Base class for Deep Variational Implicit Processes as a
         particular Keras model.
@@ -25,32 +28,36 @@ class DVIP_Base(tf.keras.Model):
                  Contains the different Variational Implicit Process layers
                  that make up this model.
         num_data : int
-                   Ammount of data samples
+                   Amount of data samples
         y_mean : float or array-like
                  Original value of the normalized labels
         y_std : float or array-like
                 Original standar deviation of the normalized labels
         dtype : data-type
                 The dtype of the layer's computations and weights.
-                Refer to tf.keras.Model for more information.
         **kwargs : dict, optional
                    Extra arguments to `Model`.
-                   Refer to tf.keras.Model for more information.
         """
-        super().__init__(name="DVIP_Base", dtype=dtype, **kwargs)
+        super().__init__()
         self.num_data = num_data
         self.y_mean = y_mean
         self.y_std = y_std
 
+        self.num_samples = num_samples
+
         self.likelihood = likelihood
-        self.vip_layers = layers
+        self.vip_layers = torch.nn.ModuleList(layers)
 
         self.warmup_iterations = warmup_iterations
 
-        # Metric trackers
-        self.loss_tracker = tf.keras.metrics.Mean(name="nelbo")
+        self.device = device
 
-    def train_step(self, data):
+        self.dtype = dtype
+
+        # Metric trackers
+        #self.loss_tracker = tf.keras.metrics.Mean(name="nelbo")
+
+    def train_step(self, optimizer, X, y):
         """
         Defines the training step for the DVIP model.
 
@@ -67,42 +74,37 @@ class DVIP_Base(tf.keras.Model):
         metrics : dictionary
                   Contains the resulting metrics of the training step.
         """
-        # Split data in features (x) and labels (y)
-        x, y = data
+        if y.ndim == 1:
+            y = y.unsqueeze(-1)
 
-        # Ensure types are compatible
-        if eval("tf." + self.dtype) != x.dtype:
-            x = tf.cast(x, self.dtype)
-        if eval("tf." + self.dtype) != y.dtype:
-            y = tf.cast(y, self.dtype)
+        if self.dtype != X.dtype:
+            X = X.to(self.dtype)
+        if self.dtype != y.dtype:
+            y = y.to(self.dtype)
 
-        with tf.GradientTape() as tape:
-            # Forward pass
-            mean_pred, std_pred = self(x, training=True)[0]
+        loss = self.nelbo(X, y)
 
-            # Compute loss function
-            loss = self.nelbo(x, y, self.optimizer.iterations)
+        optimizer.zero_grad()
+        loss.backward()  #(retain_graph=True)
+        optimizer.step()
 
-            # Get trainable variables from the model itself
-            trainable_vars = self.trainable_variables
+        with torch.no_grad():
+            means, variances = self.forward(X)
 
-            # Compute gradients
-            gradients = tape.gradient(loss, trainable_vars)
+        self.likelihood.update_metrics(y * self.y_std + self.y_mean, means,
+                                       variances)
 
-        # Update weights
-        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        return loss
 
-        # Compute metrics
-        self.loss_tracker.update_state(loss)
+    def predict(self, inputs):
 
-        # Update metrics, these are computed using pre-standardized data
-        self.likelihood.update_metrics(
-            y * self.y_std + self.y_mean, mean_pred, std_pred
-        )
+        output_means, output_vars = self(inputs)
+        output_means = output_means.mean(0)
+        output_vars = output_vars.mean(0)
+        return output_means * self.y_std + self.y_mean, output_vars.sqrt(
+        ) * self.y_std
 
-        return {m.name: m.result() for m in self.metrics}
-
-    def test_step(self, data):
+    def test_step(self, X, y):
         """
         Defines the test step for the DVIP model.
 
@@ -117,61 +119,29 @@ class DVIP_Base(tf.keras.Model):
         metrics : dictionary
                   Contains the resulting metrics of the training step.
         """
-        # Unpack the data
-        x, y = data
 
-        # Ensure types are compatible
-        if eval("tf." + self.dtype) != x.dtype:
-            x = tf.cast(x, self.dtype)
-        if eval("tf." + self.dtype) != y.dtype:
-            y = tf.cast(y, self.dtype)
+        if y.ndim == 1:
+            y = y.unsqueeze(-1)
+
+        if self.dtype != X.dtype:
+            X = X.to(self.dtype)
+        if self.dtype != y.dtype:
+            y = y.to(self.dtype)
 
         # Compute predictions
-        mean_pred, std_pred = self(x, training=False)[0]
+        with torch.no_grad():
+            mean_pred, var_pred = self(X)  # Forward pass
 
-        # Compute the loss. Scale test sample using training standarization
-        loss = self.nelbo(x, (y - self.y_mean) / self.y_std)
+            # Compute the loss
+            loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
+            self.likelihood.update_metrics(y, mean_pred, var_pred)
 
-        # Update the metrics
-        self.loss_tracker.update_state(loss)
-        self.likelihood.update_metrics(y, mean_pred, std_pred)
+            # Update the metrics
+            #self.loss_tracker.update_state(loss)
 
-        # Return a dict mapping metric names to current value.
-        # Note that it will include the loss (tracked in self.metrics).
-        return {m.name: m.result() for m in self.metrics}
+        return loss
 
-    @property
-    def metrics(self):
-        # We list our `Metric` objects here so that `reset_states()` can be
-        # called automatically at the start of each epoch
-        # or at the start of `evaluate()`.
-        # If you don't implement this property, you have to call
-        # `reset_states()` yourself at the time of your choosing.
-        metrics = [self.loss_tracker]
-        for metric in self.likelihood.metrics:
-            metrics.append(metric)
-        return metrics
-
-    def call(self, inputs):
-        """
-        Computes the prediction of the model. Calls `predict_y`.
-
-        Parameters
-        ----------
-        inputs : tf.tensor of shape (num_data, data_dim)
-                 Contains the features whose labels are to be predicted
-        Returns
-        -------
-        mean : tf.tensor of shape (num_data, output_dim)
-               Contains the mean value of the predictive distribution
-        std : tf.tensor of shape (num_data, output_dim)
-              Contains the std of the predictive distribution
-        """
-        return self.predict_y(inputs), self.predict_prior_samples(inputs)
-        return self.predict_y(inputs), tf.transpose(self.predict_prior_samples(inputs), (1,0,2))
-
-    @tf.function
-    def propagate(self, X, full_cov=False):
+    def propagate(self, X, num_samples=1, full_cov=False):
         """
         Propagates the input trough the layer, using the output of the previous
         as the input for the next one.
@@ -198,16 +168,18 @@ class DVIP_Base(tf.keras.Model):
                  Contains the S prior samples for each layer at each data
                  point.
         """
+
+        sX = torch.tile(X.unsqueeze(0), [num_samples, 1, 1])
+
         # Define arrays
         Fs, Fmeans, Fvars, Fprior = [], [], [], []
 
         # First input corresponds to the original one
-        Fmean = X
+        F = sX
 
         for layer in self.vip_layers:
             F, Fmean, Fvar, prior_samples = layer.sample_from_conditional(
-                Fmean, full_cov=full_cov
-            )
+                F, full_cov=full_cov)
 
             # Store values
             Fs.append(F)
@@ -218,7 +190,7 @@ class DVIP_Base(tf.keras.Model):
         # Return arrays
         return Fs, Fmeans, Fvars, Fprior
 
-    def predict_f(self, predict_at, full_cov=False):
+    def predict_f(self, predict_at, num_samples, full_cov=False):
         """
         Returns the predicted mean and variance at the last layer.
 
@@ -239,8 +211,10 @@ class DVIP_Base(tf.keras.Model):
                 the last layer.
 
         """
+
         _, Fmeans, Fvars, _ = self.propagate(
             predict_at,
+            num_samples,
             full_cov=full_cov,
         )
         return Fmeans[-1], Fvars[-1]
@@ -265,12 +239,13 @@ class DVIP_Base(tf.keras.Model):
 
         _, _, _, Fprior = self.propagate(
             predict_at,
+            num_samples=1,
             full_cov=full_cov,
         )
-        Fprior = tf.convert_to_tensor(Fprior)
-        return tf.transpose(Fprior, (1,0,2,3)) * self.y_std + self.y_mean
+        Fprior = torch.permute(torch.cat(Fprior), (1, 0, 2, 3))
+        return Fprior * self.y_std + self.y_mean
 
-    def predict_y(self, predict_at, full_cov=False):
+    def forward(self, predict_at, full_cov=False):
         """
         Computes the predicted labels for the given input.
 
@@ -287,16 +262,17 @@ class DVIP_Base(tf.keras.Model):
         and the predicted mean and standard deviation.
         """
 
-        mean, var = self.predict_f(predict_at, full_cov=full_cov)
-        mean, var = self.likelihood.predict_mean_and_var(mean, var)
-        # Mean and std values are scaled according to the labels scale
-        return mean * self.y_std + self.y_mean, tf.math.sqrt(var) * self.y_std
+        mean, var = self.predict_f(predict_at,
+                                   self.num_samples,
+                                   full_cov=full_cov)
+        return self.likelihood.predict_mean_and_var(mean, var)
 
-    def predict_log_density(self, data):
-        Fmean, Fvar = self.predict_f(data[0], full_cov=False)
+    def predict_log_density(self, data, num_samples):
+        Fmean, Fvar = self.predict_f(data[0], num_samples, full_cov=False)
         l = self.likelihood.predict_logdensity(Fmean, Fvar, data[1])
-        log_num_samples = tf.math.log(tf.cast(self.num_samples, self.dtype))
-        return tf.reduce_logsumexp(l - log_num_samples, axis=0)
+        log_num_samples = torch.log(torch.Tensor(self.num_samples, self.dtype))
+
+        return torch.logsumexp(l - log_num_samples, dim=0)
 
     def expected_data_log_likelihood(self, X, Y):
         """
@@ -317,13 +293,14 @@ class DVIP_Base(tf.keras.Model):
                   Contains the variational expectation
 
         """
-        F_mean, F_var = self.predict_f(X, full_cov=False)
-        # Shape [N, D]
+        F_mean, F_var = self.predict_f(X,
+                                       num_samples=self.num_samples,
+                                       full_cov=False)
         var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
-        # Shape [D]
-        return tf.reduce_mean(var_exp, 0)
 
-    def nelbo(self, inputs, outputs, iteration=None):
+        return torch.mean(var_exp, dim=0)  # Shape (N, D)
+
+    def nelbo(self, inputs, outputs):
         """
         Computes the evidence lower bound.
 
@@ -342,19 +319,24 @@ class DVIP_Base(tf.keras.Model):
         """
         X, Y = inputs, outputs
 
-        likelihood = tf.reduce_sum(self.expected_data_log_likelihood(X, Y))
+        likelihood = torch.mean(self.expected_data_log_likelihood(X, Y))
+
         # scale loss term corresponding to minibatch size
-        scale = tf.cast(self.num_data, self.dtype)
-        scale /= tf.cast(tf.shape(X)[0], self.dtype)
+        scale = self.num_data / X.shape[0]
         # Compute KL term
-        KL = tf.reduce_sum([layer.KL() for layer in self.vip_layers])
+        KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
 
-        if iteration is not None and self.warmup_iterations > 0:
-            beta = tf.minimum(
-                tf.cast(1.0, dtype=self.dtype),
-                iteration / self.warmup_iterations,
-            )
-        else:
-            beta = 1.0
+        return -scale * likelihood + KL
 
-        return -scale * likelihood + beta * KL
+    @property
+    def metrics(self):
+        # We list our `Metric` objects here so that `reset_states()` can be
+        # called automatically at the start of each epoch
+        # or at the start of `evaluate()`.
+        # If you don't implement this property, you have to call
+        # `reset_states()` yourself at the time of your choosing.
+        metrics = [self.loss_tracker]
+        for metric in self.likelihood.metrics:
+            metrics.append(metric)
+
+        return metrics
