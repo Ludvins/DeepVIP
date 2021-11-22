@@ -41,8 +41,7 @@ class Layer(torch.nn.Module):
         raise NotImplementedError
 
     def conditional_NSD(self, X, full_cov=False):
-        """
-        """
+        """"""
         N, S, D = X.shape
 
         if full_cov:
@@ -100,16 +99,18 @@ class Layer(torch.nn.Module):
 
 
 class VIPLayer(Layer):
-    def __init__(self,
-                 generative_function,
-                 num_regression_coeffs,
-                 num_outputs,
-                 input_dim,
-                 log_layer_noise=-5,
-                 mean_function=None,
-                 trainable=True,
-                 dtype=torch.float64,
-                 **kwargs):
+    def __init__(
+        self,
+        generative_function,
+        num_regression_coeffs,
+        num_outputs,
+        input_dim,
+        log_layer_noise=-5,
+        mean_function=None,
+        trainable=True,
+        dtype=torch.float64,
+        **kwargs
+    ):
         """
         A variational implicit process layer.
 
@@ -181,12 +182,15 @@ class VIPLayer(Layer):
         self.num_coeffs = num_regression_coeffs
 
         # Regression Coefficients prior mean
-        self.q_mu = torch.nn.Parameter(
-            torch.tensor(np.zeros((self.num_coeffs, num_outputs)),
-                         dtype=self.dtype,
-                         device=self.device,
-                         requires_grad=False))
-        #self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
+        # self.q_mu = torch.nn.Parameter(
+        #     torch.tensor(
+        #         np.zeros((self.num_coeffs, num_outputs)),
+        #         dtype=self.dtype,
+        #         device=self.device,
+        #         requires_grad=False,
+        #     )
+        # )
+        self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
 
         # If no mean function is given, constant 0 is used
         self.mean_function = mean_function
@@ -199,10 +203,13 @@ class VIPLayer(Layer):
 
         # Initialize the layer's noise
         self.log_layer_noise = torch.nn.Parameter(
-            torch.tensor(np.ones(num_outputs) * log_layer_noise,
-                         dtype=self.dtype,
-                         device=self.device,
-                         requires_grad=False))
+            torch.tensor(
+                np.ones(num_outputs) * log_layer_noise,
+                dtype=self.dtype,
+                device=self.device,
+                requires_grad=False,
+            )
+        )
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
@@ -215,12 +222,15 @@ class VIPLayer(Layer):
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         triangular_q_sqrt = q_sqrt[:, li, lj]
-        self.q_sqrt_tri = torch.nn.Parameter(
-            torch.tensor(triangular_q_sqrt,
-                         dtype=self.dtype,
-                         device=self.device,
-                         requires_grad=False))
-        #self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
+        # self.q_sqrt_tri = torch.nn.Parameter(
+        #     torch.tensor(
+        #         triangular_q_sqrt,
+        #         dtype=self.dtype,
+        #         device=self.device,
+        #         requires_grad=False,
+        #     )
+        # )
+        self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
 
     def conditional_ND(self, X, full_cov=False):
         """
@@ -269,18 +279,20 @@ class VIPLayer(Layer):
         # Let S = num_coeffs, D = num_outputs and N = num_samples
 
         # Shape (N, S, D)
+
+
         N, D = X.shape
-        inputs = X.unsqueeze(1)
-        inputs = torch.tile(inputs, (1, self.num_coeffs, 1))
-        inputs = inputs.reshape((self.num_coeffs * N, D))
-        f = self.generative_function(inputs)
-        f = f.reshape((N, self.num_coeffs, D))
+        f = torch.stack(
+            [self.generative_function(X) for _ in range(self.num_coeffs)]
+        )
+        f = torch.permute(f, (1, 0, 2))
 
         # Compute mean value, shape (N, 1, D)
         m = torch.mean(f, dim=1, keepdims=True)
 
         inv_sqrt = 1 / torch.sqrt(
-            torch.tensor(self.num_coeffs).type(self.dtype))
+            torch.tensor(self.num_coeffs).type(self.dtype)
+        )
         # Compute regresion function, shape (N, S, D)
         phi = inv_sqrt * (f - m)
 
@@ -290,8 +302,11 @@ class VIPLayer(Layer):
         mean = m.squeeze(axis=1) + torch.einsum("nsd,sd->nd", phi, self.q_mu)
 
         # Shape (D, S, S)
-        q_sqrt = torch.zeros((self.num_outputs, self.num_coeffs,
-                              self.num_coeffs)).to(self.dtype).to(self.device)
+        q_sqrt = (
+            torch.zeros((self.num_outputs, self.num_coeffs, self.num_coeffs))
+            .to(self.dtype)
+            .to(self.device)
+        )
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[:, li, lj] = self.q_sqrt_tri
 
@@ -336,8 +351,11 @@ class VIPLayer(Layer):
         """
 
         # Recover triangular matrix from array
-        q_sqrt = torch.zeros((self.num_outputs, self.num_coeffs,
-                              self.num_coeffs)).to(self.dtype).to(self.device)
+        q_sqrt = (
+            torch.zeros((self.num_outputs, self.num_coeffs, self.num_coeffs))
+            .to(self.dtype)
+            .to(self.device)
+        )
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[:, li, lj] = self.q_sqrt_tri
 

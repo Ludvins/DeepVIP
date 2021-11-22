@@ -68,8 +68,7 @@ def predict(model, generator, device=None):
     length_dataset = len(generator.dataset)
     assert batch_size <= length_dataset
 
-    # Generate variables and operations for the minimizer and initialize variables
-    train_per_epoch = len(generator)
+    # Generate variables and operar)
     means, vars = [], []
     for idx, data in enumerate(generator):
         try:
@@ -90,6 +89,7 @@ def predict_prior_samples(model, generator, device=None):
 
     batch_size = generator.batch_size
     length_dataset = len(generator.dataset)
+
     assert batch_size <= length_dataset
 
     # Generate variables and operations for the minimizer and initialize variables

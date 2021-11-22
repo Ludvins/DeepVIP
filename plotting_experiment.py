@@ -89,8 +89,8 @@ for name, param in dvip.named_parameters():
     if param.requires_grad:
         print(name, param.data)
 
-#prior_samples = predict_prior_samples(dvip, train_predict)
-#plot_prior_over_layers(X_train, prior_samples)
+# prior_samples = predict_prior_samples(dvip, train_predict)
+# plot_prior_over_layers(X_train, prior_samples)
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=lr)
