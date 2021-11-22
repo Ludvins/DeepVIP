@@ -69,7 +69,7 @@ layers = init_layers(
 
 # Create DVIP object
 dvip = DVIP_Base(
-    ll, layers, input_dim, y_mean=y_mean, y_std=y_std, warmup_iterations=warmup
+    ll, layers, num_data=n_samples, num_samples = 3, y_mean=y_mean, y_std=y_std, warmup_iterations=warmup
 )
 
 # Define optimizer and compile model
@@ -91,8 +91,19 @@ dvip.fit(
 )
 
 # Predict Train and Test
-train_pred, train_samples = dvip.predict(X_train, batch_size=batch_size)
-test_pred, test_samples = dvip.predict(X_test, batch_size=batch_size)
+mean_pred, var_pred = dvip.predict(X_train, batch_size=batch_size)
+test_mean_pred, test_var_pred = dvip.predict(X_test, batch_size=batch_size)
+
+print(mean_pred[0:10,0])
+print(mean_pred[0:10,1])
+import matplotlib.pyplot as plt
+
+plt.scatter(X_train, y_train)
+sort = np.argsort(X_train, axis = 0)
+for i in range(mean_pred.shape[1]):
+    plt.plot(X_train[sort].flatten(), mean_pred[:,i][sort].flatten())
+plt.show()
+
 
 # Create plot title and path
 fig_title, path = build_plot_name(
@@ -107,14 +118,12 @@ fig_title, path = build_plot_name(
 )
 
 plot_train_test(
-    train_pred,
-    test_pred,
+    (mean_pred, var_pred),
+    (test_mean_pred, test_var_pred),
     X_train,
     y_train,
     X_test,
     y_test,
-    train_samples,
-    test_samples,
-    fig_title,
-    path,
+    title = fig_title,
+    path = path,
 )

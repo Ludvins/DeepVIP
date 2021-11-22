@@ -52,6 +52,17 @@ class Layer(tf.keras.layers.Layer):
         """
         raise NotImplementedError
 
+    @tf.function
+    def conditional_NSD(self, X, full_cov=False):
+        """"""
+        f = lambda a: self.conditional_ND(a, full_cov=full_cov)
+        mean, var = tf.map_fn(
+            f, tf.transpose(X, (1, 0, 2)), fn_output_signature=(self.dtype, self.dtype)
+        )
+        mean = tf.transpose(tf.stack(mean), (1, 0, 2))
+        var = tf.transpose(tf.stack(var), (1, 0, 2))
+        return mean, var
+
     def KL(self):
         """
         The KL divergence from the variational distribution to the prior.
@@ -88,7 +99,7 @@ class Layer(tf.keras.layers.Layer):
               X.
         """
 
-        mean, var, f = self.conditional_ND(X, full_cov=full_cov)
+        mean, var = self.conditional_NSD(X, full_cov=full_cov)
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
@@ -96,7 +107,7 @@ class Layer(tf.keras.layers.Layer):
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
-        return samples, mean, var, f
+        return samples, mean, var
 
 
 class VIPLayer(Layer):
@@ -108,7 +119,7 @@ class VIPLayer(Layer):
         input_dim,
         log_layer_noise=-5,
         mean_function=None,
-        trainable = True,
+        trainable=True,
         dtype=tf.float64,
         **kwargs
     ):
@@ -271,7 +282,7 @@ class VIPLayer(Layer):
         f = self.generative_function(X)
 
         # Compute mean value, shape (N, 1, D)
-        m = tf.reduce_mean(f, axis=1, keepdims = True)
+        m = tf.reduce_mean(f, axis=1, keepdims=True)
         inv_sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype=self.dtype))
         # Compute regresion function, shape (N, S, D)
         phi = inv_sqrt * (f - m)
@@ -279,7 +290,7 @@ class VIPLayer(Layer):
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (N, S, D)
-        mean = tf.squeeze(m, axis = 1) + tf.einsum("nsd,sd->nd", phi, self.q_mu)
+        mean = tf.squeeze(m, axis=1) + tf.einsum("nsd,sd->nd", phi, self.q_mu)
 
         # Shape (D, S, S)
         q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
@@ -308,7 +319,7 @@ class VIPLayer(Layer):
         if self.mean_function is not None:
             mean = mean + self.mean_function(X)
 
-        return mean, var, f
+        return mean, var
 
     @tf.function
     def KL(self):

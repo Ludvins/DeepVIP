@@ -7,6 +7,7 @@ class DVIP_Base(tf.keras.Model):
         likelihood,
         layers,
         num_data,
+        num_samples = 1,
         y_mean=0.0,
         y_std=1.0,
         warmup_iterations=1,
@@ -39,6 +40,7 @@ class DVIP_Base(tf.keras.Model):
         """
         super().__init__(name="DVIP_Base", dtype=dtype, **kwargs)
         self.num_data = num_data
+        self.num_samples = num_samples
         self.y_mean = y_mean
         self.y_std = y_std
 
@@ -78,7 +80,7 @@ class DVIP_Base(tf.keras.Model):
 
         with tf.GradientTape() as tape:
             # Forward pass
-            mean_pred, std_pred = self(x, training=True)[0]
+            mean_pred, std_pred = self(x, training=True)
 
             # Compute loss function
             loss = self.nelbo(x, y, self.optimizer.iterations)
@@ -127,7 +129,7 @@ class DVIP_Base(tf.keras.Model):
             y = tf.cast(y, self.dtype)
 
         # Compute predictions
-        mean_pred, std_pred = self(x, training=False)[0]
+        mean_pred, std_pred = self(x, training=False)
 
         # Compute the loss. Scale test sample using training standarization
         loss = self.nelbo(x, (y - self.y_mean) / self.y_std)
@@ -167,11 +169,10 @@ class DVIP_Base(tf.keras.Model):
         std : tf.tensor of shape (num_data, output_dim)
               Contains the std of the predictive distribution
         """
-        return self.predict_y(inputs), self.predict_prior_samples(inputs)
-        return self.predict_y(inputs), tf.transpose(self.predict_prior_samples(inputs), (1,0,2))
+        return self.predict_y(inputs, S = self.num_samples)
 
     @tf.function
-    def propagate(self, X, full_cov=False):
+    def propagate(self, X, S = 1, full_cov=False):
         """
         Propagates the input trough the layer, using the output of the previous
         as the input for the next one.
@@ -194,31 +195,25 @@ class DVIP_Base(tf.keras.Model):
         Fvars : tf.tensor of shape (num_layers, num_data, output_dim)
                 Contains the standard deviation of the predictions at
                 each layer.
-        Fprior : tf.tensor of shape (num_layers, S, num_data, num_outputs)
-                 Contains the S prior samples for each layer at each data
-                 point.
         """
         # Define arrays
-        Fs, Fmeans, Fvars, Fprior = [], [], [], []
-
+        Fs, Fmeans, Fvars = [], [], []
         # First input corresponds to the original one
-        Fmean = X
+        F = tf.tile(tf.expand_dims(X, 1), [1, S, 1])
 
         for layer in self.vip_layers:
-            F, Fmean, Fvar, prior_samples = layer.sample_from_conditional(
-                Fmean, full_cov=full_cov
+            F, Fmean, Fvar = layer.sample_from_conditional(
+                F, full_cov=full_cov
             )
-
             # Store values
             Fs.append(F)
             Fmeans.append(Fmean)
             Fvars.append(Fvar)
-            Fprior.append(prior_samples)
 
         # Return arrays
-        return Fs, Fmeans, Fvars, Fprior
+        return Fs, Fmeans, Fvars
 
-    def predict_f(self, predict_at, full_cov=False):
+    def predict_f(self, predict_at, S, full_cov=False):
         """
         Returns the predicted mean and variance at the last layer.
 
@@ -239,38 +234,14 @@ class DVIP_Base(tf.keras.Model):
                 the last layer.
 
         """
-        _, Fmeans, Fvars, _ = self.propagate(
+        _, Fmeans, Fvars = self.propagate(
             predict_at,
+            S = S,
             full_cov=full_cov,
         )
         return Fmeans[-1], Fvars[-1]
 
-    def predict_prior_samples(self, predict_at, full_cov=False):
-        """
-        Returns the generated prior samples at the last layer.
-
-        Parameters
-        ----------
-        predict_at : tf.tensor of shape (num_data, data_dim)
-                     Contains the input features.
-        full_cov : boolean
-                   Whether to use the full covariance matrix or just
-                   the diagonal values.
-        Returns
-        -------
-        Fprior : tf.tensor of shape (S, num_data, output_dim)
-                 Contains the generated S samples. This values must
-                 be scaled.
-        """
-
-        _, _, _, Fprior = self.propagate(
-            predict_at,
-            full_cov=full_cov,
-        )
-        Fprior = tf.convert_to_tensor(Fprior)
-        return tf.transpose(Fprior, (1,0,2,3)) * self.y_std + self.y_mean
-
-    def predict_y(self, predict_at, full_cov=False):
+    def predict_y(self, predict_at, S, full_cov=False):
         """
         Computes the predicted labels for the given input.
 
@@ -286,8 +257,7 @@ class DVIP_Base(tf.keras.Model):
         The predicted labels using the model's likelihood
         and the predicted mean and standard deviation.
         """
-
-        mean, var = self.predict_f(predict_at, full_cov=full_cov)
+        mean, var = self.predict_f(predict_at, S=S, full_cov=full_cov)
         mean, var = self.likelihood.predict_mean_and_var(mean, var)
         # Mean and std values are scaled according to the labels scale
         return mean * self.y_std + self.y_mean, tf.math.sqrt(var) * self.y_std
@@ -317,11 +287,11 @@ class DVIP_Base(tf.keras.Model):
                   Contains the variational expectation
 
         """
-        F_mean, F_var = self.predict_f(X, full_cov=False)
-        # Shape [N, D]
+        F_mean, F_var = self.predict_f(X, S = self.num_samples, full_cov=False)
+        # Shape [N, S, D]
         var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
-        # Shape [D]
-        return tf.reduce_mean(var_exp, 0)
+        # Shape [N, D]
+        return tf.reduce_mean(var_exp, 1)
 
     def nelbo(self, inputs, outputs, iteration=None):
         """

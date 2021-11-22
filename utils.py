@@ -56,8 +56,6 @@ def plot_train_test(
     y_train,
     X_test,
     y_test=None,
-    train_prior_samples=None,
-    test_prior_samples=None,
     title=None,
     path=None,
 ):
@@ -71,23 +69,18 @@ def plot_train_test(
     plt.suptitle(title)
 
     plot_results(
-        X=X_train.flatten(),
-        mean=mean_train.flatten(),
-        std=std_train.flatten(),
-        y=y_train.flatten(),
-        prior_samples=train_prior_samples[:,-1,:,:],
+        X=X_train,
+        mean=mean_train,
+        std=std_train,
+        y=y_train,
         ax=ax.T[0],
     )
 
-    if y_test is not None:
-        y_test.flatten()
-
     plot_results(
-        X=X_test.flatten(),
-        mean=mean_test.flatten(),
-        std=std_test.flatten(),
+        X=X_test,
+        mean=mean_test,
+        std=std_test,
         y=y_test,
-        prior_samples=test_prior_samples[:,-1,:,:],
         ax=ax.T[1],
     )
 
@@ -105,9 +98,9 @@ def scatter_data(X, y, label=None, color=None, s=1.0, alpha=1.0, ax=None):
     return ax
 
 
-def plot_prediction(
+def plot_predictions(
     X,
-    mean,
+    means,
     std=None,
     label=None,
     mean_color=None,
@@ -120,12 +113,15 @@ def plot_prediction(
         fig, ax = plt.subplots()
 
     sort = np.argsort(X)
-    X = X[sort]
-    mean = mean[sort]
+    X = X[sort].flatten()
+    mean = np.mean(means, axis = 1).flatten()
 
-    ax.plot(X, mean, color=mean_color, alpha=alpha, label=label)
+    for i in range(means.shape[1]):
+        ax.plot(X, means[sort,i].flatten(), color=mean_color, alpha=alpha)
+    ax.plot(X, mean[sort], color = "black", label = label)
+
     if std is not None:
-        std = std[sort]
+        std = np.mean(std, axis = 1)[sort].flatten()
         ax.fill_between(
             X, mean - 2 * std, mean + 2 * std, color=std_color, alpha=alpha / 2
         )
@@ -140,8 +136,9 @@ def plot_standard_deviation(
         fig, ax = plt.subplots()
 
     sort = np.argsort(X)
-    X = X[sort]
-    std = std[sort]
+    X = X[sort].flatten()
+
+    std = np.mean(std, axis = 1)[sort].flatten()
     ax.fill_between(
         X, np.zeros_like(std), std, color=color, label=label, alpha=alpha
     )
@@ -151,7 +148,7 @@ def plot_standard_deviation(
 def plot_prior_samples(X, prior_samples, ax):
 
     for i in range(prior_samples.shape[1]):
-        plot_prediction(
+        plot_predictions(
             X,
             prior_samples[:,i].flatten(),
             label="Prior samples" if i == 0 else "",
@@ -177,9 +174,9 @@ def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
         _, ax = plt.subplots(2, 1, gridspec_kw={"height_ratios": [3, 1]})
 
     if y is not None:
-        scatter_data(X, y, label="Points", color="blue", ax=ax[0])
+        scatter_data(X.flatten(), y.flatten(), label="Points", color="blue", ax=ax[0])
 
-    plot_prediction(
+    plot_predictions(
         X,
         mean,
         std,
