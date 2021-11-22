@@ -7,7 +7,7 @@ class Layer(torch.nn.Module):
     def __init__(self, input_dim=None, dtype=None, device=None, seed=0):
         """
         A base class for VIP layers. Basic functionality for multisample
-        conditional and input propagation.
+        conditional.
 
         Parameters
         ----------
@@ -28,26 +28,9 @@ class Layer(torch.nn.Module):
         self.device = device
         self.input_dim = input_dim
 
-    def conditional_ND(self, X, full_cov=False):
+    def conditional_ND(self):
         """
         Computes the conditional probability \(Q^{\star}(y \mid x, \theta)\).
-
-        Parameters
-        ----------
-        X : tf.tensor of shape (N, D)
-            Contains the input locations.
-
-        full_cov : boolean
-                   Wether to use full covariance matrix or not.
-                   Determines the shape of the variance output.
-
-        Returns
-        -------
-        mean : tf.tensor of shape (N, num_outputs)
-               Contains the mean value of the distribution for each input
-
-        var : tf.tensor of shape (N, num_outputs) or (N, N, num_outputs)
-              Contains the variance value of the distribution for each input
         """
         raise NotImplementedError
 
@@ -57,38 +40,23 @@ class Layer(torch.nn.Module):
         """
         raise NotImplementedError
 
-    def conditional_SND(self, X, full_cov=False):
+    def conditional_NSD(self, X, full_cov=False):
         """
-        A multisample conditional, where X is shape (S,N,D_out), independent over samples S
-
-        if full_cov is True
-            mean is (S,N,D_out), var is (S,N,N,D_out)
-
-        if full_cov is False
-            mean and var are both (S,N,D_out)
-
-        :param X:  The input locations (S,N,D_in)
-        :param full_cov: Whether to calculate full covariance or just diagonal
-        :return: mean (S,N,D_out), var (S,N,D_out or S,N,N,D_out)
         """
-
-        S, N, D = X.shape
+        N, S, D = X.shape
 
         if full_cov:
             raise NotImplementedError
         else:
 
-            X_flat = X.reshape([S * N, D])
+            X_flat = X.reshape([N * S, D])
             mean, var, f = self.conditional_ND(X_flat)
 
         num_outputs = self.num_outputs
 
-        mean = mean.reshape((S, N, num_outputs))
-        f = f.reshape((S, N, -1, num_outputs))
-        if full_cov:
-            var = var.reshape((S, N, N, num_outputs))
-        else:
-            var = var.reshape((S, N, num_outputs))
+        mean = mean.reshape((N, S, num_outputs))
+        f = f.reshape((N, S, -1, num_outputs))
+        var = var.reshape((N, S, num_outputs))
 
         return mean, var, f
 
@@ -112,17 +80,17 @@ class Layer(torch.nn.Module):
 
         Returns
         -------
-        samples : tf.tensor of shape (S, N, self.num_outputs)
+        samples : tf.tensor of shape (N, S, self.num_outputs)
                   Samples from a Gaussian given by mean and var. See below.
-        mean : tf.tensor of shape (S, N, self.num_outputs)
+        mean : tf.tensor of shape (N, S, self.num_outputs)
                Stacked tensor of mean values from conditional_ND applied to X.
-        var : tf.tensor of shape (S, N, self.num_outputs or
-                                  S, N, N, self.num_outputs)
+        var : tf.tensor of shape (N, S, self.num_outputs or
+                                  N, N, S, self.num_outputs)
               Stacked tensor of variance values from conditional_ND applied to
               X.
         """
 
-        mean, var, f = self.conditional_SND(X, full_cov=full_cov)
+        mean, var, f = self.conditional_NSD(X, full_cov=full_cov)
 
         if z is None:
             z = torch.randn(mean.shape).to(self.dtype).to(self.device)
@@ -216,7 +184,9 @@ class VIPLayer(Layer):
         self.q_mu = torch.nn.Parameter(
             torch.tensor(np.zeros((self.num_coeffs, num_outputs)),
                          dtype=self.dtype,
-                         device=self.device))
+                         device=self.device,
+                         requires_grad=False))
+        #self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
 
         # If no mean function is given, constant 0 is used
         self.mean_function = mean_function
@@ -231,7 +201,8 @@ class VIPLayer(Layer):
         self.log_layer_noise = torch.nn.Parameter(
             torch.tensor(np.ones(num_outputs) * log_layer_noise,
                          dtype=self.dtype,
-                         device=self.device))
+                         device=self.device,
+                         requires_grad=False))
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
@@ -247,7 +218,9 @@ class VIPLayer(Layer):
         self.q_sqrt_tri = torch.nn.Parameter(
             torch.tensor(triangular_q_sqrt,
                          dtype=self.dtype,
-                         device=self.device))
+                         device=self.device,
+                         requires_grad=False))
+        #self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
 
     def conditional_ND(self, X, full_cov=False):
         """
@@ -296,7 +269,12 @@ class VIPLayer(Layer):
         # Let S = num_coeffs, D = num_outputs and N = num_samples
 
         # Shape (N, S, D)
-        f = self.generative_function(X)
+        N, D = X.shape
+        inputs = X.unsqueeze(1)
+        inputs = torch.tile(inputs, (1, self.num_coeffs, 1))
+        inputs = inputs.reshape((self.num_coeffs * N, D))
+        f = self.generative_function(inputs)
+        f = f.reshape((N, self.num_coeffs, D))
 
         # Compute mean value, shape (N, 1, D)
         m = torch.mean(f, dim=1, keepdims=True)

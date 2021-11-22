@@ -80,6 +80,7 @@ test_predict = DataLoader(test_dataset, batch_size=len(test_dataset))
 dvip = DVIP_Base(ll,
                  layers,
                  len(train_loader.dataset),
+                 num_samples=1,
                  y_mean=train_dataset.targets_mean,
                  y_std=train_dataset.targets_std,
                  warmup_iterations=warmup)
@@ -107,6 +108,11 @@ train_mean, train_var = predict(dvip, train_loader)
 test_mean, test_var = predict(dvip, test_loader)
 prior_samples_train = predict_prior_samples(dvip, train_predict)
 prior_samples_test = predict_prior_samples(dvip, test_predict)
+
+train_mean = train_mean.mean(1)
+train_var = train_var.mean(1)
+test_mean = test_mean.mean(1)
+test_var = test_var.mean(1)
 
 # Create plot title and path
 fig_title, path = build_plot_name(

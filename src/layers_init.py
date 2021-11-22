@@ -123,24 +123,18 @@ def init_layers(
 
             mf = LinearProjection(V[:dim_out, :])
             # Apply the projection to the running data,
-            X_running = mf(X_running)
+            X_running = X_running @ V[:dim_out].T
 
         else:
             raise NotImplementedError("Dimensionality augmentation is not"
                                       " handled currently.")
 
         # Create the Generation function, i.e, the Bayesian Neural Network
-        bayesian_network = BayesianNN(
-            noise_sampler=noise_sampler,
-            num_samples=regression_coeffs,
-            input_dim=dim_in,
-            structure=structure,
-            activation=activation,
-            num_outputs=dim_out,
-            trainable=trainable_prior,
-            seed=seed,
-        )
-        # bayesian_network = BayesianLinearNN(noise_sampler, regression_coeffs, dim_out, dim_in, seed = seed)
+        bayesian_network = BayesianNN(noise_sampler=noise_sampler,
+                                      input_dim=dim_in,
+                                      structure=structure,
+                                      activation=activation,
+                                      output_dim=dim_out)
 
         # Create layer
         layers.append(

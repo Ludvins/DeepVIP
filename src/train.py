@@ -72,7 +72,10 @@ def predict(model, generator, device=None):
     train_per_epoch = len(generator)
     means, vars = [], []
     for idx, data in enumerate(generator):
-        batch_x, _ = data
+        try:
+            batch_x, _ = data
+        except:
+            batch_x = data
         batch_means, batch_vars = model.predict(batch_x.to(device))
         means.append(batch_means.detach().numpy())
         vars.append(batch_vars.detach().numpy())
@@ -93,7 +96,10 @@ def predict_prior_samples(model, generator, device=None):
     train_per_epoch = len(generator)
     prior = []
     for idx, data in enumerate(generator):
-        batch_x, _ = data
+        try:
+            batch_x, _ = data
+        except:
+            batch_x = data
         prior_samples = model.predict_prior_samples(batch_x.to(device))
 
         prior.append(prior_samples.detach().numpy())

@@ -1,5 +1,7 @@
 import torch
 
+from src.layers import VIPLayer
+
 
 class DVIP_Base(torch.nn.Module):
     def name(self):
@@ -14,8 +16,7 @@ class DVIP_Base(torch.nn.Module):
                  y_std=1.0,
                  warmup_iterations=1,
                  device=None,
-                 dtype=torch.float64,
-                 **kwargs):
+                 dtype=torch.float64):
         """
         Defines a Base class for Deep Variational Implicit Processes as a
         particular Keras model.
@@ -35,8 +36,6 @@ class DVIP_Base(torch.nn.Module):
                 Original standar deviation of the normalized labels
         dtype : data-type
                 The dtype of the layer's computations and weights.
-        **kwargs : dict, optional
-                   Extra arguments to `Model`.
         """
         super().__init__()
         self.num_data = num_data
@@ -53,9 +52,6 @@ class DVIP_Base(torch.nn.Module):
         self.device = device
 
         self.dtype = dtype
-
-        # Metric trackers
-        #self.loss_tracker = tf.keras.metrics.Mean(name="nelbo")
 
     def train_step(self, optimizer, X, y):
         """
@@ -96,14 +92,6 @@ class DVIP_Base(torch.nn.Module):
 
         return loss
 
-    def predict(self, inputs):
-
-        output_means, output_vars = self(inputs)
-        output_means = output_means.mean(0)
-        output_vars = output_vars.mean(0)
-        return output_means * self.y_std + self.y_mean, output_vars.sqrt(
-        ) * self.y_std
-
     def test_step(self, X, y):
         """
         Defines the test step for the DVIP model.
@@ -136,10 +124,35 @@ class DVIP_Base(torch.nn.Module):
             loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
             self.likelihood.update_metrics(y, mean_pred, var_pred)
 
-            # Update the metrics
-            #self.loss_tracker.update_state(loss)
-
         return loss
+
+    def forward(self, predict_at, full_cov=False):
+        """
+        Computes the predicted labels for the given input.
+
+        Parameters
+        ----------
+        predict_at : tf.tensor of shape (num_data, data_dim)
+                     Contains the input features.
+        full_cov : boolean
+                   Whether to use the full covariance matrix or just
+                   the diagonal values.
+        Returns
+        -------
+        The predicted labels using the model's likelihood
+        and the predicted mean and standard deviation.
+        """
+
+        mean, var = self.predict_f(predict_at,
+                                   self.num_samples,
+                                   full_cov=full_cov)
+        return self.likelihood.predict_mean_and_var(mean, var)
+
+    def predict(self, inputs):
+
+        output_means, output_vars = self(inputs)
+        return (output_means * self.y_std + self.y_mean,
+                output_vars.sqrt() * self.y_std)
 
     def propagate(self, X, num_samples=1, full_cov=False):
         """
@@ -169,7 +182,7 @@ class DVIP_Base(torch.nn.Module):
                  point.
         """
 
-        sX = torch.tile(X.unsqueeze(0), [num_samples, 1, 1])
+        sX = torch.tile(X.unsqueeze(1), [1, num_samples, 1])
 
         # Define arrays
         Fs, Fmeans, Fvars, Fprior = [], [], [], []
@@ -242,30 +255,8 @@ class DVIP_Base(torch.nn.Module):
             num_samples=1,
             full_cov=full_cov,
         )
-        Fprior = torch.permute(torch.cat(Fprior), (1, 0, 2, 3))
+        Fprior = torch.permute(torch.stack(Fprior).mean(2), (1, 0, 2, 3))
         return Fprior * self.y_std + self.y_mean
-
-    def forward(self, predict_at, full_cov=False):
-        """
-        Computes the predicted labels for the given input.
-
-        Parameters
-        ----------
-        predict_at : tf.tensor of shape (num_data, data_dim)
-                     Contains the input features.
-        full_cov : boolean
-                   Whether to use the full covariance matrix or just
-                   the diagonal values.
-        Returns
-        -------
-        The predicted labels using the model's likelihood
-        and the predicted mean and standard deviation.
-        """
-
-        mean, var = self.predict_f(predict_at,
-                                   self.num_samples,
-                                   full_cov=full_cov)
-        return self.likelihood.predict_mean_and_var(mean, var)
 
     def predict_log_density(self, data, num_samples):
         Fmean, Fvar = self.predict_f(data[0], num_samples, full_cov=False)
@@ -296,9 +287,9 @@ class DVIP_Base(torch.nn.Module):
         F_mean, F_var = self.predict_f(X,
                                        num_samples=self.num_samples,
                                        full_cov=False)
+        # Shape (N, S, D)
         var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
-
-        return torch.mean(var_exp, dim=0)  # Shape (N, D)
+        return torch.mean(var_exp, dim=1)  # Shape (N, D)
 
     def nelbo(self, inputs, outputs):
         """
@@ -319,7 +310,7 @@ class DVIP_Base(torch.nn.Module):
         """
         X, Y = inputs, outputs
 
-        likelihood = torch.mean(self.expected_data_log_likelihood(X, Y))
+        likelihood = torch.sum(self.expected_data_log_likelihood(X, Y))
 
         # scale loss term corresponding to minibatch size
         scale = self.num_data / X.shape[0]

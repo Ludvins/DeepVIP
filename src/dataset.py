@@ -10,12 +10,15 @@ class DVIP_Dataset(Dataset):
             self.targets_mean = np.mean(targets)
             self.targets_std = np.std(targets)
             self.targets = (targets - self.targets_mean) / self.targets_std
+        else:
+            self.targets = None
 
     def __getitem__(self, index):
-        X = self.inputs[index]
-        y = self.targets[index]
 
-        return X, y
+        if self.targets is None:
+            return self.inputs[index]
+        else:
+            return self.inputs[index], self.targets[index]
 
     def __len__(self):
         return len(self.inputs)

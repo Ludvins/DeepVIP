@@ -47,7 +47,7 @@ class Gaussian(Likelihood):
         self.log_variance = torch.nn.Parameter(
             torch.tensor(log_variance, dtype=dtype, device=self.device))
 
-        self.rmse_metric = self.rmse_metric = torch.nn.MSELoss()
+        self.rmse_metric = torch.nn.MSELoss()
         self.nll_metric = torch.mean
 
     @property
@@ -56,15 +56,16 @@ class Gaussian(Likelihood):
 
     def update_metrics(self, y, mean_pred, std_pred):
         if mean_pred.ndim == 3:
-            predictions = mean_pred.mean(0)
+            predictions = mean_pred.mean(1)
         else:
             predictions = mean_pred
         self.rmse_val = self.rmse_metric(y, predictions).sqrt()
 
-        S = mean_pred.shape[0]
+        S = mean_pred.shape[1]
         normal = torch.distributions.Normal(loc=mean_pred, scale=std_pred)
+        y = y.unsqueeze(1)
         logpdf = normal.log_prob(y)
-        nll = torch.logsumexp(logpdf, 0) - np.log(S)
+        nll = torch.logsumexp(logpdf, 1) - np.log(S)
         nll = -nll.mean()
 
         self.nll_val = nll
@@ -89,6 +90,6 @@ class Gaussian(Likelihood):
 
     def variational_expectations(self, Fmu, Fvar, Y):
 
-        Y = Y.unsqueeze(0)
+        Y = Y.unsqueeze(1)
         return -0.5 * np.log(2 * np.pi) - 0.5 * self.log_variance \
                - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
