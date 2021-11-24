@@ -1,5 +1,11 @@
 from src.dataset import DVIP_Dataset
-from utils import plot_train_test, check_data, build_plot_name, get_parser, plot_prior_over_layers
+from utils import (
+    plot_train_test,
+    check_data,
+    build_plot_name,
+    get_parser,
+    plot_prior_over_layers,
+)
 from load_data import SPGP, synthetic
 
 import torch
@@ -40,7 +46,8 @@ elif args.activation == "relu":
     activation = torch.relu
 
 n_samples, input_dim, output_dim, y_mean, y_std = check_data(
-    X_train, y_train, verbose)
+    X_train, y_train, verbose
+)
 batch_size = args.batch_size or n_samples
 
 # CUDA for PyTorch
@@ -69,7 +76,7 @@ layers = init_layers(
 )
 
 train_dataset = DVIP_Dataset(X_train, y_train)
-test_dataset = DVIP_Dataset(X_test, y_test)
+test_dataset = DVIP_Dataset(X_test, y_test, normalize=False)
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size)
 test_loader = DataLoader(test_dataset, batch_size=batch_size)
@@ -77,42 +84,40 @@ train_predict = DataLoader(train_dataset, batch_size=len(train_dataset))
 test_predict = DataLoader(test_dataset, batch_size=len(test_dataset))
 
 # Create DVIP object
-dvip = DVIP_Base(ll,
-                 layers,
-                 len(train_loader.dataset),
-                 num_samples=1,
-                 y_mean=train_dataset.targets_mean,
-                 y_std=train_dataset.targets_std,
-                 warmup_iterations=warmup)
+dvip = DVIP_Base(
+    ll,
+    layers,
+    len(train_loader.dataset),
+    num_samples=5,
+    y_mean=train_dataset.targets_mean,
+    y_std=train_dataset.targets_std,
+    warmup_iterations=warmup,
+)
 
-for name, param in dvip.named_parameters():
-    if param.requires_grad:
-        print(name, param.data)
+dvip.print_variables()
 
-# prior_samples = predict_prior_samples(dvip, train_predict)
-# plot_prior_over_layers(X_train, prior_samples)
+# prior_samples = dvip.get_prior_samples(
+#     (torch.tensor(X_train) - dvip.x_mean) / dvip.x_std
+# )
+# plot_prior_over_layers(X_train, prior_samples.detach().cpu().numpy())
+# input()
 
 # Define optimizer and compile model
-opt = torch.optim.Adam(dvip.parameters(), lr=lr)
+opt = torch.optim.Adam(dvip.parameters(), lr=0.001)
 
 # Perform training
 train(dvip, train_loader, opt, epochs=args.epochs)
 
-for name, param in dvip.named_parameters():
-    if param.requires_grad:
-        print(name, param.data)
+dvip.print_variables()
 
 # Predict Train and Test
 
 train_mean, train_var = predict(dvip, train_loader)
 test_mean, test_var = predict(dvip, test_loader)
-prior_samples_train = predict_prior_samples(dvip, train_predict)
-prior_samples_test = predict_prior_samples(dvip, test_predict)
 
-train_mean = train_mean.mean(1)
-train_var = train_var.mean(1)
-test_mean = test_mean.mean(1)
-test_var = test_var.mean(1)
+
+train_prior_samples = dvip.get_prior_samples(torch.tensor(X_train))
+test_prior_samples = dvip.get_prior_samples(torch.tensor(X_test))
 
 # Create plot title and path
 fig_title, path = build_plot_name(
@@ -133,8 +138,8 @@ plot_train_test(
     y_train,
     X_test,
     y_test,
-    prior_samples_train,
-    prior_samples_test,
+    train_prior_samples.detach().cpu().numpy(),
+    test_prior_samples.detach().cpu().numpy(),
     title=fig_title,
     path=path,
 )

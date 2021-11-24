@@ -18,8 +18,10 @@ def synthetic():
     rng = default_rng(seed=0)
 
     def f(x):
-        return np.cos(5 * x) / (np.abs(x) + 1) + rng.standard_normal(
-            x.shape) * 0.1
+        return (
+            np.cos(5 * x) / (np.abs(x) + 1)
+            + rng.standard_normal(x.shape) * 0.1
+        )
 
     X_train = rng.standard_normal(300)
     y_train = f(X_train)
@@ -34,8 +36,10 @@ def synthetic():
 
 
 def boston():
-    (X_train, y_train), (X_test, y_test) \
-        = tf.keras.datasets.boston_housing.load_data()
+    (X_train, y_train), (
+        X_test,
+        y_test,
+    ) = tf.keras.datasets.boston_housing.load_data()
 
     y_train = y_train[..., np.newaxis]
     y_test = y_test[..., np.newaxis]

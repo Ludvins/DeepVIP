@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import time
-
+from tqdm import tqdm
 from utils import *
 import pkbar
 
@@ -16,52 +16,48 @@ def train(model, training_generator, optimizer, epochs=2000, device=None):
     assert batch_size <= length_dataset
 
     # Generate variables and operations for the minimizer and initialize variables
-    global_nelbow = np.inf
     train_per_epoch = len(training_generator)
-    print(train_per_epoch)
 
-    initial_time = time.time()
-    total_time = 0.0
-    for epoch in range(epochs):
-        message_write = {}
-        message_write['epoch'] = epoch
-        kbar = pkbar.Kbar(target=train_per_epoch,
-                          epoch=epoch,
-                          num_epochs=epochs,
-                          width=50,
-                          always_stateful=False)
-        avg_nelbo = 0.0
-        avg_rmse = 0
-        avg_nll = 0
+    miniters = 10
+    with tqdm(range(epochs), unit="epoch", miniters=miniters) as tepoch:
+        for epoch in tepoch:
+            tepoch.set_description(f"Training ")
+            avg_nelbo = 0.0
+            avg_rmse = 0
+            avg_nll = 0
 
-        kbar.update(0, values=[("nelbo", 0), ("rmse", 0), ("nll", 0)])
-        for idx, data in enumerate(training_generator):
-            batch_x, batch_y = data
-            loss = model.train_step(optimizer, batch_x.to(device),
-                                    batch_y.to(device))
+            for data, target in training_generator:
 
-            avg_nelbo += loss
-            rmse = model.likelihood.rmse_val
-            nll = model.likelihood.nll_val
-            avg_rmse += rmse
-            avg_nll += nll
-            kbar.update(idx + 1,
-                        values=[("nelbo", loss), ("rmse", rmse), ("nll", nll)])
+                loss = model.train_step(
+                    optimizer, data.to(device), target.to(device)
+                )
+                avg_nelbo += loss
+                avg_rmse += model.likelihood.rmse_val
+                avg_nll += model.likelihood.nll_val
 
-        NELBO = avg_nelbo / train_per_epoch
-        NLL = avg_nll / train_per_epoch
-        ACC = avg_rmse / train_per_epoch
+                NELBO = avg_nelbo / train_per_epoch
+                NLL = avg_nll / train_per_epoch
+                RMSE = avg_rmse / train_per_epoch
 
-        message_write['acc_train'] = ACC.detach().cpu().numpy()
-        message_write['nelbo_train'] = NELBO.detach().cpu().numpy()
-        message_write['nll_train'] = NLL.detach().cpu().numpy()
-
-    total_time = time.time() - initial_time
-
-    return total_time
+                if epoch % miniters == 0:
+                    tepoch.set_postfix(
+                        {
+                            "nelbo_train": "{:3f}".format(
+                                NELBO.detach().cpu().numpy()
+                            ),
+                            "rmse_train": "{:3f}".format(
+                                RMSE.detach().cpu().numpy()
+                            ),
+                            "nll_train": "{:3f}".format(
+                                NLL.detach().cpu().numpy()
+                            ),
+                        }
+                    )
 
 
 def predict(model, generator, device=None):
+
+    model.eval()
 
     batch_size = generator.batch_size
 
@@ -75,12 +71,12 @@ def predict(model, generator, device=None):
             batch_x, _ = data
         except:
             batch_x = data
-        batch_means, batch_vars = model.predict(batch_x.to(device))
+        batch_means, batch_vars = model(batch_x.to(device))
         means.append(batch_means.detach().numpy())
         vars.append(batch_vars.detach().numpy())
 
-    means = np.concatenate(means)
-    vars = np.concatenate(vars)
+    means = np.concatenate(means, axis=1)
+    vars = np.concatenate(vars, axis=1)
 
     return means, vars
 

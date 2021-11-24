@@ -23,7 +23,7 @@ class NoiseSampler:
 
 
 class GaussianSampler(NoiseSampler):
-    def __init__(self, seed):
+    def __init__(self, device=None, seed=2147483647):
         """
         Generates noise samples from a Standar Gaussian distribution N(0, 1).
 
@@ -34,7 +34,7 @@ class GaussianSampler(NoiseSampler):
 
         """
         super().__init__(seed)
-        self.generator = torch.Generator()  # TODO Check device
+        self.generator = torch.Generator()
         self.generator.manual_seed(seed)
 
     def __call__(self, size):
@@ -108,9 +108,9 @@ class BayesLinear(GenerativeFunction):
         input_dim,
         output_dim,
         w_mean_prior,
-        w_std_prior,
+        w_log_std_prior,
         b_mean_prior,
-        b_std_prior,
+        b_log_std_prior,
         dtype=torch.float64,
     ):
         super(BayesLinear, self).__init__(
@@ -118,40 +118,32 @@ class BayesLinear(GenerativeFunction):
         )
 
         self.w_mean_prior = w_mean_prior
-        self.w_std_prior = w_std_prior
+        self.w_log_std_prior = w_log_std_prior
         self.b_mean_prior = b_mean_prior
-        self.b_std_prior = b_std_prior
-        self.frozen = False
+        self.b_log_std_prior = b_log_std_prior
 
-        weight_mu = torch.tensor(
-            self.noise_sampler((output_dim, input_dim)) * 0.01 + w_mean_prior
-        )
-        weight_log_sigma = torch.tensor(
-            self.noise_sampler((output_dim, input_dim)) * 0.0 + w_std_prior
-        )
-        bias_mu = torch.tensor(
-            self.noise_sampler([output_dim]) * 0.1 + b_mean_prior
-        )
-        bias_log_sigma = torch.tensor(
-            self.noise_sampler([output_dim]) * 0.1 + b_std_prior
-        )
-
-        self.weight_mu = torch.nn.Parameter(weight_mu)
-        self.weight_log_sigma = torch.nn.Parameter(weight_log_sigma)
-        self.bias_mu = torch.nn.Parameter(bias_mu)
-        self.bias_log_sigma = torch.nn.Parameter(bias_log_sigma)
+        self.weight_mu = torch.nn.Parameter(w_mean_prior)
+        self.weight_log_sigma = torch.nn.Parameter(w_log_std_prior)
+        self.bias_mu = torch.nn.Parameter(b_mean_prior)
+        self.bias_log_sigma = torch.nn.Parameter(b_log_std_prior)
 
     def forward(self, inputs):
 
         assert inputs.shape[-1] == self.input_dim
 
-        w = self.weight_mu + torch.exp(
-            self.weight_log_sigma
-        ) * self.noise_sampler(self.weight_log_sigma.shape)
-        b = self.bias_mu + torch.exp(self.bias_log_sigma) * self.noise_sampler(
-            self.bias_log_sigma.shape
-        )
-        return torch.nn.functional.linear(inputs, w, b)
+        # inputs (A1, A2, ..., AM, N, D)
+        # z_w_shape (A1, ..., AM, D, D_out)
+        # z_b shape (A1, ..., AM, 1, D_out)
+        z_w_shape = (*inputs.shape[:-2], self.input_dim, self.output_dim)
+        z_b_shape = (*inputs.shape[:-2], 1, self.output_dim)
+
+        z_w = self.noise_sampler(z_w_shape)
+        z_b = self.noise_sampler(z_b_shape)
+
+        w = self.weight_mu + torch.exp(self.weight_log_sigma) * z_w
+        b = self.bias_mu + torch.exp(self.bias_log_sigma) * z_b
+        return torch.einsum("...nd, ...do -> ...no", inputs, w) + b
+
 
 class BayesianNN(GenerativeFunction):
     def __init__(
@@ -161,11 +153,6 @@ class BayesianNN(GenerativeFunction):
         activation,
         input_dim=1,
         output_dim=1,
-        w_mean_prior=0.2,
-        w_std_prior=0.0,
-        b_mean_prior=0.01,
-        b_std_prior=1.0,
-        seed=0,
     ):
         """
         Defines a Bayesian Neural Network.
@@ -193,28 +180,30 @@ class BayesianNN(GenerativeFunction):
         super().__init__(noise_sampler, input_dim, output_dim)
 
         self.structure = structure
-        self.w_mean_prior = w_mean_prior
-        self.w_std_prior = w_std_prior
-        self.b_mean_prior = b_mean_prior
-        self.b_std_prior = b_std_prior
-        self.output_dim = output_dim
-
         self.activation = activation
 
         dims = [input_dim] + self.structure + [self.output_dim]
+        layers = []
 
-        layers = [
-            BayesLinear(
-                noise_sampler,
-                _in,
-                _out,
-                w_mean_prior,
-                w_std_prior,
-                b_mean_prior,
-                b_std_prior,
+        for _in, _out in zip(dims, dims[1:]):
+            layers.append(
+                BayesLinear(
+                    noise_sampler,
+                    _in,
+                    _out,
+                    w_mean_prior=torch.normal(
+                        mean=0.0, std=0.01, size=(_in, _out)
+                    ),
+                    w_log_std_prior=4.6
+                    + torch.log(
+                        torch.normal(mean=0.01, std=0.0, size=(_in, _out))
+                    ),
+                    b_mean_prior=torch.normal(mean=0.01, std=0.1, size=[_out]),
+                    b_log_std_prior=torch.normal(
+                        mean=0.0, std=0.1, size=[_out]
+                    ),
+                )
             )
-            for _in, _out in zip(dims, dims[1:])
-        ]
         self.layers = torch.nn.ModuleList(layers)
 
     def forward(self, inputs):

@@ -7,16 +7,18 @@ class DVIP_Base(torch.nn.Module):
     def name(self):
         return "Deep VIP Base"
 
-    def __init__(self,
-                 likelihood,
-                 layers,
-                 num_data,
-                 num_samples=1,
-                 y_mean=0.0,
-                 y_std=1.0,
-                 warmup_iterations=1,
-                 device=None,
-                 dtype=torch.float64):
+    def __init__(
+        self,
+        likelihood,
+        layers,
+        num_data,
+        num_samples=1,
+        y_mean=0.0,
+        y_std=1.0,
+        warmup_iterations=1,
+        device=None,
+        dtype=torch.float64,
+    ):
         """
         Defines a Base class for Deep Variational Implicit Processes as a
         particular Keras model.
@@ -70,6 +72,7 @@ class DVIP_Base(torch.nn.Module):
         metrics : dictionary
                   Contains the resulting metrics of the training step.
         """
+
         if y.ndim == 1:
             y = y.unsqueeze(-1)
 
@@ -78,17 +81,18 @@ class DVIP_Base(torch.nn.Module):
         if self.dtype != y.dtype:
             y = y.to(self.dtype)
 
-        loss = self.nelbo(X, y)
-
         optimizer.zero_grad()
-        loss.backward()  #(retain_graph=True)
+        loss = self.nelbo(X, y)
+        loss.backward()  # (retain_graph=True)
+
         optimizer.step()
 
         with torch.no_grad():
             means, variances = self.forward(X)
 
-        self.likelihood.update_metrics(y * self.y_std + self.y_mean, means,
-                                       variances)
+        self.likelihood.update_metrics(
+            y * self.y_std + self.y_mean, means, variances
+        )
 
         return loss
 
@@ -126,7 +130,7 @@ class DVIP_Base(torch.nn.Module):
 
         return loss
 
-    def forward(self, predict_at, full_cov=False):
+    def forward(self, predict_at):
         """
         Computes the predicted labels for the given input.
 
@@ -143,16 +147,8 @@ class DVIP_Base(torch.nn.Module):
         and the predicted mean and standard deviation.
         """
 
-        mean, var = self.predict_f(predict_at,
-                                   self.num_samples,
-                                   full_cov=full_cov)
-        return self.likelihood.predict_mean_and_var(mean, var)
-
-    def predict(self, inputs):
-
-        output_means, output_vars = self(inputs)
-        return (output_means * self.y_std + self.y_mean,
-                output_vars.sqrt() * self.y_std)
+        mean, var = self.predict_y(predict_at, self.num_samples)
+        return mean * self.y_std + self.y_mean, var.sqrt() * self.y_std
 
     def propagate(self, X, num_samples=1, full_cov=False):
         """
@@ -181,27 +177,20 @@ class DVIP_Base(torch.nn.Module):
                  Contains the S prior samples for each layer at each data
                  point.
         """
-
-        sX = torch.tile(X.unsqueeze(1), [1, num_samples, 1])
-
-        # Define arrays
-        Fs, Fmeans, Fvars, Fprior = [], [], [], []
-
-        # First input corresponds to the original one
+        sX = torch.tile(X.unsqueeze(0), [num_samples, 1, 1])
+        Fs, Fmeans, Fvars, Fpriors = [], [], [], []
         F = sX
-
         for layer in self.vip_layers:
-            F, Fmean, Fvar, prior_samples = layer.sample_from_conditional(
-                F, full_cov=full_cov)
+            F, Fmean, Fvar, Fprior = layer.sample_from_conditional(
+                F, full_cov=full_cov
+            )
 
-            # Store values
             Fs.append(F)
             Fmeans.append(Fmean)
             Fvars.append(Fvar)
-            Fprior.append(prior_samples)
+            Fpriors.append(Fprior)
 
-        # Return arrays
-        return Fs, Fmeans, Fvars, Fprior
+        return Fs, Fmeans, Fvars, Fpriors
 
     def predict_f(self, predict_at, num_samples, full_cov=False):
         """
@@ -232,35 +221,23 @@ class DVIP_Base(torch.nn.Module):
         )
         return Fmeans[-1], Fvars[-1]
 
-    def predict_prior_samples(self, predict_at, full_cov=False):
-        """
-        Returns the generated prior samples at the last layer.
-
-        Parameters
-        ----------
-        predict_at : tf.tensor of shape (num_data, data_dim)
-                     Contains the input features.
-        full_cov : boolean
-                   Whether to use the full covariance matrix or just
-                   the diagonal values.
-        Returns
-        -------
-        Fprior : tf.tensor of shape (S, num_data, output_dim)
-                 Contains the generated S samples. This values must
-                 be scaled.
-        """
-
-        _, _, _, Fprior = self.propagate(
-            predict_at,
-            num_samples=1,
-            full_cov=full_cov,
+    def predict_y(self, predict_at, num_samples):
+        Fmean, Fvar = self.predict_f(
+            predict_at, num_samples=num_samples, full_cov=False
         )
-        Fprior = torch.permute(torch.stack(Fprior).mean(2), (1, 0, 2, 3))
-        return Fprior * self.y_std + self.y_mean
+        return self.likelihood.predict_mean_and_var(Fmean, Fvar)
+
+    def get_prior_samples(self, X, full_cov=False):
+        _, _, _, Fpriors = self.propagate(X, num_samples=1, full_cov=full_cov)
+
+        Fpriors = torch.stack(Fpriors).squeeze(2)
+        return Fpriors * self.y_std + self.y_mean
 
     def predict_log_density(self, data, num_samples):
-        Fmean, Fvar = self.predict_f(data[0], num_samples, full_cov=False)
-        l = self.likelihood.predict_logdensity(Fmean, Fvar, data[1])
+        Fmean, Fvar = self.predict_f(
+            data[0], num_samples=num_samples, full_cov=False
+        )
+        l = self.likelihood.predict_density(Fmean, Fvar, data[1])
         log_num_samples = torch.log(torch.Tensor(self.num_samples, self.dtype))
 
         return torch.logsumexp(l - log_num_samples, dim=0)
@@ -268,56 +245,34 @@ class DVIP_Base(torch.nn.Module):
     def expected_data_log_likelihood(self, X, Y):
         """
         Compute expectations of the data log likelihood under the variational
-        distribution
-
-        Parameters
-        ----------
-        X : tf.tensor of shape (num_samples, input_dim)
-            Contains input features
-
-        Y : tf.tensor of shape (num_samples, output_dim)
-            Contains input labels
-
-        Returns
-        -------
-        var_exp : tf.tensor of shape (1)
-                  Contains the variational expectation
-
+        distribution with MC samples
         """
-        F_mean, F_var = self.predict_f(X,
-                                       num_samples=self.num_samples,
-                                       full_cov=False)
-        # Shape (N, S, D)
-        var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
-        return torch.mean(var_exp, dim=1)  # Shape (N, D)
+        F_mean, F_var = self.predict_f(
+            X, num_samples=self.num_samples, full_cov=False
+        )
+        var_exp = self.likelihood.variational_expectations(
+            F_mean, F_var, Y
+        )  # Shape [S, N, D]
+        return torch.mean(var_exp, dim=0)  # Shape [N, D]
 
     def nelbo(self, inputs, outputs):
         """
-        Computes the evidence lower bound.
-
-        Parameters
-        ----------
-        inputs : tf.tensor of shape (num_samples, input_dim)
-                 Contains input features
-
-        outputs : tf.tensor of shape (num_samples, output_dim)
-                  Contains input labels
-
-        Returns
-        -------
-        nelbo : tf.tensor
-                Negative evidence lower bound
+        Computes the evidence lower bound according to eq. (17) in the paper.
+        :param data: Tuple of two tensors for input data X and labels Y.
+        :return: Tensor representing ELBO.
         """
         X, Y = inputs, outputs
 
         likelihood = torch.sum(self.expected_data_log_likelihood(X, Y))
 
         # scale loss term corresponding to minibatch size
-        scale = self.num_data / X.shape[0]
+        scale = self.num_data
+        scale /= X.shape[0]
+
         # Compute KL term
         KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
 
-        return -scale * likelihood + KL
+        return -(scale * likelihood - KL)
 
     @property
     def metrics(self):
@@ -331,3 +286,27 @@ class DVIP_Base(torch.nn.Module):
             metrics.append(metric)
 
         return metrics
+
+    def print_variables(self):
+        import numpy as np
+
+        print("\n---- MODEL PARAMETERS ----")
+        np.set_printoptions(threshold=3, edgeitems=2)
+        sections = []
+        for name, param in self.named_parameters():
+            name = name.split(".")
+            for i in range(len(name) - 1):
+
+                if name[i] not in sections:
+                    print("\t" * i, name[i].upper())
+                    sections = name[: i + 1]
+
+            padding = "\t" * (len(name) - 1)
+            print(
+                padding,
+                "{}: {}".format(
+                    name[-1], param.data.detach().cpu().numpy().flatten()
+                ),
+            )
+
+        print("\n---------------------------\n\n")

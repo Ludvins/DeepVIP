@@ -45,7 +45,8 @@ class Gaussian(Likelihood):
         """"""
         super().__init__(dtype, device)
         self.log_variance = torch.nn.Parameter(
-            torch.tensor(log_variance, dtype=dtype, device=self.device))
+            torch.tensor(log_variance, dtype=dtype, device=self.device)
+        )
 
         self.rmse_metric = torch.nn.MSELoss()
         self.nll_metric = torch.mean
@@ -55,17 +56,17 @@ class Gaussian(Likelihood):
         return [self.rmse_metric, self.nll_metric]
 
     def update_metrics(self, y, mean_pred, std_pred):
+
         if mean_pred.ndim == 3:
-            predictions = mean_pred.mean(1)
+            predictions = mean_pred.mean(0)
         else:
             predictions = mean_pred
         self.rmse_val = self.rmse_metric(y, predictions).sqrt()
 
-        S = mean_pred.shape[1]
+        S = mean_pred.shape[0]
         normal = torch.distributions.Normal(loc=mean_pred, scale=std_pred)
-        y = y.unsqueeze(1)
         logpdf = normal.log_prob(y)
-        nll = torch.logsumexp(logpdf, 1) - np.log(S)
+        nll = torch.logsumexp(logpdf, 0) - np.log(S)
         nll = -nll.mean()
 
         self.nll_val = nll
@@ -76,12 +77,6 @@ class Gaussian(Likelihood):
     def logp(self, F, Y):
         return self.logdensity(Y, F, self.log_variance.exp())
 
-    def conditional_mean(self, F):
-        return torch.identity(F)
-
-    def conditional_variance(self, F):
-        return torch.full(F.shape, torch.squeeze(self.log_variance.exp()))
-
     def predict_mean_and_var(self, Fmu, Fvar):
         return Fmu, Fvar + self.log_variance.exp()
 
@@ -89,7 +84,8 @@ class Gaussian(Likelihood):
         return self.logdensity(Y, Fmu, Fvar + self.log_variance.exp())
 
     def variational_expectations(self, Fmu, Fvar, Y):
-
-        Y = Y.unsqueeze(1)
-        return -0.5 * np.log(2 * np.pi) - 0.5 * self.log_variance \
-               - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
+        return (
+            -0.5 * np.log(2 * np.pi)
+            - 0.5 * self.log_variance
+            - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
+        )

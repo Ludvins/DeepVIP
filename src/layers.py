@@ -30,7 +30,7 @@ class Layer(torch.nn.Module):
 
     def conditional_ND(self):
         """
-        Computes the conditional probability \(Q^{\star}(y \mid x, \theta)\).
+        Computes the conditional probability Q*(y | x, theta).
         """
         raise NotImplementedError
 
@@ -40,26 +40,26 @@ class Layer(torch.nn.Module):
         """
         raise NotImplementedError
 
-    def conditional_NSD(self, X, full_cov=False):
+    def conditional_SND(self, X, full_cov=False):
         """"""
-        N, S, D = X.shape
-
         if full_cov:
             raise NotImplementedError
-        else:
 
-            X_flat = X.reshape([N * S, D])
-            mean, var, f = self.conditional_ND(X_flat)
+        S, N, D = X.shape
+        means = []
+        vars = []
+        for s in range(S):
+            mean, var = self.conditional_ND(X[s])
+            means.append(mean)
+            vars.append(var)
 
-        num_outputs = self.num_outputs
+        means = torch.stack(means)
+        vars = torch.stack(vars)
+        return means, vars
 
-        mean = mean.reshape((N, S, num_outputs))
-        f = f.reshape((N, S, -1, num_outputs))
-        var = var.reshape((N, S, num_outputs))
-
-        return mean, var, f
-
-    def sample_from_conditional(self, X, z=None, full_cov=False):
+    def sample_from_conditional(
+        self, X, z=None, full_cov=False, return_prior_samples=False
+    ):
         """
         Calculates self.conditional and also draws a sample.
         Adds input propagation if necessary.
@@ -89,13 +89,13 @@ class Layer(torch.nn.Module):
               X.
         """
 
-        mean, var, f = self.conditional_NSD(X, full_cov=full_cov)
-
         if z is None:
-            z = torch.randn(mean.shape).to(self.dtype).to(self.device)
+            z = torch.randn(X.shape).to(self.dtype).to(self.device)
+
+        mean, var, prior_samples = self.conditional_ND(X, full_cov=full_cov)
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
-        return samples, mean, var, f
+        return samples, mean, var, prior_samples
 
 
 class VIPLayer(Layer):
@@ -182,15 +182,15 @@ class VIPLayer(Layer):
         self.num_coeffs = num_regression_coeffs
 
         # Regression Coefficients prior mean
-        # self.q_mu = torch.nn.Parameter(
-        #     torch.tensor(
-        #         np.zeros((self.num_coeffs, num_outputs)),
-        #         dtype=self.dtype,
-        #         device=self.device,
-        #         requires_grad=False,
-        #     )
-        # )
-        self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
+        self.q_mu = torch.nn.Parameter(
+            torch.tensor(
+                np.zeros((self.num_coeffs, num_outputs)),
+                dtype=self.dtype,
+                device=self.device,
+                requires_grad=False,
+            )
+        )
+        # self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
 
         # If no mean function is given, constant 0 is used
         self.mean_function = mean_function
@@ -207,7 +207,6 @@ class VIPLayer(Layer):
                 np.ones(num_outputs) * log_layer_noise,
                 dtype=self.dtype,
                 device=self.device,
-                requires_grad=False,
             )
         )
 
@@ -216,23 +215,22 @@ class VIPLayer(Layer):
         # Shape (num_coeffs, num_coeffs)
         q_sqrt = np.eye(self.num_coeffs)
         # Replicate it num_outputs times
-        # Shape (num_outputs, num_coeffs, num_coeffs)
-        q_sqrt = np.tile(q_sqrt[None, :, :], [num_outputs, 1, 1])
+        # Shape (num_coeffs, num_coeffs, num_outputs)
+        q_sqrt = np.tile(q_sqrt[:, :, None], [1, 1, num_outputs])
         # Create tensor with triangular representation.
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
-        triangular_q_sqrt = q_sqrt[:, li, lj]
-        # self.q_sqrt_tri = torch.nn.Parameter(
-        #     torch.tensor(
-        #         triangular_q_sqrt,
-        #         dtype=self.dtype,
-        #         device=self.device,
-        #         requires_grad=False,
-        #     )
-        # )
-        self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
+        triangular_q_sqrt = q_sqrt[li, lj]
+        self.q_sqrt_tri = torch.nn.Parameter(
+            torch.tensor(
+                triangular_q_sqrt,
+                dtype=self.dtype,
+                device=self.device,
+            )
+        )
+        # self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
 
-    def conditional_ND(self, X, full_cov=False):
+    def conditional_ND(self, X, full_cov=False, return_prior_samples=False):
         """
         Computes Q*(y|x, a) using the linear regression approximation.
         Given that this distribution is Gaussian and Q(a) is also Gaussian
@@ -278,17 +276,13 @@ class VIPLayer(Layer):
 
         # Let S = num_coeffs, D = num_outputs and N = num_samples
 
-        # Shape (N, S, D)
-
-
-        N, D = X.shape
-        f = torch.stack(
-            [self.generative_function(X) for _ in range(self.num_coeffs)]
+        # Shape (S, ..., N, D)
+        X = torch.tile(
+            X.unsqueeze(0), (self.num_coeffs, *np.ones(X.ndim, dtype=int))
         )
-        f = torch.permute(f, (1, 0, 2))
-
-        # Compute mean value, shape (N, 1, D)
-        m = torch.mean(f, dim=1, keepdims=True)
+        f = self.generative_function(X)
+        # Compute mean value, shape (1, N, D)
+        m = torch.mean(f, dim=0, keepdims=True)
 
         inv_sqrt = 1 / torch.sqrt(
             torch.tensor(self.num_coeffs).type(self.dtype)
@@ -299,34 +293,33 @@ class VIPLayer(Layer):
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (N, S, D)
-        mean = m.squeeze(axis=1) + torch.einsum("nsd,sd->nd", phi, self.q_mu)
+        mean = m.squeeze(axis=0) + torch.einsum(
+            "s...nd,sd->...nd", phi, self.q_mu
+        )
 
-        # Shape (D, S, S)
+        # Shape (S, S, D)
         q_sqrt = (
-            torch.zeros((self.num_outputs, self.num_coeffs, self.num_coeffs))
+            torch.zeros((self.num_coeffs, self.num_coeffs, self.num_outputs))
             .to(self.dtype)
             .to(self.device)
         )
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
-        q_sqrt[:, li, lj] = self.q_sqrt_tri
-
-        # Shape (D, S, S)
-        Delta = torch.matmul(q_sqrt, torch.transpose(q_sqrt, 1, 2))
+        q_sqrt[li, lj] = self.q_sqrt_tri
         # Shape (S, S, D)
-        Delta = torch.permute(Delta, (1, 2, 0))
+        Delta = torch.einsum("ijd, kjd -> ikd", q_sqrt, q_sqrt)
 
         # Compute variance matrix in two steps
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
-        K = torch.einsum("nsd,skd->nkd", phi, Delta)
+        K = torch.einsum("s...nd,skd->k...nd", phi, Delta)
 
         if full_cov:
             # var shape (num_points, num_points, num_outputs)
             # Multiply by phi again distinguishing data_points
-            K = torch.einsum("nsd,msd->nmd", K, phi)
+            K = torch.einsum("s...nd,s...md->...nmd", K, phi)
         else:
             # var shape (num_points, num_outputs)
             # Multiply by phi again, using the same points twice
-            K = torch.einsum("nsd,nsd->nd", K, phi)
+            K = torch.einsum("s...nd,s...nd->...nd", K, phi)
 
         # Add layer noise to variance
         var = K + torch.exp(self.log_layer_noise)
@@ -352,17 +345,17 @@ class VIPLayer(Layer):
 
         # Recover triangular matrix from array
         q_sqrt = (
-            torch.zeros((self.num_outputs, self.num_coeffs, self.num_coeffs))
+            torch.zeros((self.num_coeffs, self.num_coeffs, self.num_outputs))
             .to(self.dtype)
             .to(self.device)
         )
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
-        q_sqrt[:, li, lj] = self.q_sqrt_tri
+        q_sqrt[li, lj] = self.q_sqrt_tri
 
-        diag = torch.diagonal(q_sqrt, dim1=1, dim2=2)
+        diag = torch.diagonal(q_sqrt, dim1=0, dim2=1)
 
         # Constant dimensionality term
-        KL = -0.5 * self.num_outputs * self.num_coeffs
+        KL = -0.5 * self.num_outputs * self.num_coeffs * self.num_coeffs
 
         # Log of determinant of covariance matrix.
         # Uses that sqrt(det(X)) = det(X^(1/2)) and

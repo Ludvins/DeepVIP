@@ -97,7 +97,8 @@ def init_layers(
     # Create VIP layers. If integer, replicate output dimension
     if isinstance(inner_dims, (int, np.integer)):
         dims = np.concatenate(
-            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1]))
+            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1])
+        )
     # Otherwise, append thedata dimensions to the array.
     else:
         dims = [X.shape[1]] + inner_dims + [Y.shape[1]]
@@ -126,15 +127,18 @@ def init_layers(
             X_running = X_running @ V[:dim_out].T
 
         else:
-            raise NotImplementedError("Dimensionality augmentation is not"
-                                      " handled currently.")
+            raise NotImplementedError(
+                "Dimensionality augmentation is not" " handled currently."
+            )
 
         # Create the Generation function, i.e, the Bayesian Neural Network
-        bayesian_network = BayesianNN(noise_sampler=noise_sampler,
-                                      input_dim=dim_in,
-                                      structure=structure,
-                                      activation=activation,
-                                      output_dim=dim_out)
+        bayesian_network = BayesianNN(
+            noise_sampler=noise_sampler,
+            input_dim=dim_in,
+            structure=structure,
+            activation=activation,
+            output_dim=dim_out,
+        )
 
         # Create layer
         layers.append(
@@ -145,6 +149,7 @@ def init_layers(
                 input_dim=dim_in,
                 mean_function=mf,
                 trainable=trainable_parameters,
-            ))
+            )
+        )
 
     return layers
