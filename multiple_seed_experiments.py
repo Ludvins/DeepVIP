@@ -26,9 +26,9 @@ elif args.dataset == "boston":
 elif args.dataset == "synthethic":
     X_train, y_train, X_test, y_test = synthetic()
 
-df = pd.DataFrame(
-    columns=["VIP Layers", "BNN Layers", "Epochs", "nelbo", "rmse", "nll", "seed"]
-)
+df = pd.DataFrame(columns=[
+    "VIP Layers", "BNN Layers", "Epochs", "nelbo", "rmse", "nll", "seed"
+])
 
 epochs = 20000
 vip_layers = np.arange(1, 5)
@@ -42,16 +42,16 @@ if args.activation == "tanh":
 elif args.activation == "relu":
     activation = tf.keras.activations.relu
 
-
-n_samples, input_dim, output_dim, y_mean, y_std = check_data(X_train, y_train, verbose = args.verbose)
+n_samples, input_dim, output_dim, y_mean, y_std = check_data(
+    X_train, y_train, verbose=args.verbose)
 
 # Gaussian Likelihood
 ll = Gaussian()
 
-
 for i, (vip_layers, bnn_structure, seed) in enumerate(combs):
     print("Experiment {} out of {}.".format(i, len(combs)))
-    print("VIP Layers: {}, BNN: {}, seed: {}".format(vip_layers, bnn_structure, seed))
+    print("VIP Layers: {}, BNN: {}, seed: {}".format(vip_layers, bnn_structure,
+                                                     seed))
     # Define the noise sampler
     noise_sampler = GaussianSampler(seed)
 
@@ -83,7 +83,7 @@ for i, (vip_layers, bnn_structure, seed) in enumerate(combs):
         epochs=epochs,
         batch_size=batch_size,
         verbose=0,
-        validation_data = (X_test, y_test),
+        validation_data=(X_test, y_test),
         callbacks=[TqdmCallback(verbose=0)],
     )
 

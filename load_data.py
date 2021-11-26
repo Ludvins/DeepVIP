@@ -3,6 +3,13 @@ from numpy.random import default_rng
 import tensorflow as tf
 
 
+def test():
+    X_train = np.array([-1.0, 0.0, 2.0])
+    y_train = np.array([1.0, 4.0, 2.0])
+
+    return X_train, y_train, None, None
+
+
 def SPGP():
     X_train = np.loadtxt("data/SPGP_dist/train_inputs")
     y_train = np.loadtxt("data/SPGP_dist/train_outputs")
@@ -19,11 +26,12 @@ def synthetic():
     rng = default_rng(seed=0)
 
     def f(x, noise=True):
-        return np.cos(5 * x) / (np.abs(x) + 1) + rng.standard_normal(x.shape) * 0.1
+        return np.cos(5 * x) / (np.abs(x) + 1) + rng.standard_normal(
+            x.shape) * 0.1
 
     X_train = rng.standard_normal(300)
     y_train = f(X_train)
-    X_test = rng.standard_normal(400)*2
+    X_test = rng.standard_normal(400) * 2
     y_test = f(X_test)
 
     X_train = X_train[..., np.newaxis]

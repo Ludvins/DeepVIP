@@ -33,19 +33,19 @@ def train(model, train_dataset, optimizer, epochs=20000, batch_size=32):
 
                     # Update weights
                     optimizer.apply_gradients(
-                        zip(gradients, model.trainable_variables)
-                    )
+                        zip(gradients, model.trainable_variables))
 
                     model.update_metrics(y_batch, mean_pred, std_pred, loss)
 
             if epoch % tepoch.miniters == 0:
-                tepoch.set_postfix(
-                    {
-                        "nelbo_train": "{:2f}".format(model.metrics["nelbo"]),
-                        "rmse_train": "{:2f}".format(model.metrics["rmse"]),
-                        "nll_train": "{:2f}".format(model.metrics["nll"]),
-                    }
-                )
+                tepoch.set_postfix({
+                    "nelbo_train":
+                    "{:2f}".format(model.metrics["nelbo"]),
+                    "rmse_train":
+                    "{:2f}".format(model.metrics["rmse"]),
+                    "nll_train":
+                    "{:2f}".format(model.metrics["nll"]),
+                })
             model.reset_metrics()
 
 

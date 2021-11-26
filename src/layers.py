@@ -105,9 +105,9 @@ class Layer(tf.keras.layers.Layer):
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
-            z = tf.random.normal(
-                shape=tf.shape(mean), seed=self.seed, dtype=self.dtype
-            )
+            z = tf.random.normal(shape=tf.shape(mean),
+                                 seed=self.seed,
+                                 dtype=self.dtype)
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
@@ -115,18 +115,16 @@ class Layer(tf.keras.layers.Layer):
 
 
 class VIPLayer(Layer):
-    def __init__(
-        self,
-        generative_function,
-        num_regression_coeffs,
-        num_outputs,
-        input_dim,
-        log_layer_noise=-5,
-        mean_function=None,
-        trainable=True,
-        dtype=tf.float64,
-        **kwargs
-    ):
+    def __init__(self,
+                 generative_function,
+                 num_regression_coeffs,
+                 num_outputs,
+                 input_dim,
+                 log_layer_noise=-5,
+                 mean_function=None,
+                 trainable=True,
+                 dtype=tf.float64,
+                 **kwargs):
         """
         A variational implicit process layer.
 
@@ -231,9 +229,9 @@ class VIPLayer(Layer):
         # Create tensor with triangular representation.
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         q_sqrt_tri_prior = tfp.math.fill_triangular_inverse(q_var)
-        self.q_sqrt_tri = tf.Variable(
-            q_sqrt_tri_prior, trainable=trainable, name="q_sqrt_tri"
-        )
+        self.q_sqrt_tri = tf.Variable(q_sqrt_tri_prior,
+                                      trainable=trainable,
+                                      name="q_sqrt_tri")
 
     @tf.function
     def conditional_ND(self, X, full_cov=False):
@@ -245,7 +243,7 @@ class VIPLayer(Layer):
 
         Let
 
-        phi(x) =   1/sqrt{S}(f_1(x) - m^*(x),...,f_S(\bm x) - m^*(x)),
+        phi(x) = 1/sqrt{S}(f_1(x) - m^*(x),...,f_S(\bm x) - m^*(x)),
 
         with f_1,..., f_S the sampled functions. Then if
 
@@ -281,15 +279,18 @@ class VIPLayer(Layer):
         """
 
         # Let S = num_coeffs, D = num_outputs and N = num_samples
-        # X shape is (..., N, D)
 
-        X = tf.expand_dims(X, 0)
-        X = tf.tile(
-            X,
+        # X shape is (M, N, D)
+        sX = tf.expand_dims(X, 0)
+        sX = tf.tile(
+            sX,
             (self.num_coeffs, 1, 1, 1),
         )
-        # Shape (S, ... N, D)
-        f = self.generative_function(X)
+        # Shape (S, M, N, D)
+        f = self.generative_function(sX)
+
+        # f = w x + b  con  w (D_out, D_in)  b (D_out)
+        #
 
         # Compute mean value, shape (1, ..., N, D)
         m = tf.reduce_mean(f, axis=0, keepdims=True)
@@ -300,10 +301,8 @@ class VIPLayer(Layer):
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, ..., N, D)
-        mean = tf.squeeze(m, axis=0) + tf.einsum(
-            "s...nd,sd->...nd", phi, self.q_mu
-        )
-
+        mean = tf.squeeze(m, axis=0) + tf.einsum("s...nd,sd->...nd", phi,
+                                                 self.q_mu)
         # Shape (D, S, S)
         q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
         # Shape (D, S, S)
@@ -351,8 +350,7 @@ class VIPLayer(Layer):
 
         # Recover triangular matrix from array
         q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
-        diag = tf.linalg.diag_part(q_sqrt)
-
+        Delta = tf.matmul(q_sqrt, q_sqrt, transpose_b=True)
         # Constant dimensionality term
         KL = -0.5 * D * self.num_coeffs
 
@@ -360,7 +358,7 @@ class VIPLayer(Layer):
         # Uses that sqrt(det(X)) = det(X^(1/2)) and
         # that the determinant of a upper triangular matrix (which q_sqrt is),
         # is the product of the diagonal entries (i.e. sum of their logarithm).
-        KL -= 0.5 * tf.reduce_sum(2 * tf.math.log(diag))
+        KL -= 0.5 * tf.linalg.trace(Delta)
 
         # Trace term.
         KL += 0.5 * tf.reduce_sum(tf.square(self.q_sqrt_tri))

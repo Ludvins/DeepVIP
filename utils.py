@@ -37,14 +37,12 @@ def build_plot_name(
 ):
     # Create title name
     dims = np.concatenate(
-        ([input_dim], np.ones(vip_layers, dtype=int) * [output_dim])
-    )
+        ([input_dim], np.ones(vip_layers, dtype=int) * [output_dim]))
 
     dims_name = "-".join(map(str, dims))
     bnn_name = "-".join(map(str, bnn_structure))
     path = "plots/{}_{}_layers={}_bnn={}_epochs={}_batchsize={}.svg".format(
-        dataset, name_flag, dims_name, bnn_name, epochs, n_samples
-    )
+        dataset, name_flag, dims_name, bnn_name, epochs, n_samples)
     title = "Layers: {}({})  BNN: {}".format(vip_layers, dims_name, bnn_name)
     return title, path
 
@@ -62,9 +60,10 @@ def plot_train_test(
     mean_train, std_train = train_pred
     mean_test, std_test = test_pred
 
-    fig, ax = plt.subplots(
-        2, 2, gridspec_kw={"height_ratios": [3, 1]}, figsize=(20, 10)
-    )
+    fig, ax = plt.subplots(2,
+                           2,
+                           gridspec_kw={"height_ratios": [3, 1]},
+                           figsize=(20, 10))
 
     plt.suptitle(title)
 
@@ -97,9 +96,11 @@ def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
         _, ax = plt.subplots(2, 1, gridspec_kw={"height_ratios": [3, 1]})
 
     if y is not None:
-        scatter_data(
-            X.flatten(), y.flatten(), label="Points", color="blue", ax=ax[0]
-        )
+        scatter_data(X.flatten(),
+                     y.flatten(),
+                     label="Points",
+                     color="blue",
+                     ax=ax[0])
 
     plot_predictions(
         X,
@@ -154,7 +155,10 @@ def plot_predictions(
     mean = np.mean(means, axis=0).flatten()
 
     for i in range(means.shape[0]):
-        ax.plot(X, means[i].flatten()[sort], color=mean_color, alpha=alpha)
+        ax.plot(X,
+                means[i].flatten()[sort],
+                color=mean_color,
+                alpha=alpha / 10.0)
     ax.plot(X, mean[sort], color="black", label=label)
 
     if std is not None:
@@ -170,9 +174,12 @@ def plot_predictions(
     return ax
 
 
-def plot_standard_deviation(
-    X, std, color=None, alpha=1.0, label=None, ax=None
-):
+def plot_standard_deviation(X,
+                            std,
+                            color=None,
+                            alpha=1.0,
+                            label=None,
+                            ax=None):
     if ax is None:
         fig, ax = plt.subplots()
 
@@ -180,9 +187,12 @@ def plot_standard_deviation(
     X = X[sort]
 
     std = np.mean(std, axis=0)[sort].flatten()
-    ax.fill_between(
-        X, np.zeros_like(std), std, color=color, label=label, alpha=alpha
-    )
+    ax.fill_between(X,
+                    np.zeros_like(std),
+                    std,
+                    color=color,
+                    label=label,
+                    alpha=alpha)
 
     return ax
 
@@ -206,9 +216,8 @@ def plot_prior_over_layers(X, prior_samples, n=2):
     _, ax = plt.subplots(n, n_layers // 2, figsize=(5, 15))
 
     for i in range(n_layers):
-        plot_prior_samples(
-            X.flatten(), prior_samples[:, i, :, :], ax[i // n][i % n]
-        )
+        plot_prior_samples(X.flatten(), prior_samples[:, i, :, :],
+                           ax[i // n][i % n])
 
         ax[i // n][i % n].set_title("Layer {}".format(i + 1))
     plt.suptitle("Prior Samples")

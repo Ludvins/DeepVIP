@@ -1,7 +1,7 @@
 import argparse
 
 
-def get_parser():
+def parser():
     """
     Defines and returns a parser for DeepVIP experiments.
     """

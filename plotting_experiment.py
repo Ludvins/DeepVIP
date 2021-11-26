@@ -9,18 +9,16 @@ from utils import (
 from load_data import SPGP, synthetic
 import tensorflow as tf
 
-from parser import get_parser
+from input_parser import parser
 
 from src.likelihood import Gaussian
 from src.dvip import DVIP_Base
 from src.layers_init import init_layers
 from src.generative_models import GaussianSampler
-
-from tqdm.keras import TqdmCallback
 from src.train import train, predict
 
 # Parse dataset
-parser = get_parser()
+parser = parser()
 args = parser.parse_args()
 
 # Load data
@@ -50,8 +48,7 @@ elif args.activation == "relu":
 tf.config.run_functions_eagerly(args.eager)
 
 n_samples, input_dim, output_dim, y_mean, y_std = check_data(
-    X_train, y_train, verbose
-)
+    X_train, y_train, verbose)
 batch_size = args.batch_size or n_samples
 
 # Gaussian Likelihood
@@ -79,19 +76,25 @@ dvip = DVIP_Base(
     ll,
     layers,
     num_data=n_samples,
-    num_samples=5,
+    num_samples=1,
     y_mean=y_mean,
     y_std=y_std,
     warmup_iterations=warmup,
 )
 
-# Define optimizer and compile model
-opt = tf.keras.optimizers.Adam(learning_rate=lr)
+# Define optimizer
+lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(0.1,
+                                                             decay_steps=100,
+                                                             decay_rate=0.96,
+                                                             staircase=True)
+
+opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
 train_dataset = tf.data.Dataset.from_tensor_slices(
-    (X_train, (y_train - y_mean) / y_std)
-)
+    (X_train, (y_train - y_mean) / y_std))
 test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+
+tf.config.run_functions_eagerly(False)
 
 train(
     dvip,
@@ -101,12 +104,13 @@ train(
     batch_size=args.batch_size,
 )
 
+#dvip.num_samples = 100
+
 # Predict Train and Test
 mean_pred, var_pred = predict(dvip, train_dataset, batch_size=args.batch_size)
-test_mean_pred, test_var_pred = predict(
-    dvip, test_dataset, batch_size=args.batch_size
-)
-
+test_mean_pred, test_var_pred = predict(dvip,
+                                        test_dataset,
+                                        batch_size=args.batch_size)
 
 # Create plot title and path
 fig_title, path = build_plot_name(
