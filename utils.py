@@ -68,6 +68,8 @@ def plot_train_test(
 
     plt.suptitle(title)
 
+    X_train = X_train.flatten()
+    X_test = X_test.flatten()
     plot_results(
         X=X_train,
         mean=mean_train,
@@ -88,6 +90,41 @@ def plot_train_test(
     ax[0][1].set_title("Test results")
     plt.savefig(path, format="svg")
     plt.show()
+
+
+def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
+    if ax is None:
+        _, ax = plt.subplots(2, 1, gridspec_kw={"height_ratios": [3, 1]})
+
+    if y is not None:
+        scatter_data(
+            X.flatten(), y.flatten(), label="Points", color="blue", ax=ax[0]
+        )
+
+    plot_predictions(
+        X,
+        mean,
+        std,
+        label="VIP Predictive Mean",
+        mean_color="#029386",
+        std_color="#cfe6fc",
+        ax=ax[0],
+    )
+
+    plot_standard_deviation(
+        X,
+        std,
+        color="#cfe6fc",
+        alpha=0.8,
+        label="VIP Prediction Standard Deviation",
+        ax=ax[1],
+    )
+
+    if prior_samples is not None:
+        plot_prior_samples(X, prior_samples, ax[0])
+
+    ax[0].legend()
+    ax[1].legend()
 
 
 def scatter_data(X, y, label=None, color=None, s=1.0, alpha=1.0, ax=None):
@@ -113,17 +150,21 @@ def plot_predictions(
         fig, ax = plt.subplots()
 
     sort = np.argsort(X)
-    X = X[sort].flatten()
-    mean = np.mean(means, axis = 1).flatten()
+    X = X[sort]
+    mean = np.mean(means, axis=0).flatten()
 
-    for i in range(means.shape[1]):
-        ax.plot(X, means[sort,i].flatten(), color=mean_color, alpha=alpha)
-    ax.plot(X, mean[sort], color = "black", label = label)
+    for i in range(means.shape[0]):
+        ax.plot(X, means[i].flatten()[sort], color=mean_color, alpha=alpha)
+    ax.plot(X, mean[sort], color="black", label=label)
 
     if std is not None:
-        std = np.mean(std, axis = 1)[sort].flatten()
+        std = np.mean(std, axis=0)[sort].flatten()
         ax.fill_between(
-            X, mean - 2 * std, mean + 2 * std, color=std_color, alpha=alpha / 2
+            X,
+            mean[sort] - 2 * std,
+            mean[sort] + 2 * std,
+            color=std_color,
+            alpha=alpha / 2,
         )
 
     return ax
@@ -136,21 +177,22 @@ def plot_standard_deviation(
         fig, ax = plt.subplots()
 
     sort = np.argsort(X)
-    X = X[sort].flatten()
+    X = X[sort]
 
-    std = np.mean(std, axis = 1)[sort].flatten()
+    std = np.mean(std, axis=0)[sort].flatten()
     ax.fill_between(
         X, np.zeros_like(std), std, color=color, label=label, alpha=alpha
     )
 
     return ax
 
+
 def plot_prior_samples(X, prior_samples, ax):
 
     for i in range(prior_samples.shape[1]):
         plot_predictions(
             X,
-            prior_samples[:,i].flatten(),
+            prior_samples[:, i].flatten(),
             label="Prior samples" if i == 0 else "",
             mean_color="red",
             alpha=0.1,
@@ -158,46 +200,16 @@ def plot_prior_samples(X, prior_samples, ax):
         )
     ax.legend()
 
-def plot_prior_over_layers(X, prior_samples, n = 2):
+
+def plot_prior_over_layers(X, prior_samples, n=2):
     n_layers = prior_samples.shape[1]
-    _, ax = plt.subplots(n, n_layers//2, figsize = (5, 15))
+    _, ax = plt.subplots(n, n_layers // 2, figsize=(5, 15))
 
     for i in range(n_layers):
-        plot_prior_samples(X.flatten(), prior_samples[:,i,:,:], ax[i//n][i%n])
+        plot_prior_samples(
+            X.flatten(), prior_samples[:, i, :, :], ax[i // n][i % n]
+        )
 
-        ax[i//n][i%n].set_title("Layer {}".format(i+1))
+        ax[i // n][i % n].set_title("Layer {}".format(i + 1))
     plt.suptitle("Prior Samples")
     plt.show()
-
-def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
-    if ax is None:
-        _, ax = plt.subplots(2, 1, gridspec_kw={"height_ratios": [3, 1]})
-
-    if y is not None:
-        scatter_data(X.flatten(), y.flatten(), label="Points", color="blue", ax=ax[0])
-
-    plot_predictions(
-        X,
-        mean,
-        std,
-        label="VIP Predictive Mean",
-        mean_color="#029386",
-        std_color="#cfe6fc",
-        ax=ax[0],
-    )
-
-    plot_standard_deviation(
-        X,
-        std,
-        color="#cfe6fc",
-        alpha=0.8,
-        label="VIP Prediction Standard Deviation",
-        ax=ax[1],
-    )
-
-
-    if prior_samples is not None:
-        plot_prior_samples(X, prior_samples, ax[0])
-
-    ax[0].legend()
-    ax[1].legend()

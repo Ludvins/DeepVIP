@@ -57,7 +57,9 @@ class Layer(tf.keras.layers.Layer):
         """"""
         f = lambda a: self.conditional_ND(a, full_cov=full_cov)
         mean, var = tf.map_fn(
-            f, tf.transpose(X, (1, 0, 2)), fn_output_signature=(self.dtype, self.dtype)
+            f,
+            tf.transpose(X, (1, 0, 2)),
+            fn_output_signature=(self.dtype, self.dtype),
         )
         mean = tf.transpose(tf.stack(mean), (1, 0, 2))
         var = tf.transpose(tf.stack(var), (1, 0, 2))
@@ -99,11 +101,13 @@ class Layer(tf.keras.layers.Layer):
               X.
         """
 
-        mean, var = self.conditional_NSD(X, full_cov=full_cov)
+        mean, var = self.conditional_ND(X, full_cov=full_cov)
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
-            z = tf.random.normal(shape=tf.shape(mean), seed=self.seed, dtype=self.dtype)
+            z = tf.random.normal(
+                shape=tf.shape(mean), seed=self.seed, dtype=self.dtype
+            )
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
@@ -277,20 +281,28 @@ class VIPLayer(Layer):
         """
 
         # Let S = num_coeffs, D = num_outputs and N = num_samples
+        # X shape is (..., N, D)
 
-        # Shape (N, S, D)
+        X = tf.expand_dims(X, 0)
+        X = tf.tile(
+            X,
+            (self.num_coeffs, 1, 1, 1),
+        )
+        # Shape (S, ... N, D)
         f = self.generative_function(X)
 
-        # Compute mean value, shape (N, 1, D)
-        m = tf.reduce_mean(f, axis=1, keepdims=True)
+        # Compute mean value, shape (1, ..., N, D)
+        m = tf.reduce_mean(f, axis=0, keepdims=True)
         inv_sqrt = 1 / tf.math.sqrt(tf.cast(self.num_coeffs, dtype=self.dtype))
-        # Compute regresion function, shape (N, S, D)
+        # Compute regresion function, shape (S, ..., N, D)
         phi = inv_sqrt * (f - m)
 
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
-        # phi has shape (N, S, D)
-        mean = tf.squeeze(m, axis=1) + tf.einsum("nsd,sd->nd", phi, self.q_mu)
+        # phi has shape (S, ..., N, D)
+        mean = tf.squeeze(m, axis=0) + tf.einsum(
+            "s...nd,sd->...nd", phi, self.q_mu
+        )
 
         # Shape (D, S, S)
         q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
@@ -301,16 +313,16 @@ class VIPLayer(Layer):
 
         # Compute variance matrix in two steps
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
-        K = tf.einsum("nsd,skd->nkd", phi, Delta)
+        K = tf.einsum("s...nd,sk...d->k...nd", phi, Delta)
 
         if full_cov:
             # var shape (num_points, num_points, num_outputs)
             # Multiply by phi again distinguishing data_points
-            K = tf.einsum("nsd,msd->nmd", K, phi)
+            K = tf.einsum("s...nd,s...md->...nmd", K, phi)
         else:
             # var shape (num_points, num_outputs)
             # Multiply by phi again, using the same points twice
-            K = tf.einsum("nsd,nsd->nd", K, phi)
+            K = tf.einsum("s...nd,s...nd->...nd", K, phi)
 
         # Add layer noise to variance
         var = K + tf.math.exp(self.log_layer_noise)

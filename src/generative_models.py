@@ -248,13 +248,10 @@ class BayesianLinearNN(GenerativeFunction):
         x = tf.expand_dims(inputs, 1)
         x = tf.tile(x, (1, self.num_samples, 1))
 
-
         z_w = self.noise_sampler(
             (self.num_samples, self.input_dim, self.num_outputs)
         )
-        z_b = self.noise_sampler(
-            (self.num_samples, self.num_outputs)
-        )
+        z_b = self.noise_sampler((self.num_samples, self.num_outputs))
 
         w = z_w * tf.math.exp(self.w_log_std) + self.w_mean
         b = z_b * tf.math.exp(self.b_log_std) + self.b_mean
@@ -334,7 +331,8 @@ class BayesianNN(GenerativeFunction):
                 name="w_mean_" + str(_in) + "-" + str(_out),
             )
             w_log_std = tf.Variable(
-                initial_value=self.w_std_prior + 4.6
+                initial_value=self.w_std_prior
+                + 4.6
                 + 0.0 * self.initializer(shape=(_in, _out), dtype="float64"),
                 trainable=self.trainable,
                 name="w_log_std_" + str(_in) + "-" + str(_out),
@@ -364,25 +362,24 @@ class BayesianNN(GenerativeFunction):
         values.
         """
 
-        # Input has shape (N, D), we are replicating it self.num_samples
-        # times in the first dimension (N, S, D)
-        x = tf.expand_dims(inputs, 1)
-        x = tf.tile(x, (1, self.num_samples, 1))
-
+        x = inputs
         for (w_m, w_log_std, b_m, b_log_std) in self.vars[:-1]:
             # Get noise
-            z_w = self.noise_sampler((self.num_samples, *w_log_std.shape))
-            z_b = self.noise_sampler((self.num_samples, *b_log_std.shape))
+            z_w = self.noise_sampler((*x.shape[:-2], *w_log_std.shape))
+            z_b = self.noise_sampler((*x.shape[:-2], 1, *b_log_std.shape))
 
             # Compute Gaussian samples
             w = z_w * tf.math.exp(w_log_std) + w_m
             b = z_b * tf.math.exp(b_log_std) + b_m
-            x = self.activation(tf.einsum("nsi,sio->nso", x, w) + b)
+            x = self.activation(tf.einsum("...ni,...io->...no", x, w) + b)
 
         # Last layer has no activation function
         w_m, w_log_std, b_m, b_log_std = self.vars[-1]
-        z_w = self.noise_sampler((self.num_samples, *w_log_std.shape))
-        z_b = self.noise_sampler((self.num_samples, *b_log_std.shape))
+
+        # Get noise
+        z_w = self.noise_sampler((*x.shape[:-2], *w_log_std.shape))
+        z_b = self.noise_sampler((*x.shape[:-2], 1, *b_log_std.shape))
+
         w = z_w * tf.math.exp(w_log_std) + w_m
         b = z_b * tf.math.exp(b_log_std) + b_m
-        return tf.einsum("nsi,sio->nso", x, w) + b
+        return tf.einsum("...ni,...io->...no", x, w) + b

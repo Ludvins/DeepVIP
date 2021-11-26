@@ -1,13 +1,13 @@
 import tensorflow as tf
 
 
-class DVIP_Base(tf.keras.Model):
+class DVIP_Base(tf.Module):
     def __init__(
         self,
         likelihood,
         layers,
         num_data,
-        num_samples = 1,
+        num_samples=1,
         y_mean=0.0,
         y_std=1.0,
         warmup_iterations=1,
@@ -38,7 +38,7 @@ class DVIP_Base(tf.keras.Model):
                    Extra arguments to `Model`.
                    Refer to tf.keras.Model for more information.
         """
-        super().__init__(name="DVIP_Base", dtype=dtype, **kwargs)
+        super().__init__(name="DVIP_Base", **kwargs)
         self.num_data = num_data
         self.num_samples = num_samples
         self.y_mean = y_mean
@@ -49,98 +49,9 @@ class DVIP_Base(tf.keras.Model):
 
         self.warmup_iterations = warmup_iterations
 
+        self.dtype = dtype
         # Metric trackers
         self.loss_tracker = tf.keras.metrics.Mean(name="nelbo")
-
-    def train_step(self, data):
-        """
-        Defines the training step for the DVIP model.
-
-        Parameters
-        ----------
-        data : tuple of shape
-               ([num_samples, data_dim], [num_samples, labels_dim])
-               Contains features and labels of the training set.
-
-               Input labels must be standardized.
-
-        Returns
-        -------
-        metrics : dictionary
-                  Contains the resulting metrics of the training step.
-        """
-        # Split data in features (x) and labels (y)
-        x, y = data
-
-        # Ensure types are compatible
-        if eval("tf." + self.dtype) != x.dtype:
-            x = tf.cast(x, self.dtype)
-        if eval("tf." + self.dtype) != y.dtype:
-            y = tf.cast(y, self.dtype)
-
-        with tf.GradientTape() as tape:
-            # Forward pass
-            mean_pred, std_pred = self(x, training=True)
-
-            # Compute loss function
-            loss = self.nelbo(x, y, self.optimizer.iterations)
-
-            # Get trainable variables from the model itself
-            trainable_vars = self.trainable_variables
-
-            # Compute gradients
-            gradients = tape.gradient(loss, trainable_vars)
-
-        # Update weights
-        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
-
-        # Compute metrics
-        self.loss_tracker.update_state(loss)
-
-        # Update metrics, these are computed using pre-standardized data
-        self.likelihood.update_metrics(
-            y * self.y_std + self.y_mean, mean_pred, std_pred
-        )
-
-        return {m.name: m.result() for m in self.metrics}
-
-    def test_step(self, data):
-        """
-        Defines the test step for the DVIP model.
-
-        Parameters
-        ----------
-        data : tuple of shape
-               ([num_samples, data_dim], [num_samples, labels_dim])
-               Contains features and labels of the training set.
-
-        Returns
-        -------
-        metrics : dictionary
-                  Contains the resulting metrics of the training step.
-        """
-        # Unpack the data
-        x, y = data
-
-        # Ensure types are compatible
-        if eval("tf." + self.dtype) != x.dtype:
-            x = tf.cast(x, self.dtype)
-        if eval("tf." + self.dtype) != y.dtype:
-            y = tf.cast(y, self.dtype)
-
-        # Compute predictions
-        mean_pred, std_pred = self(x, training=False)
-
-        # Compute the loss. Scale test sample using training standarization
-        loss = self.nelbo(x, (y - self.y_mean) / self.y_std)
-
-        # Update the metrics
-        self.loss_tracker.update_state(loss)
-        self.likelihood.update_metrics(y, mean_pred, std_pred)
-
-        # Return a dict mapping metric names to current value.
-        # Note that it will include the loss (tracked in self.metrics).
-        return {m.name: m.result() for m in self.metrics}
 
     @property
     def metrics(self):
@@ -152,9 +63,22 @@ class DVIP_Base(tf.keras.Model):
         metrics = [self.loss_tracker]
         for metric in self.likelihood.metrics:
             metrics.append(metric)
-        return metrics
+        return {m.name: m.result() for m in metrics}
 
-    def call(self, inputs):
+    def update_metrics(self, y, mean, std, loss, normalized_y=True):
+        if normalized_y:
+            labels = y * self.y_std + self.y_mean
+        else:
+            labels = y
+        self.loss_tracker.update_state(loss)
+        self.likelihood.update_metrics(labels, mean, std)
+
+    def reset_metrics(self):
+        self.loss_tracker.reset_states()
+        for metric in self.likelihood.metrics:
+            metric.reset_states()
+
+    def __call__(self, inputs):
         """
         Computes the prediction of the model. Calls `predict_y`.
 
@@ -169,10 +93,12 @@ class DVIP_Base(tf.keras.Model):
         std : tf.tensor of shape (num_data, output_dim)
               Contains the std of the predictive distribution
         """
-        return self.predict_y(inputs, S = self.num_samples)
+        mean, var = self.predict_y(inputs, num_samples=self.num_samples)
+
+        return mean * self.y_std + self.y_mean, tf.math.sqrt(var) * self.y_std
 
     @tf.function
-    def propagate(self, X, S = 1, full_cov=False):
+    def propagate(self, X, num_samples=1, full_cov=False):
         """
         Propagates the input trough the layer, using the output of the previous
         as the input for the next one.
@@ -199,7 +125,7 @@ class DVIP_Base(tf.keras.Model):
         # Define arrays
         Fs, Fmeans, Fvars = [], [], []
         # First input corresponds to the original one
-        F = tf.tile(tf.expand_dims(X, 1), [1, S, 1])
+        F = tf.tile(tf.expand_dims(X, 0), [num_samples, 1, 1])
 
         for layer in self.vip_layers:
             F, Fmean, Fvar = layer.sample_from_conditional(
@@ -213,7 +139,7 @@ class DVIP_Base(tf.keras.Model):
         # Return arrays
         return Fs, Fmeans, Fvars
 
-    def predict_f(self, predict_at, S, full_cov=False):
+    def predict_f(self, predict_at, num_samples, full_cov=False):
         """
         Returns the predicted mean and variance at the last layer.
 
@@ -236,12 +162,12 @@ class DVIP_Base(tf.keras.Model):
         """
         _, Fmeans, Fvars = self.propagate(
             predict_at,
-            S = S,
+            num_samples=num_samples,
             full_cov=full_cov,
         )
         return Fmeans[-1], Fvars[-1]
 
-    def predict_y(self, predict_at, S, full_cov=False):
+    def predict_y(self, predict_at, num_samples, full_cov=False):
         """
         Computes the predicted labels for the given input.
 
@@ -257,10 +183,10 @@ class DVIP_Base(tf.keras.Model):
         The predicted labels using the model's likelihood
         and the predicted mean and standard deviation.
         """
-        mean, var = self.predict_f(predict_at, S=S, full_cov=full_cov)
-        mean, var = self.likelihood.predict_mean_and_var(mean, var)
-        # Mean and std values are scaled according to the labels scale
-        return mean * self.y_std + self.y_mean, tf.math.sqrt(var) * self.y_std
+        mean, var = self.predict_f(
+            predict_at, num_samples=num_samples, full_cov=full_cov
+        )
+        return self.likelihood.predict_mean_and_var(mean, var)
 
     def predict_log_density(self, data):
         Fmean, Fvar = self.predict_f(data[0], full_cov=False)
@@ -287,11 +213,13 @@ class DVIP_Base(tf.keras.Model):
                   Contains the variational expectation
 
         """
-        F_mean, F_var = self.predict_f(X, S = self.num_samples, full_cov=False)
-        # Shape [N, S, D]
+        F_mean, F_var = self.predict_f(
+            X, num_samples=self.num_samples, full_cov=False
+        )
+        # Shape [S, N,  D]
         var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
         # Shape [N, D]
-        return tf.reduce_mean(var_exp, 1)
+        return tf.reduce_mean(var_exp, 0)
 
     def nelbo(self, inputs, outputs, iteration=None):
         """
@@ -319,12 +247,12 @@ class DVIP_Base(tf.keras.Model):
         # Compute KL term
         KL = tf.reduce_sum([layer.KL() for layer in self.vip_layers])
 
-        if iteration is not None and self.warmup_iterations > 0:
-            beta = tf.minimum(
-                tf.cast(1.0, dtype=self.dtype),
-                iteration / self.warmup_iterations,
-            )
-        else:
-            beta = 1.0
+        # if iteration is not None and self.warmup_iterations > 0:
+        #     beta = tf.minimum(
+        #         tf.cast(1.0, dtype=self.dtype),
+        #         iteration / self.warmup_iterations,
+        #     )
+        # else:
+        #     beta = 1.0
 
-        return -scale * likelihood + beta * KL
+        return -scale * likelihood + KL

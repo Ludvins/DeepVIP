@@ -1,6 +1,11 @@
 import numpy as np
 
-from utils import plot_train_test, check_data, build_plot_name, plot_prior_over_layers
+from utils import (
+    plot_train_test,
+    check_data,
+    build_plot_name,
+    plot_prior_over_layers,
+)
 from load_data import SPGP, synthetic
 import tensorflow as tf
 
@@ -12,7 +17,7 @@ from src.layers_init import init_layers
 from src.generative_models import GaussianSampler
 
 from tqdm.keras import TqdmCallback
-
+from src.train import train, predict
 
 # Parse dataset
 parser = get_parser()
@@ -44,7 +49,9 @@ elif args.activation == "relu":
 # Set eager execution
 tf.config.run_functions_eagerly(args.eager)
 
-n_samples, input_dim, output_dim, y_mean, y_std = check_data(X_train, y_train, verbose)
+n_samples, input_dim, output_dim, y_mean, y_std = check_data(
+    X_train, y_train, verbose
+)
 batch_size = args.batch_size or n_samples
 
 # Gaussian Likelihood
@@ -69,40 +76,36 @@ layers = init_layers(
 
 # Create DVIP object
 dvip = DVIP_Base(
-    ll, layers, num_data=n_samples, num_samples = 3, y_mean=y_mean, y_std=y_std, warmup_iterations=warmup
+    ll,
+    layers,
+    num_data=n_samples,
+    num_samples=5,
+    y_mean=y_mean,
+    y_std=y_std,
+    warmup_iterations=warmup,
 )
 
 # Define optimizer and compile model
 opt = tf.keras.optimizers.Adam(learning_rate=lr)
-dvip.compile(optimizer=opt)
 
-# train_pred, train_samples = dvip.predict(X_train, batch_size=batch_size)
-# plot_prior_over_layers(X_train, train_samples)
-# exit()
+train_dataset = tf.data.Dataset.from_tensor_slices(
+    (X_train, (y_train - y_mean) / y_std)
+)
+test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
-# Perform training
-dvip.fit(
-    X_train,
-    (y_train - y_mean) / y_std,  # Provide normalized outputs
-    epochs=epochs,
-    batch_size=batch_size,
-    verbose=0,
-    callbacks=[TqdmCallback(verbose=0)],
+train(
+    dvip,
+    train_dataset,
+    optimizer=opt,
+    epochs=args.epochs,
+    batch_size=args.batch_size,
 )
 
 # Predict Train and Test
-mean_pred, var_pred = dvip.predict(X_train, batch_size=batch_size)
-test_mean_pred, test_var_pred = dvip.predict(X_test, batch_size=batch_size)
-
-print(mean_pred[0:10,0])
-print(mean_pred[0:10,1])
-import matplotlib.pyplot as plt
-
-plt.scatter(X_train, y_train)
-sort = np.argsort(X_train, axis = 0)
-for i in range(mean_pred.shape[1]):
-    plt.plot(X_train[sort].flatten(), mean_pred[:,i][sort].flatten())
-plt.show()
+mean_pred, var_pred = predict(dvip, train_dataset, batch_size=args.batch_size)
+test_mean_pred, test_var_pred = predict(
+    dvip, test_dataset, batch_size=args.batch_size
+)
 
 
 # Create plot title and path
@@ -124,6 +127,6 @@ plot_train_test(
     y_train,
     X_test,
     y_test,
-    title = fig_title,
-    path = path,
+    title=fig_title,
+    path=path,
 )

@@ -62,22 +62,23 @@ class Gaussian(Likelihood):
     @tf.autograph.experimental.do_not_convert
     def update_metrics(self, y, mean_pred, std_pred):
         if tf.shape(mean_pred).shape == 3:
-            predictions = tf.reduce_mean(mean_pred, 1)
+            predictions = tf.reduce_mean(mean_pred, 0)
         else:
             predictions = mean_pred
         self.rmse_metric.update_state(y, predictions)
 
-        S = tf.cast(tf.shape(mean_pred)[1], dtype=self.dtype)
+        S = tf.cast(tf.shape(mean_pred)[0], dtype=self.dtype)
         normal = tfp.distributions.Normal(loc=mean_pred, scale=std_pred)
-        y = tf.expand_dims(y, 1)
         logpdf = normal.log_prob(y)
-        nll = tf.math.reduce_logsumexp(logpdf, 1) - tf.math.log(S)
+        nll = tf.math.reduce_logsumexp(logpdf, 0) - tf.math.log(S)
         nll = -tf.reduce_mean(nll)
 
         self.nll_metric.update_state(nll)
 
     def logdensity(self, x, mu, var):
-        return -0.5 * (np.log(2 * np.pi) + tf.math.log(var) + tf.square(mu - x) / var)
+        return -0.5 * (
+            np.log(2 * np.pi) + tf.math.log(var) + tf.square(mu - x) / var
+        )
 
     def logp(self, F, Y):
         return self.logdensity(Y, F, tf.math.exp(self.log_variance))
@@ -95,14 +96,6 @@ class Gaussian(Likelihood):
         return self.logdensity(Y, Fmu, Fvar + tf.math.exp(self.log_variance))
 
     def variational_expectations(self, Fmu, Fvar, Y):
-        # NOTE Y shape is (N,) when D is 1, this leads to Y - Fmu to be
-        #  (N, N)
-        #
-        if len(Y.shape) == 1:
-            Y = tf.expand_dims(Y, -1)
-        Y = tf.expand_dims(Y, 1)
-
-
 
         # Get variance
         variance = tf.math.exp(self.log_variance)
@@ -110,6 +103,6 @@ class Gaussian(Likelihood):
         var_exp = (
             -0.5 * np.log(2 * np.pi)
             - 0.5 * self.log_variance
-            - 0.5 * (tf.square(Y - Fmu) + Fvar) / variance
+            - 0.5 * (tf.square(Fmu - Y) + Fvar) / variance
         )
         return var_exp
