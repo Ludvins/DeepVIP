@@ -57,9 +57,11 @@ class Layer(torch.nn.Module):
         vars = torch.stack(vars)
         return means, vars
 
-    def sample_from_conditional(
-        self, X, z=None, full_cov=False, return_prior_samples=False
-    ):
+    def sample_from_conditional(self,
+                                X,
+                                z=None,
+                                full_cov=False,
+                                return_prior_samples=False):
         """
         Calculates self.conditional and also draws a sample.
         Adds input propagation if necessary.
@@ -99,18 +101,16 @@ class Layer(torch.nn.Module):
 
 
 class VIPLayer(Layer):
-    def __init__(
-        self,
-        generative_function,
-        num_regression_coeffs,
-        num_outputs,
-        input_dim,
-        log_layer_noise=-5,
-        mean_function=None,
-        trainable=True,
-        dtype=torch.float64,
-        **kwargs
-    ):
+    def __init__(self,
+                 generative_function,
+                 num_regression_coeffs,
+                 num_outputs,
+                 input_dim,
+                 log_layer_noise=-5,
+                 mean_function=None,
+                 trainable=True,
+                 dtype=torch.float64,
+                 **kwargs):
         """
         A variational implicit process layer.
 
@@ -188,8 +188,7 @@ class VIPLayer(Layer):
                 dtype=self.dtype,
                 device=self.device,
                 requires_grad=False,
-            )
-        )
+            ))
         # self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
 
         # If no mean function is given, constant 0 is used
@@ -207,8 +206,7 @@ class VIPLayer(Layer):
                 np.ones(num_outputs) * log_layer_noise,
                 dtype=self.dtype,
                 device=self.device,
-            )
-        )
+            ))
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
@@ -226,11 +224,10 @@ class VIPLayer(Layer):
                 triangular_q_sqrt,
                 dtype=self.dtype,
                 device=self.device,
-            )
-        )
+            ))
         # self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
 
-    def conditional_ND(self, X, full_cov=False, return_prior_samples=False):
+    def conditional_ND(self, X, full_cov=False):
         """
         Computes Q*(y|x, a) using the linear regression approximation.
         Given that this distribution is Gaussian and Q(a) is also Gaussian
@@ -277,32 +274,27 @@ class VIPLayer(Layer):
         # Let S = num_coeffs, D = num_outputs and N = num_samples
 
         # Shape (S, ..., N, D)
-        X = torch.tile(
-            X.unsqueeze(0), (self.num_coeffs, *np.ones(X.ndim, dtype=int))
-        )
+        X = torch.tile(X.unsqueeze(0),
+                       (self.num_coeffs, *np.ones(X.ndim, dtype=int)))
         f = self.generative_function(X)
         # Compute mean value, shape (1, N, D)
         m = torch.mean(f, dim=0, keepdims=True)
 
         inv_sqrt = 1 / torch.sqrt(
-            torch.tensor(self.num_coeffs).type(self.dtype)
-        )
+            torch.tensor(self.num_coeffs).type(self.dtype))
         # Compute regresion function, shape (N, S, D)
         phi = inv_sqrt * (f - m)
 
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (N, S, D)
-        mean = m.squeeze(axis=0) + torch.einsum(
-            "s...nd,sd->...nd", phi, self.q_mu
-        )
+        mean = m.squeeze(axis=0) + torch.einsum("s...nd,sd->...nd", phi,
+                                                self.q_mu)
 
         # Shape (S, S, D)
-        q_sqrt = (
-            torch.zeros((self.num_coeffs, self.num_coeffs, self.num_outputs))
-            .to(self.dtype)
-            .to(self.device)
-        )
+        q_sqrt = (torch.zeros(
+            (self.num_coeffs, self.num_coeffs,
+             self.num_outputs)).to(self.dtype).to(self.device))
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
         # Shape (S, S, D)
@@ -344,24 +336,21 @@ class VIPLayer(Layer):
         """
 
         # Recover triangular matrix from array
-        q_sqrt = (
-            torch.zeros((self.num_coeffs, self.num_coeffs, self.num_outputs))
-            .to(self.dtype)
-            .to(self.device)
-        )
+        q_sqrt = (torch.zeros(
+            (self.num_coeffs, self.num_coeffs,
+             self.num_outputs)).to(self.dtype).to(self.device))
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
 
         diag = torch.diagonal(q_sqrt, dim1=0, dim2=1)
 
         # Constant dimensionality term
-        KL = -0.5 * self.num_outputs * self.num_coeffs * self.num_coeffs
+        KL = -0.5 * self.num_outputs * self.num_coeffs
 
         # Log of determinant of covariance matrix.
-        # Uses that sqrt(det(X)) = det(X^(1/2)) and
-        # that the determinant of a upper triangular matrix (which q_sqrt is),
-        # is the product of the diagonal entries (i.e. sum of their logarithm).
-        KL -= 0.5 * torch.sum(2 * torch.log(diag))
+        # Det(Sigma) = Det(q_sqrt q_sqrt^T) = Det(q_sqrt) Det(q_sqrt^T)
+        # = prod(diag_s_sqrt)^2
+        KL -= torch.sum(torch.log(torch.abs(diag)))
 
         # Trace term.
         KL += 0.5 * torch.sum(torch.square(self.q_sqrt_tri))
@@ -369,4 +358,4 @@ class VIPLayer(Layer):
         # Mean term
         KL += 0.5 * torch.sum(torch.square(self.q_mu))
 
-        return KL
+        return KL + self.generative_function.KL()

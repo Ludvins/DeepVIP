@@ -46,8 +46,7 @@ elif args.activation == "relu":
     activation = torch.relu
 
 n_samples, input_dim, output_dim, y_mean, y_std = check_data(
-    X_train, y_train, verbose
-)
+    X_train, y_train, verbose)
 batch_size = args.batch_size or n_samples
 
 # CUDA for PyTorch
@@ -103,7 +102,7 @@ dvip.print_variables()
 # input()
 
 # Define optimizer and compile model
-opt = torch.optim.Adam(dvip.parameters(), lr=0.001)
+opt = torch.optim.Adam(dvip.parameters(), lr=0.1)
 
 # Perform training
 train(dvip, train_loader, opt, epochs=args.epochs)
@@ -114,7 +113,6 @@ dvip.print_variables()
 
 train_mean, train_var = predict(dvip, train_loader)
 test_mean, test_var = predict(dvip, test_loader)
-
 
 train_prior_samples = dvip.get_prior_samples(torch.tensor(X_train))
 test_prior_samples = dvip.get_prior_samples(torch.tensor(X_test))

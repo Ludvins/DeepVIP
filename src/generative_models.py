@@ -62,9 +62,11 @@ class GaussianSampler(NoiseSampler):
 
 
 class GenerativeFunction(torch.nn.Module):
-    def __init__(
-        self, noise_sampler, input_dim, output_dim, dtype=torch.float64
-    ):
+    def __init__(self,
+                 noise_sampler,
+                 input_dim,
+                 output_dim,
+                 dtype=torch.float64):
         """
         Generates samples from a stochastic function using sampled
         noise values and input values.
@@ -113,9 +115,10 @@ class BayesLinear(GenerativeFunction):
         b_log_std_prior,
         dtype=torch.float64,
     ):
-        super(BayesLinear, self).__init__(
-            noise_sampler, input_dim, output_dim, dtype=dtype
-        )
+        super(BayesLinear, self).__init__(noise_sampler,
+                                          input_dim,
+                                          output_dim,
+                                          dtype=dtype)
 
         self.w_mean_prior = w_mean_prior
         self.w_log_std_prior = w_log_std_prior
@@ -143,6 +146,9 @@ class BayesLinear(GenerativeFunction):
         w = self.weight_mu + torch.exp(self.weight_log_sigma) * z_w
         b = self.bias_mu + torch.exp(self.bias_log_sigma) * z_b
         return torch.einsum("...nd, ...do -> ...no", inputs, w) + b
+
+    def KL(self):
+        
 
 
 class BayesianNN(GenerativeFunction):
@@ -191,19 +197,16 @@ class BayesianNN(GenerativeFunction):
                     noise_sampler,
                     _in,
                     _out,
-                    w_mean_prior=torch.normal(
-                        mean=0.0, std=0.01, size=(_in, _out)
-                    ),
-                    w_log_std_prior=4.6
-                    + torch.log(
-                        torch.normal(mean=0.01, std=0.0, size=(_in, _out))
-                    ),
+                    w_mean_prior=torch.normal(mean=0.0,
+                                              std=0.01,
+                                              size=(_in, _out)),
+                    w_log_std_prior=4.6 + torch.log(
+                        torch.normal(mean=0.01, std=0.0, size=(_in, _out))),
                     b_mean_prior=torch.normal(mean=0.01, std=0.1, size=[_out]),
-                    b_log_std_prior=torch.normal(
-                        mean=0.0, std=0.1, size=[_out]
-                    ),
-                )
-            )
+                    b_log_std_prior=torch.normal(mean=0.0,
+                                                 std=0.1,
+                                                 size=[_out]),
+                ))
         self.layers = torch.nn.ModuleList(layers)
 
     def forward(self, inputs):
@@ -212,3 +215,6 @@ class BayesianNN(GenerativeFunction):
             x = self.activation(layer(x))
 
         return self.layers[-1](x)
+
+    def KL(self):
+        return torch.stack([layer.KL() for layer in self.layers]).sum()
