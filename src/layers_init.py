@@ -30,9 +30,6 @@ def init_layers(
     regression_coeffs=20,
     structure=[10, 10],
     activation=torch.tanh,
-    noise_sampler=None,
-    trainable_parameters=True,
-    trainable_prior=True,
     seed=0,
 ):
     """
@@ -49,10 +46,8 @@ def init_layers(
     ----------
     X : tf.tensor of shape (num_data, data_dim)
         Contains the input features.
-
     Y : tf.tensor of shape (num_data, output_dim)
         Contains the input labels
-
     inner_dims : integer or list of integers
                  Indicates the number of VIP layers to use. If
                  an integer is used, as many layers as its value
@@ -64,41 +59,22 @@ def init_layers(
                  layers; one that goes from data_dim features
                  to 10, another from 10 to 3, and lastly from
                  3 to output_dim.
-
     regression_coeffs : integer
                         Number of regression coefficients to use.
-
     structure : list of integers
                 Specifies the hidden dimensions of the Bayesian
                 Neural Networks in each VIP.
-
     activation : callable
                  Non-linear function to apply at each inner
                  dimension of the Bayesian Network.
-
-    noise_sampler : NoiseSampler
-                    Specifies the noise generationfunction
-
-    trainable_prior : boolean
-                      Determines whether the prior function parameters
-                      are trainable or not.
-
     seed : int
            Random seed
-
-    Returns
-    -------
     """
-
-    # Initialice noise sampler using the given seed.
-    if noise_sampler is None:
-        noise_sampler = GaussianSampler(seed)
 
     # Create VIP layers. If integer, replicate output dimension
     if isinstance(inner_dims, (int, np.integer)):
         dims = np.concatenate(
-            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1])
-        )
+            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1]))
     # Otherwise, append thedata dimensions to the array.
     else:
         dims = [X.shape[1]] + inner_dims + [Y.shape[1]]
@@ -127,18 +103,15 @@ def init_layers(
             X_running = X_running @ V[:dim_out].T
 
         else:
-            raise NotImplementedError(
-                "Dimensionality augmentation is not" " handled currently."
-            )
+            raise NotImplementedError("Dimensionality augmentation is not"
+                                      " handled currently.")
 
         # Create the Generation function, i.e, the Bayesian Neural Network
-        bayesian_network = BayesianNN(
-            noise_sampler=noise_sampler,
-            input_dim=dim_in,
-            structure=structure,
-            activation=activation,
-            output_dim=dim_out,
-        )
+        bayesian_network = BayesianNN(input_dim=dim_in,
+                                      structure=structure,
+                                      activation=activation,
+                                      output_dim=dim_out,
+                                      seed=seed)
 
         # Create layer
         layers.append(
@@ -148,8 +121,6 @@ def init_layers(
                 num_outputs=dim_out,
                 input_dim=dim_in,
                 mean_function=mf,
-                trainable=trainable_parameters,
-            )
-        )
+            ))
 
     return layers

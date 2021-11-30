@@ -15,7 +15,6 @@ class DVIP_Base(torch.nn.Module):
         num_samples=1,
         y_mean=0.0,
         y_std=1.0,
-        warmup_iterations=1,
         device=None,
         dtype=torch.float64,
     ):
@@ -32,10 +31,14 @@ class DVIP_Base(torch.nn.Module):
                  that make up this model.
         num_data : int
                    Amount of data samples
+        num_samples : int
+                      Number of Monte Carlo samples to broadcast by default.
         y_mean : float or array-like
                  Original value of the normalized labels
         y_std : float or array-like
                 Original standar deviation of the normalized labels
+        device : torch.device
+                 The device in which the computations are made.
         dtype : data-type
                 The dtype of the layer's computations and weights.
         """
@@ -49,10 +52,7 @@ class DVIP_Base(torch.nn.Module):
         self.likelihood = likelihood
         self.vip_layers = torch.nn.ModuleList(layers)
 
-        self.warmup_iterations = warmup_iterations
-
         self.device = device
-
         self.dtype = dtype
 
     def train_step(self, optimizer, X, y):
@@ -61,38 +61,47 @@ class DVIP_Base(torch.nn.Module):
 
         Parameters
         ----------
-        data : tuple of shape
-               ([num_samples, data_dim], [num_samples, labels_dim])
-               Contains features and labels of the training set.
-
-               Input labels must be standardized.
+        optimizer : torch.optim
+                    The considered optimization algorithm.
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input, must be standardized.
 
         Returns
         -------
-        metrics : dictionary
-                  Contains the resulting metrics of the training step.
+        loss : float
+               The nelbo of the model at the current state for the given inputs
         """
 
+        # If targets are unidimensional,
+        # ensure there is a second dimension (N, 1)
         if y.ndim == 1:
             y = y.unsqueeze(-1)
 
+        # Transform inputs and largets to the model'd dtype
         if self.dtype != X.dtype:
             X = X.to(self.dtype)
         if self.dtype != y.dtype:
             y = y.to(self.dtype)
 
+        # Clear gradients
         optimizer.zero_grad()
-        loss = self.nelbo(X, y)
-        loss.backward()  # (retain_graph=True)
 
+        # Compute loss
+        loss = self.nelbo(X, y)
+        # Create backpropagation graph
+        loss.backward()
+        # Make optimization step
         optimizer.step()
 
+        # Create predictions to update the model's metrics. Turn off gradients
+        # computations as they are not necessary.
         with torch.no_grad():
             means, variances = self.forward(X)
-
-        self.likelihood.update_metrics(
-            y * self.y_std + self.y_mean, means, variances
-        )
+            # Update likelihood metrics using re-escaled targets.
+            self.likelihood.update_metrics(y * self.y_std + self.y_mean, means,
+                                           variances)
 
         return loss
 
@@ -102,14 +111,15 @@ class DVIP_Base(torch.nn.Module):
 
         Parameters
         ----------
-        data : tuple of shape
-               ([num_samples, data_dim], [num_samples, labels_dim])
-               Contains features and labels of the training set.
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input, must be standardized.
 
         Returns
         -------
-        metrics : dictionary
-                  Contains the resulting metrics of the training step.
+        loss : float
+               The nelbo of the model at the current state for the given inputs
         """
 
         if y.ndim == 1:
@@ -136,7 +146,7 @@ class DVIP_Base(torch.nn.Module):
 
         Parameters
         ----------
-        predict_at : tf.tensor of shape (num_data, data_dim)
+        predict_at : torch tensor of shape (batch_size, data_dim)
                      Contains the input features.
         full_cov : boolean
                    Whether to use the full covariance matrix or just
@@ -157,33 +167,39 @@ class DVIP_Base(torch.nn.Module):
 
         Parameters
         ----------
-        X : tf.tensor of shape (num_data, data_dim)
+        X : torch tensor of shape (batch_size, data_dim)
             Contains the input features.
+        num_samples : int
+                      Number of MonteCarlo resamples to use
         full_cov : boolean
                    Whether to use the full covariance matrix or just
                    the diagonal values.
 
         Returns
         -------
-        Fs : tf.tensor of shape (num_layers, num_data, data_dim)
+        Fs : torch tensor of shape (num_layers, batch_size, data_dim)
              Contains the propagation made in each layer
-        Fmeans : tf.tensor of shape (num_layers, num_data, output_dim)
+        Fmeans : torch tensor of shape (num_layers, batch_size, output_dim)
                  Contains the mean value of the predictions at
                  each layer.
-        Fvars : tf.tensor of shape (num_layers, num_data, output_dim)
+        Fvars : torch tensor of shape (num_layers, batch_size, output_dim)
                 Contains the standard deviation of the predictions at
                 each layer.
-        Fprior : tf.tensor of shape (num_layers, S, num_data, num_outputs)
+        Fprior : torch tensor of shape (num_layers, S, batch_size, num_outputs)
                  Contains the S prior samples for each layer at each data
                  point.
         """
+        # Replicate X in a new axis for MonteCarlo samples
         sX = torch.tile(X.unsqueeze(0), [num_samples, 1, 1])
+
+        # Initialize arrays
         Fs, Fmeans, Fvars, Fpriors = [], [], [], []
+
+        # The first input values are the original ones
         F = sX
         for layer in self.vip_layers:
             F, Fmean, Fvar, Fprior = layer.sample_from_conditional(
-                F, full_cov=full_cov
-            )
+                F, full_cov=full_cov)
 
             Fs.append(F)
             Fmeans.append(Fmean)
@@ -198,20 +214,21 @@ class DVIP_Base(torch.nn.Module):
 
         Parameters
         ----------
-        predict_at : tf.tensor of shape (num_data, data_dim)
+        predict_at : torch tensor of shape (batch_size, data_dim)
                      Contains the input features.
+        num_samples : int
+                      Number of MonteCarlo resamples to use
         full_cov : boolean
                    Whether to use the full covariance matrix or just
                    the diagonal values.
         Returns
         -------
-        Fmeans : tf.tensor of shape (num_data, output_dim)
+        Fmeans : torch tensor of shape (num_layers, batch_size, output_dim)
                  Contains the mean value of the predictions at
-                 the last layer.
-        Fvars : tf.tensor of shape (num_data, output_dim)
+                 each layer.
+        Fvars : torch tensor of shape (num_layers, batch_size, output_dim)
                 Contains the standard deviation of the predictions at
-                the last layer.
-
+                each layer.
         """
 
         _, Fmeans, Fvars, _ = self.propagate(
@@ -222,48 +239,88 @@ class DVIP_Base(torch.nn.Module):
         return Fmeans[-1], Fvars[-1]
 
     def predict_y(self, predict_at, num_samples):
-        Fmean, Fvar = self.predict_f(
-            predict_at, num_samples=num_samples, full_cov=False
-        )
+        """
+        Returns the predicted mean and variance for the given inputs.
+        Takes the predictions from the last layer and considers 
+        applies the likelihood.
+
+        Parameters
+        ----------
+        predict_at : torch tensor of shape (batch_size, data_dim)
+                     Contains the input features.
+        num_samples : int
+                      Number of MonteCarlo resamples to use
+        Returns
+        -------
+        Fmeans : torch tensor of shape (num_layers, batch_size, output_dim)
+                 Contains the mean value of the predictions.
+        Fvars : torch tensor of shape (num_layers, batch_size, output_dim)
+                Contains the standard deviation of the predictions.
+        """
+        Fmean, Fvar = self.predict_f(predict_at,
+                                     num_samples=num_samples,
+                                     full_cov=False)
         return self.likelihood.predict_mean_and_var(Fmean, Fvar)
 
     def get_prior_samples(self, X, full_cov=False):
+        """
+        Returns the prior samples of the given inputs using 1 MonteCarlo 
+        resample.
+
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        full_cov : boolean
+                   Whether to use the full covariance matrix or just
+                   the diagonal values.
+
+        Returns
+        -------
+        Fprior : torch tensor of shape (num_layers, S, batch_size, num_outputs)
+                 Contains the S prior samples for each layer at each data
+                 point.
+        """
         _, _, _, Fpriors = self.propagate(X, num_samples=1, full_cov=full_cov)
 
+        # Squeeze the MonteCarlo dimension
         Fpriors = torch.stack(Fpriors).squeeze(2)
+        # Scale data
         return Fpriors * self.y_std + self.y_mean
-
-    def predict_log_density(self, data, num_samples):
-        Fmean, Fvar = self.predict_f(
-            data[0], num_samples=num_samples, full_cov=False
-        )
-        l = self.likelihood.predict_density(Fmean, Fvar, data[1])
-        log_num_samples = torch.log(torch.Tensor(self.num_samples, self.dtype))
-
-        return torch.logsumexp(l - log_num_samples, dim=0)
 
     def expected_data_log_likelihood(self, X, Y):
         """
         Compute expectations of the data log likelihood under the variational
-        distribution with MC samples
+        distribution with MC samples.
+        
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input, must be standardized.
+
         """
-        F_mean, F_var = self.predict_f(
-            X, num_samples=self.num_samples, full_cov=False
-        )
+        F_mean, F_var = self.predict_f(X,
+                                       num_samples=self.num_samples,
+                                       full_cov=False)
         var_exp = self.likelihood.variational_expectations(
-            F_mean, F_var, Y
-        )  # Shape [S, N, D]
+            F_mean, F_var, Y)  # Shape [S, N, D]
         return torch.mean(var_exp, dim=0)  # Shape [N, D]
 
-    def nelbo(self, inputs, outputs):
+    def nelbo(self, X, y):
         """
-        Computes the evidence lower bound according to eq. (17) in the paper.
-        :param data: Tuple of two tensors for input data X and labels Y.
-        :return: Tensor representing ELBO.
-        """
-        X, Y = inputs, outputs
+        Computes the evidence lower bound.
+        
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input, must be standardized.
 
-        likelihood = torch.sum(self.expected_data_log_likelihood(X, Y))
+        """
+        likelihood = torch.sum(self.expected_data_log_likelihood(X, y))
 
         # scale loss term corresponding to minibatch size
         scale = self.num_data
@@ -299,14 +356,13 @@ class DVIP_Base(torch.nn.Module):
 
                 if name[i] not in sections:
                     print("\t" * i, name[i].upper())
-                    sections = name[: i + 1]
+                    sections = name[:i + 1]
 
             padding = "\t" * (len(name) - 1)
             print(
                 padding,
-                "{}: {}".format(
-                    name[-1], param.data.detach().cpu().numpy().flatten()
-                ),
+                "{}: {}".format(name[-1],
+                                param.data.detach().cpu().numpy().flatten()),
             )
 
         print("\n---------------------------\n\n")

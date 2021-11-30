@@ -6,7 +6,7 @@ from utils import (
     get_parser,
     plot_prior_over_layers,
 )
-from load_data import SPGP, synthetic
+from load_data import SPGP, synthetic, test
 
 import torch
 from torch.utils.data import DataLoader
@@ -16,7 +16,6 @@ from src.train import predict_prior_samples, train, predict
 from src.likelihood import Gaussian
 from src.dvip import DVIP_Base
 from src.layers_init import init_layers
-from src.generative_models import GaussianSampler
 
 # Parse dataset
 parser = get_parser()
@@ -27,6 +26,8 @@ if args.dataset == "SPGP":
     X_train, y_train, X_test, y_test = SPGP()
 elif args.dataset == "synthetic":
     X_train, y_train, X_test, y_test = synthetic()
+elif args.dataset == "test":
+    X_train, y_train, X_test, y_test = test()
 
 # Get experiments variables
 epochs = args.epochs
@@ -57,9 +58,6 @@ torch.backends.cudnn.benchmark = True
 # Gaussian Likelihood
 ll = Gaussian()
 
-# Define the noise sampler
-noise_sampler = GaussianSampler(seed)
-
 # Get VIP layers
 layers = init_layers(
     X_train,
@@ -68,38 +66,27 @@ layers = init_layers(
     regression_coeffs,
     bnn_structure,
     activation=activation,
-    noise_sampler=noise_sampler,
-    trainable_parameters=True,
-    trainable_prior=True,
     seed=seed,
 )
 
 train_dataset = DVIP_Dataset(X_train, y_train)
 test_dataset = DVIP_Dataset(X_test, y_test, normalize=False)
 
-train_loader = DataLoader(train_dataset, batch_size=batch_size)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size)
-train_predict = DataLoader(train_dataset, batch_size=len(train_dataset))
-test_predict = DataLoader(test_dataset, batch_size=len(test_dataset))
 
 # Create DVIP object
 dvip = DVIP_Base(
     ll,
     layers,
     len(train_loader.dataset),
-    num_samples=5,
+    num_samples=3,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
-    warmup_iterations=warmup,
 )
-
-dvip.print_variables()
-
-# prior_samples = dvip.get_prior_samples(
-#     (torch.tensor(X_train) - dvip.x_mean) / dvip.x_std
-# )
-# plot_prior_over_layers(X_train, prior_samples.detach().cpu().numpy())
-# input()
+""" dvip.print_variables()
+prior_samples = dvip.get_prior_samples(torch.tensor(X_train))
+plot_prior_over_layers(X_train, prior_samples.detach().cpu().numpy()) """
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=0.1)
@@ -110,12 +97,12 @@ train(dvip, train_loader, opt, epochs=args.epochs)
 dvip.print_variables()
 
 # Predict Train and Test
-
+train_loader = DataLoader(train_dataset, batch_size=batch_size)
 train_mean, train_var = predict(dvip, train_loader)
 test_mean, test_var = predict(dvip, test_loader)
 
-train_prior_samples = dvip.get_prior_samples(torch.tensor(X_train))
-test_prior_samples = dvip.get_prior_samples(torch.tensor(X_test))
+train_prior_samples = predict_prior_samples(dvip, train_loader)
+test_prior_samples = predict_prior_samples(dvip, test_loader)
 
 # Create plot title and path
 fig_title, path = build_plot_name(
@@ -136,8 +123,8 @@ plot_train_test(
     y_train,
     X_test,
     y_test,
-    train_prior_samples.detach().cpu().numpy(),
-    test_prior_samples.detach().cpu().numpy(),
+    train_prior_samples,
+    test_prior_samples,
     title=fig_title,
     path=path,
 )

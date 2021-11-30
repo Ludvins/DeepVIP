@@ -15,18 +15,20 @@ class Layer(torch.nn.Module):
                     Input dimension
         dtype : data-type
                 The dtype of the layer's computations and weights.
-                Refer to tf.keras.layers.Layer for more information.
+        device : torch.device
+                 The device in which the computations are made.
         seed : int
                integer to use as seed for randomness.
-        **kwargs : dict, optional
-                   Extra arguments to `Layer`.
-                   Refer to tf.keras.layers.Layer for more information.
         """
         super().__init__()
         self.seed = seed
         self.dtype = dtype
         self.device = device
         self.input_dim = input_dim
+        self.freeze = False
+
+        self.generator = torch.Generator()
+        self.generator.manual_seed(seed)
 
     def conditional_ND(self):
         """
@@ -40,59 +42,35 @@ class Layer(torch.nn.Module):
         """
         raise NotImplementedError
 
-    def conditional_SND(self, X, full_cov=False):
-        """"""
-        if full_cov:
-            raise NotImplementedError
-
-        S, N, D = X.shape
-        means = []
-        vars = []
-        for s in range(S):
-            mean, var = self.conditional_ND(X[s])
-            means.append(mean)
-            vars.append(var)
-
-        means = torch.stack(means)
-        vars = torch.stack(vars)
-        return means, vars
-
-    def sample_from_conditional(self,
-                                X,
-                                z=None,
-                                full_cov=False,
-                                return_prior_samples=False):
+    def sample_from_conditional(self, X, full_cov=False):
         """
         Calculates self.conditional and also draws a sample.
         Adds input propagation if necessary.
 
         Parameters
         ----------
-        X : tf.tensor of shape (N, D_in)
-            Input locations.
-
-        z : tf.tensor of shape (N, D)
-            Contains a sample from a Gaussian distribution, ideally from a
-            standardized Gaussian.
-
+        X : torch tensor of shape (..., N, D_in)
+            Input locations. Additional dimensions at the beggining are
+            propagated over each computation.
         full_cov : boolean
                    Wether to compute or not the full covariance matrix or just
                    the diagonal.
-
         Returns
         -------
-        samples : tf.tensor of shape (N, S, self.num_outputs)
+        samples : torch tensor of shape (..., N, self.num_outputs)
                   Samples from a Gaussian given by mean and var. See below.
-        mean : tf.tensor of shape (N, S, self.num_outputs)
-               Stacked tensor of mean values from conditional_ND applied to X.
-        var : tf.tensor of shape (N, S, self.num_outputs or
-                                  N, N, S, self.num_outputs)
-              Stacked tensor of variance values from conditional_ND applied to
-              X.
+        mean : torch tensor of shape (..., N, self.num_outputs)
+               Mean values from conditional_ND applied to X.
+        var : torch tensor of shape (..., N , self.num_outputs)
+              Variance values from conditional_ND applied to X.
+        prior_samples : torch tensor of shape (self.num_coeffs, ..., 
+                        N, self.num_outputs)
+                        Prior samples from conditional_ND applied to X.
         """
-
-        if z is None:
-            z = torch.randn(X.shape).to(self.dtype).to(self.device)
+        z = torch.randn(X.shape,
+                        generator=self.generator,
+                        dtype=self.dtype,
+                        device=self.device)
 
         mean, var, prior_samples = self.conditional_ND(X, full_cov=full_cov)
         samples = reparameterize(mean, var, z, full_cov=full_cov)
@@ -108,88 +86,67 @@ class VIPLayer(Layer):
                  input_dim,
                  log_layer_noise=-5,
                  mean_function=None,
-                 trainable=True,
-                 dtype=torch.float64,
-                 **kwargs):
+                 dtype=torch.float64):
         """
         A variational implicit process layer.
 
         The underlying model performs a Bayesian linear regression
         approximation
-        \[
-            f(x) = mean_function(x) + a^T \phi(x)
-        \]
+            
+        f(x) = mean_function(x) + a^T \phi(x)
+        
         with
-        \[
-            \phi(x) = \frac{1}{\sqrt(S)}(f_1(x) - m(x), \dots, f_S(x) - m(x))
-        \]
-        \[
-            a \sim \mathcal{N}(0, I)
-        \]
+        
+        phi(x) = 1/S (f_1(x) - m(x), ..., f_S(x) - m(x)),  a ~ N(0, I)
+        
         Where S randomly sampled functions are used and m(x) denotes
         their empirical mean.
 
         The variational distribution over the regression coefficients is
-        \[
-            Q(a) = \mathcal{N}(a_mu, a_sqrt a_sqrt^T)
-        \]
-
+        
+            Q(a) = N(a_mu, a_sqrt a_sqrt^T)
+        
         The layer holds D_out independent VIPs with the same kernel
         and regression coefficients.
-
 
         Parameters
         ----------
         generative_function : GenerativeFunction
                               Generates function samples using the input
                               locations X and noise values.
-
         num_regression_coeffs : integer
                                 Indicates the amount of linear regression
                                 coefficients to use in the approximation.
                                 Coincides with the number of samples of f.
-
+        input_dim : int
+                    Dimensionality of the given features. Used to
+                    pre-fix the shape of the different layers of the model.        
         num_outputs : int
                       The number of independent VIP in this layer.
                       More precisely, q_mu has shape (S, num_outputs)
-
-        input_dim : int
-                    Dimensionality of the given features. Used to
-                    pre-fix the shape of the different layers of the model.
-
         log_layer_noise : float or tf.tensor of shape (num_outputs)
                           Contains the noise of each VIP contained in this
                           layer, i.e, epsilon ~ N(0, exp(log_layer_noise))
-
         mean_function : callable
                         Mean function added to the model. If no mean function
                         is specified, no value is added.
-
-        trainable : boolean
-                    Determines whether the regression parameters
-                    q_mu and q_sqrt are trainable or not.
-
         dtype : data-type
                 The dtype of the layer's computations and weights.
                 Refer to tf.keras.layers.Layer for more information.
-
-        **kwargs : dict, optional
-                   Extra arguments to `Layer`.
-                   Refer to tf.keras.layers.Layer for more information.
         """
-        super().__init__(dtype=dtype, input_dim=input_dim, **kwargs)
+        super().__init__(dtype=dtype, input_dim=input_dim)
 
         self.num_coeffs = num_regression_coeffs
 
         # Regression Coefficients prior mean
-        self.q_mu = torch.nn.Parameter(
+        """ self.q_mu = torch.nn.Parameter(
             torch.tensor(
                 np.zeros((self.num_coeffs, num_outputs)),
                 dtype=self.dtype,
                 device=self.device,
                 requires_grad=False,
-            ))
-        # self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
+            )) """
+        self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
 
         # If no mean function is given, constant 0 is used
         self.mean_function = mean_function
@@ -219,13 +176,13 @@ class VIPLayer(Layer):
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         triangular_q_sqrt = q_sqrt[li, lj]
-        self.q_sqrt_tri = torch.nn.Parameter(
+        """ self.q_sqrt_tri = torch.nn.Parameter(
             torch.tensor(
                 triangular_q_sqrt,
                 dtype=self.dtype,
                 device=self.device,
-            ))
-        # self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
+            )) """
+        self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
 
     def conditional_ND(self, X, full_cov=False):
         """
@@ -255,20 +212,20 @@ class VIPLayer(Layer):
 
         Parameters:
         -----------
-        X : tf.tensor of shape (N, D)
+        X : torch tensor of shape (..., N, D)
             Contains the input locations.
-
         full_cov : boolean
                    Wether to use full covariance matrix or not.
                    Determines the shape of the variance output.
-
         Returns:
         --------
-        mean : tf.tensor of shape (N, num_outputs)
-               Contains the mean value of the distribution for each input
-
-        var : tf.tensor of shape (N, num_outputs) or (N, N, num_outputs)
-              Contains the variance value of the distribution for each input
+        mean : torch tensor of shape (..., N, self.num_outputs)
+               Mean values from conditional_ND applied to X.
+        var : torch tensor of shape (..., N , self.num_outputs)
+              Variance values from conditional_ND applied to X.
+        prior_samples : torch tensor of shape (self.num_coeffs, ..., 
+                        N, self.num_outputs)
+                        Prior samples from conditional_ND applied to X.
         """
 
         # Let S = num_coeffs, D = num_outputs and N = num_samples

@@ -12,10 +12,6 @@ class DVIP_Dataset(Dataset):
             self.targets = None
 
         if normalize:
-            # self.inputs_mean = np.mean(inputs)
-            # self.inputs_std = np.std(inputs)
-            # self.inputs = (self.inputs - self.inputs_mean) / self.inputs_std
-
             if targets is not None:
                 self.targets_mean = np.mean(targets)
                 self.targets_std = np.std(targets)

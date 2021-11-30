@@ -3,7 +3,6 @@ import numpy as np
 import time
 from tqdm import tqdm
 from utils import *
-import pkbar
 
 
 def train(model, training_generator, optimizer, epochs=2000, device=None):
@@ -13,7 +12,8 @@ def train(model, training_generator, optimizer, epochs=2000, device=None):
     batch_size = training_generator.batch_size
 
     length_dataset = len(training_generator.dataset)
-    assert batch_size <= length_dataset
+    if batch_size <= length_dataset:
+        batch_size = length_dataset
 
     # Generate variables and operations for the minimizer and initialize variables
     train_per_epoch = len(training_generator)
@@ -28,9 +28,8 @@ def train(model, training_generator, optimizer, epochs=2000, device=None):
 
             for data, target in training_generator:
 
-                loss = model.train_step(
-                    optimizer, data.to(device), target.to(device)
-                )
+                loss = model.train_step(optimizer, data.to(device),
+                                        target.to(device))
                 avg_nelbo += loss
                 avg_rmse += model.likelihood.rmse_val
                 avg_nll += model.likelihood.nll_val
@@ -40,19 +39,14 @@ def train(model, training_generator, optimizer, epochs=2000, device=None):
                 RMSE = avg_rmse / train_per_epoch
 
                 if epoch % miniters == 0:
-                    tepoch.set_postfix(
-                        {
-                            "nelbo_train": "{:3f}".format(
-                                NELBO.detach().cpu().numpy()
-                            ),
-                            "rmse_train": "{:3f}".format(
-                                RMSE.detach().cpu().numpy()
-                            ),
-                            "nll_train": "{:3f}".format(
-                                NLL.detach().cpu().numpy()
-                            ),
-                        }
-                    )
+                    tepoch.set_postfix({
+                        "nelbo_train":
+                        "{:3f}".format(NELBO.detach().cpu().numpy()),
+                        "rmse_train":
+                        "{:3f}".format(RMSE.detach().cpu().numpy()),
+                        "nll_train":
+                        "{:3f}".format(NLL.detach().cpu().numpy()),
+                    })
 
 
 def predict(model, generator, device=None):
@@ -62,7 +56,8 @@ def predict(model, generator, device=None):
     batch_size = generator.batch_size
 
     length_dataset = len(generator.dataset)
-    assert batch_size <= length_dataset
+    if batch_size <= length_dataset:
+        batch_size = length_dataset
 
     # Generate variables and operar)
     means, vars = [], []
@@ -83,10 +78,13 @@ def predict(model, generator, device=None):
 
 def predict_prior_samples(model, generator, device=None):
 
+    model.eval()
+
     batch_size = generator.batch_size
     length_dataset = len(generator.dataset)
 
-    assert batch_size <= length_dataset
+    if batch_size <= length_dataset:
+        batch_size = length_dataset
 
     # Generate variables and operations for the minimizer and initialize variables
     train_per_epoch = len(generator)
@@ -96,10 +94,10 @@ def predict_prior_samples(model, generator, device=None):
             batch_x, _ = data
         except:
             batch_x = data
-        prior_samples = model.predict_prior_samples(batch_x.to(device))
+        prior_samples = model.get_prior_samples(batch_x.to(device))
 
         prior.append(prior_samples.detach().numpy())
 
-    prior = np.concatenate(prior)
+    prior = np.concatenate(prior, axis=2)
 
     return prior

@@ -2,6 +2,18 @@ import numpy as np
 from numpy.random import default_rng
 
 
+def test():
+    X_train = np.array([-1.0, 0.0, 3.0])
+    y_train = np.array([2.0, 4.0, 1.0])
+
+    X_test = np.linspace(-5, 5, 1000)
+    X_train = X_train[..., np.newaxis]
+    X_test = X_test[..., np.newaxis]
+    y_train = y_train[..., np.newaxis]
+
+    return X_train, y_train, X_test, None
+
+
 def SPGP():
     X_train = np.loadtxt("data/SPGP_dist/train_inputs")
     y_train = np.loadtxt("data/SPGP_dist/train_outputs")
@@ -11,7 +23,8 @@ def SPGP():
     X_test = X_test[..., np.newaxis]
     y_train = y_train[..., np.newaxis]
 
-    x_test = np.linspace(-10, 20, 1000)
+    X_test = np.linspace(-10, 20, 1000)
+    X_test = X_test[..., np.newaxis]
 
     return X_train, y_train, X_test, None
 

@@ -44,10 +44,10 @@ class Gaussian(Likelihood):
     def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None):
         """"""
         super().__init__(dtype, device)
-        self.log_variance = torch.nn.Parameter(
-            torch.tensor(log_variance, dtype=dtype, device=self.device)
-        )
-
+        self.log_variance = torch.tensor(log_variance,
+                                         dtype=dtype,
+                                         device=self.device)
+        self.log_variance = torch.nn.Parameter(self.log_variance)
         self.rmse_metric = torch.nn.MSELoss()
         self.nll_metric = torch.mean
 
@@ -84,8 +84,5 @@ class Gaussian(Likelihood):
         return self.logdensity(Y, Fmu, Fvar + self.log_variance.exp())
 
     def variational_expectations(self, Fmu, Fvar, Y):
-        return (
-            -0.5 * np.log(2 * np.pi)
-            - 0.5 * self.log_variance
-            - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
-        )
+        return (-0.5 * np.log(2 * np.pi) - 0.5 * self.log_variance - 0.5 *
+                ((Y - Fmu).square() + Fvar) / self.log_variance.exp())
