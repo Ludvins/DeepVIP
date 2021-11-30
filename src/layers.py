@@ -138,15 +138,14 @@ class VIPLayer(Layer):
 
         self.num_coeffs = num_regression_coeffs
 
+        self.q_mu = torch.tensor(
+            np.zeros((self.num_coeffs, num_outputs)),
+            dtype=self.dtype,
+            device=self.device,
+            requires_grad=False,
+        )
         # Regression Coefficients prior mean
-        """ self.q_mu = torch.nn.Parameter(
-            torch.tensor(
-                np.zeros((self.num_coeffs, num_outputs)),
-                dtype=self.dtype,
-                device=self.device,
-                requires_grad=False,
-            )) """
-        self.q_mu = torch.tensor(np.zeros((self.num_coeffs, num_outputs)))
+        self.q_mu = torch.nn.Parameter(self.q_mu)
 
         # If no mean function is given, constant 0 is used
         self.mean_function = mean_function
@@ -176,13 +175,12 @@ class VIPLayer(Layer):
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         triangular_q_sqrt = q_sqrt[li, lj]
-        """ self.q_sqrt_tri = torch.nn.Parameter(
-            torch.tensor(
-                triangular_q_sqrt,
-                dtype=self.dtype,
-                device=self.device,
-            )) """
-        self.q_sqrt_tri = torch.tensor(triangular_q_sqrt)
+        self.q_sqrt_tri = torch.tensor(
+            triangular_q_sqrt,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        self.q_sqrt_tri = torch.nn.Parameter(self.q_sqrt_tri)
 
     def conditional_ND(self, X, full_cov=False):
         """
@@ -315,4 +313,4 @@ class VIPLayer(Layer):
         # Mean term
         KL += 0.5 * torch.sum(torch.square(self.q_mu))
 
-        return KL + self.generative_function.KL()
+        return KL  #+ self.generative_function.KL()

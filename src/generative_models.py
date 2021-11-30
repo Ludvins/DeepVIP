@@ -255,24 +255,24 @@ class BayesianNN(GenerativeFunction):
                     _in,
                     _out,
                     # Sampler the prior values from a Gaussian distribution
-                    w_mean_prior=torch.normal(mean=0.0,
-                                              std=0.01,
+                    w_mean_prior=torch.normal(mean=.0,
+                                              std=.01,
                                               size=(_in, _out),
                                               generator=self.generator),
                     w_log_std_prior=torch.log(
                         torch.abs(
                             torch.normal(mean=.01,
-                                         std=2.0,
+                                         std=.0,
                                          size=(_in, _out),
                                          generator=self.generator))),
-                    b_mean_prior=torch.normal(mean=0.01,
-                                              std=0.1,
+                    b_mean_prior=torch.normal(mean=.01,
+                                              std=.1,
                                               size=[_out],
                                               generator=self.generator),
                     b_log_std_prior=torch.log(
                         torch.abs(
                             torch.normal(mean=.0,
-                                         std=2.1,
+                                         std=.1,
                                          size=[_out],
                                          generator=self.generator))),
                 ))
