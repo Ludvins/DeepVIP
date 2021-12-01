@@ -197,6 +197,7 @@ class DVIP_Base(torch.nn.Module):
 
         # The first input values are the original ones
         F = sX
+
         for layer in self.vip_layers:
             F, Fmean, Fvar, Fprior = layer.sample_from_conditional(
                 F, full_cov=full_cov)

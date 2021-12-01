@@ -71,7 +71,6 @@ class Layer(torch.nn.Module):
                         generator=self.generator,
                         dtype=self.dtype,
                         device=self.device)
-
         mean, var, prior_samples = self.conditional_ND(X, full_cov=full_cov)
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
@@ -228,21 +227,20 @@ class VIPLayer(Layer):
 
         # Let S = num_coeffs, D = num_outputs and N = num_samples
 
+        # Shape (S, ... , N, D)
+        sX = torch.tile(X.unsqueeze(0),
+                        (self.num_coeffs, *np.ones(X.ndim, dtype=int)))
         # Shape (S, ..., N, D)
-        X = torch.tile(X.unsqueeze(0),
-                       (self.num_coeffs, *np.ones(X.ndim, dtype=int)))
-        f = self.generative_function(X)
-        # Compute mean value, shape (1, N, D)
+        f = self.generative_function(sX)
+        # Compute mean value, shape (1, ... , N, D)
         m = torch.mean(f, dim=0, keepdims=True)
 
-        inv_sqrt = 1 / torch.sqrt(
+        # Compute regresion function, shape (S, ... , N, D)
+        phi = (f - m) / torch.sqrt(
             torch.tensor(self.num_coeffs).type(self.dtype))
-        # Compute regresion function, shape (N, S, D)
-        phi = inv_sqrt * (f - m)
-
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
-        # phi has shape (N, S, D)
+        # phi has shape (S, ... , N, D)
         mean = m.squeeze(axis=0) + torch.einsum("s...nd,sd->...nd", phi,
                                                 self.q_mu)
 
@@ -290,15 +288,12 @@ class VIPLayer(Layer):
                      q_mu^T q_mu - M - log |q_sqrt^T q_sqrt| )
         """
 
-        # Recover triangular matrix from array
-        q_sqrt = (torch.zeros(
-            (self.num_coeffs, self.num_coeffs,
-             self.num_outputs)).to(self.dtype).to(self.device))
-        li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
-        q_sqrt[li, lj] = self.q_sqrt_tri
-
-        diag = torch.diagonal(q_sqrt, dim1=0, dim2=1)
-
+        # self.q_sqrt_tri stores the triangular matrix using indexes
+        #  (0,0), (1,0), (1,1), (2,0), (2,1), (2,2), (3,0)....
+        #  knowing this, the diagonal is stored at positions 0, 2, 5, 9, 13...
+        #  which can be created using np.cumsum
+        diag_indexes = np.cumsum(np.arange(1, self.num_coeffs + 1)) - 1
+        diag = self.q_sqrt_tri[diag_indexes]
         # Constant dimensionality term
         KL = -0.5 * self.num_outputs * self.num_coeffs
 
