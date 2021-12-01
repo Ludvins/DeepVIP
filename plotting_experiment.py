@@ -45,6 +45,10 @@ if args.activation == "tanh":
     activation = torch.tanh
 elif args.activation == "relu":
     activation = torch.relu
+elif args.activation == "softplus":
+    activation = torch.nn.Softplus()
+elif args.activation == "sigmoid":
+    activation = torch.sigmoid
 
 n_samples, input_dim, output_dim, y_mean, y_std = check_data(
     X_train, y_train, verbose)
@@ -59,34 +63,31 @@ torch.backends.cudnn.benchmark = True
 ll = Gaussian()
 
 # Get VIP layers
-layers = init_layers(
-    X_train,
-    y_train,
-    vip_layers,
-    regression_coeffs,
-    bnn_structure,
-    activation=activation,
-    seed=seed,
-)
+layers = init_layers(X_train,
+                     y_train,
+                     vip_layers,
+                     regression_coeffs,
+                     bnn_structure,
+                     activation=activation,
+                     seed=seed,
+                     device=device)
 
 train_dataset = DVIP_Dataset(X_train, y_train)
 test_dataset = DVIP_Dataset(X_test, y_test, normalize=False)
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size)
+predict_loader = DataLoader(train_dataset, batch_size=len(train_dataset))
+test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
 
 # Create DVIP object
 dvip = DVIP_Base(
     ll,
     layers,
-    len(train_loader.dataset),
-    num_samples=3,
+    len(train_dataset),
+    num_samples=10,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
 )
-""" dvip.print_variables()
-prior_samples = dvip.get_prior_samples(torch.tensor(X_train))
-plot_prior_over_layers(X_train, prior_samples.detach().cpu().numpy()) """
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=0.1)
@@ -97,11 +98,10 @@ train(dvip, train_loader, opt, epochs=args.epochs)
 dvip.print_variables()
 
 # Predict Train and Test
-train_loader = DataLoader(train_dataset, batch_size=batch_size)
-train_mean, train_var = predict(dvip, train_loader)
+train_mean, train_var = predict(dvip, predict_loader)
 test_mean, test_var = predict(dvip, test_loader)
 
-train_prior_samples = predict_prior_samples(dvip, train_loader)
+train_prior_samples = predict_prior_samples(dvip, predict_loader)
 test_prior_samples = predict_prior_samples(dvip, test_loader)
 
 # Create plot title and path
