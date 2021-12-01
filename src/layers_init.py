@@ -5,7 +5,7 @@ from src.generative_models import GaussianSampler, BayesianNN
 
 
 class LinearProjection:
-    def __init__(self, matrix):
+    def __init__(self, matrix, device):
         """
         Encapsulates a linear projection defined by a Matrix
 
@@ -14,24 +14,23 @@ class LinearProjection:
         matrix : Torch tensor of shape (N, M)
                  Contains the linear projection
         """
-        self.P = matrix
+        self.P = torch.tensor(matrix, dtype=torch.float64, device=device)
 
     def __call__(self, inputs):
         """
         Applies the linear transformation to the given input.
         """
-        return torch.matmul(inputs, torch.tensor(self.P.T))
+        return torch.einsum("...a, ab -> ...b", inputs, self.P)
 
 
-def init_layers(
-    X,
-    Y,
-    inner_dims,
-    regression_coeffs=20,
-    structure=[10, 10],
-    activation=torch.tanh,
-    seed=0,
-):
+def init_layers(X,
+                Y,
+                inner_dims,
+                regression_coeffs=20,
+                structure=[10, 10],
+                activation=torch.tanh,
+                seed=0,
+                device=None):
     """
     Creates the Variational Implicit Process layers using the given
     information. If the dimensionality is reducen between layers,
@@ -92,13 +91,13 @@ def init_layers(
 
         # No dimension change, identity matrix
         elif dim_in == dim_out:
-            mf = LinearProjection(np.identity(n=dim_in))
+            mf = LinearProjection(np.identity(n=dim_in), device=device)
 
         # Dimensionality reduction, PCA using svd decomposition
         elif dim_in > dim_out:
             _, _, V = np.linalg.svd(X_running, full_matrices=False)
 
-            mf = LinearProjection(V[:dim_out, :])
+            mf = LinearProjection(V[:dim_out, :].T, device=device)
             # Apply the projection to the running data,
             X_running = X_running @ V[:dim_out].T
 
