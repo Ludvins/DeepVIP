@@ -84,10 +84,12 @@ dvip = DVIP_Base(
     ll,
     layers,
     len(train_dataset),
-    num_samples=10,
+    num_samples=5,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
 )
+
+dvip.print_variables()
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=0.1)

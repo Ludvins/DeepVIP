@@ -137,13 +137,13 @@ class VIPLayer(Layer):
 
         self.num_coeffs = num_regression_coeffs
 
+        # Regression Coefficients prior mean
         self.q_mu = torch.tensor(
             np.zeros((self.num_coeffs, num_outputs)),
             dtype=self.dtype,
             device=self.device,
             requires_grad=False,
         )
-        # Regression Coefficients prior mean
         self.q_mu = torch.nn.Parameter(self.q_mu)
 
         # If no mean function is given, constant 0 is used
@@ -180,6 +180,14 @@ class VIPLayer(Layer):
             device=self.device,
         )
         self.q_sqrt_tri = torch.nn.Parameter(self.q_sqrt_tri)
+
+    def freeze_posterior(self):
+        self.q_mu.requires_grad = False
+        self.q_sqrt_tri.requires_grad = False
+        self.log_layer_noise.requires_grad = False
+
+    def freeze_prior(self):
+        self.generative_function.freeze_parameters()
 
     def conditional_ND(self, X, full_cov=False):
         """

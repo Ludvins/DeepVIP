@@ -345,6 +345,17 @@ class DVIP_Base(torch.nn.Module):
 
         return metrics
 
+    def freeze_posterior(self):
+        for layer in self.vip_layers:
+            layer.freeze_posterior()
+
+    def freeze_prior(self):
+        for layer in self.vip_layers:
+            layer.freeze_prior()
+
+    def freeze_ll_variance(self):
+        self.likelihood.log_variance.requires_grad = False
+
     def print_variables(self):
         import numpy as np
 

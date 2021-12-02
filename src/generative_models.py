@@ -85,6 +85,10 @@ class GenerativeFunction(torch.nn.Module):
         self.input_dim = input_dim
         self.dtype = dtype
 
+    def freeze_parameters(self):
+        for param in self.parameters():
+            param.requires_grad = False
+
     def forward(self):
         """
         Generates the function samples.
