@@ -427,14 +427,12 @@ class GP(GenerativeFunction):
 
         # Create sample from posterior distribution using the cholesky
         #  decomposition of the covariance matrix
-        #  shape (20, 3, N, N)
+        #  shape (..., N, N)
         L = torch.linalg.cholesky(cov + 1e-5 * torch.eye(cov.shape[-1]))
-        # (20, 3, 1)
+        # (..., N, D_out)
+        z = self.gaussian_sampler((*L.shape[:-1], self.output_dim))
 
-        z = self.gaussian_sampler(L.shape[:-1])
-        z = z.unsqueeze(-1)
-
-        # Shape (20, 3, N, 1)
+        # Shape (..., N, 1)
         return mu + L @ z
 
     def KL(self):
