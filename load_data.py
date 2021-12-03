@@ -23,10 +23,10 @@ def SPGP():
     X_test = X_test[..., np.newaxis]
     y_train = y_train[..., np.newaxis]
 
-    X_test = np.linspace(-5, 5, 1000)
+    X_test = np.linspace(-1, 8, 1000)
     X_test = X_test[..., np.newaxis]
 
-    X_train = (X_train - np.mean(X_train)) / np.std(X_train)
+    #X_train = (X_train - np.mean(X_train)) / np.std(X_train)
 
     return X_train, y_train, X_test, None
 

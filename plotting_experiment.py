@@ -1,12 +1,9 @@
 from src.dataset import DVIP_Dataset
 from utils import (
     plot_train_test,
-    check_data,
     build_plot_name,
-    get_parser,
     plot_prior_over_layers,
 )
-from load_data import SPGP, synthetic, test
 
 import torch
 from torch.utils.data import DataLoader
@@ -17,74 +14,37 @@ from src.likelihood import Gaussian
 from src.dvip import DVIP_Base
 from src.layers_init import init_layers
 
-# Parse dataset
-parser = get_parser()
-args = parser.parse_args()
+from process_flags import manage_experiment_configuration
 
-# Load data
-if args.dataset == "SPGP":
-    X_train, y_train, X_test, y_test = SPGP()
-elif args.dataset == "synthetic":
-    X_train, y_train, X_test, y_test = synthetic()
-elif args.dataset == "test":
-    X_train, y_train, X_test, y_test = test()
-
-# Get experiments variables
-epochs = args.epochs
-bnn_structure = args.bnn_structure
-seed = args.seed
-regression_coeffs = args.regression_coeffs
-lr = args.lr
-verbose = args.verbose
-warmup = args.warmup
-
-if len(args.vip_layers) == 1:
-    vip_layers = args.vip_layers[0]
-
-if args.activation == "tanh":
-    activation = torch.tanh
-elif args.activation == "relu":
-    activation = torch.relu
-elif args.activation == "softplus":
-    activation = torch.nn.Softplus()
-elif args.activation == "sigmoid":
-    activation = torch.sigmoid
-
-n_samples, input_dim, output_dim, y_mean, y_std = check_data(
-    X_train, y_train, verbose)
-batch_size = args.batch_size or n_samples
+args = manage_experiment_configuration()
 
 # CUDA for PyTorch
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda:0" if use_cuda else "cpu")
 torch.backends.cudnn.benchmark = True
-
-# Gaussian Likelihood
-ll = Gaussian()
+vars(args)["device"] = device
 
 # Get VIP layers
-layers = init_layers(X_train,
-                     y_train,
-                     vip_layers,
-                     regression_coeffs,
-                     bnn_structure,
-                     activation=activation,
-                     seed=seed,
-                     device=device)
+layers = init_layers(**vars(args))
 
-train_dataset = DVIP_Dataset(X_train, y_train)
-test_dataset = DVIP_Dataset(X_test, y_test, normalize=False)
+train_dataset = DVIP_Dataset(args.X_train, args.y_train)
+test_dataset = DVIP_Dataset(args.X_test, args.y_test, normalize=False)
 
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+train_loader = DataLoader(train_dataset,
+                          batch_size=args.batch_size,
+                          shuffle=True)
 predict_loader = DataLoader(train_dataset, batch_size=len(train_dataset))
 test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
+
+# Instantiate Likelihood
+ll = Gaussian()
 
 # Create DVIP object
 dvip = DVIP_Base(
     ll,
     layers,
     len(train_dataset),
-    num_samples=5,
+    num_samples=args.num_samples_train,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
 )
@@ -92,12 +52,14 @@ dvip = DVIP_Base(
 dvip.print_variables()
 
 # Define optimizer and compile model
-opt = torch.optim.Adam(dvip.parameters(), lr=0.1)
+opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
 # Perform training
 train(dvip, train_loader, opt, epochs=args.epochs)
 
 dvip.print_variables()
+
+dvip.num_samples = args.num_samples_test
 
 # Predict Train and Test
 train_mean, train_var = predict(dvip, predict_loader)
@@ -107,24 +69,15 @@ train_prior_samples = predict_prior_samples(dvip, predict_loader)
 test_prior_samples = predict_prior_samples(dvip, test_loader)
 
 # Create plot title and path
-fig_title, path = build_plot_name(
-    vip_layers,
-    bnn_structure,
-    input_dim,
-    output_dim,
-    epochs,
-    n_samples,
-    args.dataset,
-    args.name_flag,
-)
+fig_title, path = build_plot_name(**vars(args))
 
 plot_train_test(
     (train_mean, train_var),
     (test_mean, test_var),
-    X_train,
-    y_train,
-    X_test,
-    y_test,
+    args.X_train,
+    args.y_train,
+    args.X_test,
+    args.y_test,
     train_prior_samples,
     test_prior_samples,
     title=fig_title,

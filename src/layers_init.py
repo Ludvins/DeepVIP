@@ -1,7 +1,7 @@
 from src.layers import VIPLayer
 import numpy as np
 import torch
-from src.generative_models import GaussianSampler, BayesianNN
+from src.generative_models import BayesianNN, GP, GP_Inducing
 
 
 class LinearProjection:
@@ -23,14 +23,9 @@ class LinearProjection:
         return torch.einsum("...a, ab -> ...b", inputs, self.P)
 
 
-def init_layers(X,
-                Y,
-                inner_dims,
-                regression_coeffs=20,
-                structure=[10, 10],
-                activation=torch.tanh,
-                seed=0,
-                device=None):
+def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
+                bnn_structure, activation, use_kmeans, num_inducing, seed,
+                device, **kwargs):
     """
     Creates the Variational Implicit Process layers using the given
     information. If the dimensionality is reducen between layers,
@@ -47,7 +42,7 @@ def init_layers(X,
         Contains the input features.
     Y : tf.tensor of shape (num_data, output_dim)
         Contains the input labels
-    inner_dims : integer or list of integers
+    vip_layers : integer or list of integers
                  Indicates the number of VIP layers to use. If
                  an integer is used, as many layers as its value
                  are created, with output dimension output_dim.
@@ -70,20 +65,24 @@ def init_layers(X,
            Random seed
     """
 
+    labels = (y_train - np.mean(y_train, keepdims=True, axis=0)) / np.std(
+        y_train, keepdims=True, axis=0)
+
     # Create VIP layers. If integer, replicate output dimension
-    if isinstance(inner_dims, (int, np.integer)):
+    if isinstance(vip_layers, (int, np.integer)):
         dims = np.concatenate(
-            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1]))
+            ([X_train.shape[1]],
+             np.ones(vip_layers, dtype=int) * y_train.shape[1]))
     # Otherwise, append thedata dimensions to the array.
     else:
-        dims = [X.shape[1]] + inner_dims + [Y.shape[1]]
+        dims = [X_train.shape[1]] + vip_layers + [y_train.shape[1]]
 
     # Initialize layers array
     layers = []
     # We maintain a copy of X, where each projection is applied. That is,
     # if two data reductions are made, the matrix of the second is computed
     # using the projected (from the first projection) data.
-    X_running = np.copy(X)
+    X_running = np.copy(X_train)
     for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
         # Las layer has no transformation
         if i == len(dims) - 2:
@@ -105,17 +104,35 @@ def init_layers(X,
             raise NotImplementedError("Dimensionality augmentation is not"
                                       " handled currently.")
 
-        # Create the Generation function, i.e, the Bayesian Neural Network
-        bayesian_network = BayesianNN(input_dim=dim_in,
-                                      structure=structure,
-                                      activation=activation,
-                                      output_dim=dim_out,
-                                      seed=seed)
+        # Create the Generation function
+        if genf == "BNN":
+            f = BayesianNN(input_dim=dim_in,
+                           structure=bnn_structure,
+                           activation=activation,
+                           output_dim=dim_out,
+                           device=device,
+                           seed=seed)
+        elif genf == "GP":
+            f = GP(torch.tensor(X_running),
+                   torch.tensor(labels),
+                   device=device)
+        elif genf == "GPI":
+            z = None
+            if use_kmeans:
+                from sklearn.cluster import KMeans
+                km = KMeans(num_inducing)
+                km.fit(X_running)
+                z = km.cluster_centers_
+            f = GP_Inducing(input_dim=dim_in,
+                            output_dim=dim_out,
+                            inducing=z,
+                            num_inducing=num_inducing,
+                            device=device)
 
         # Create layer
         layers.append(
             VIPLayer(
-                bayesian_network,
+                f,
                 num_regression_coeffs=regression_coeffs,
                 num_outputs=dim_out,
                 input_dim=dim_in,
