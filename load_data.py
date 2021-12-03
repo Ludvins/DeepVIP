@@ -6,7 +6,7 @@ def test():
     X_train = np.array([-2.0, 0.0, 5.0])
     y_train = np.array([2.0, 4.0, 1.0])
 
-    X_test = np.linspace(-5, 6, 1000)
+    X_test = np.linspace(-5, 6, 50)
     X_train = X_train[..., np.newaxis]
     X_test = X_test[..., np.newaxis]
     y_train = y_train[..., np.newaxis]
@@ -26,7 +26,7 @@ def SPGP():
     X_test = np.linspace(-1, 8, 1000)
     X_test = X_test[..., np.newaxis]
 
-    #X_train = (X_train - np.mean(X_train)) / np.std(X_train)
+    # X_train = (X_train - np.mean(X_train)) / np.std(X_train)
 
     return X_train, y_train, X_test, None
 
@@ -35,7 +35,7 @@ def synthetic():
     rng = default_rng(seed=0)
 
     def f(x):
-        return (np.cos(5 * x) / (np.abs(x) + 1))
+        return np.cos(5 * x) / (np.abs(x) + 1)
 
     X_train = rng.standard_normal(300)
     y_train = f(X_train) + rng.standard_normal(X_train.shape) * 0.1

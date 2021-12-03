@@ -14,14 +14,26 @@ def manage_experiment_configuration():
 
     # Manage Dataset
     if args.dataset == "SPGP":
-        FLAGS["X_train"], FLAGS["y_train"], FLAGS["X_test"], FLAGS[
-            "y_test"] = SPGP()
+        (
+            FLAGS["X_train"],
+            FLAGS["y_train"],
+            FLAGS["X_test"],
+            FLAGS["y_test"],
+        ) = SPGP()
     elif args.dataset == "synthetic":
-        FLAGS["X_train"], FLAGS["y_train"], FLAGS["X_test"], FLAGS[
-            "y_test"] = synthetic()
+        (
+            FLAGS["X_train"],
+            FLAGS["y_train"],
+            FLAGS["X_test"],
+            FLAGS["y_test"],
+        ) = synthetic()
     elif args.dataset == "test":
-        FLAGS["X_train"], FLAGS["y_train"], FLAGS["X_test"], FLAGS[
-            "y_test"] = test()
+        (
+            FLAGS["X_train"],
+            FLAGS["y_train"],
+            FLAGS["X_test"],
+            FLAGS["y_test"],
+        ) = test()
 
     check_data(args)
 
@@ -82,20 +94,25 @@ def get_parser():
         type=int,
         default=3,
         help="Number of Monte Carlo samples of the posterior to "
-        "use during training")
+        "use during training",
+    )
     parser.add_argument(
         "--num_samples_test",
         type=int,
         default=10,
         help="Number of Monte Carlo samples of the posterior to "
-        "use during inference")
+        "use during inference",
+    )
     parser.add_argument(
         "--genf",
         type=str,
         default="BNN",
-        help=("Generative function or model to use. Bayesian Neural Network"
-              " (BNN), Gaussian Process (GP) or Gaussian Process with "
-              " Inducing Points (GPI)"))
+        help=(
+            "Generative function or model to use. Bayesian Neural Network"
+            " (BNN), Gaussian Process (GP) or Gaussian Process with "
+            " Inducing Points (GPI)"
+        ),
+    )
     parser.add_argument(
         "--dataset",
         type=str,
@@ -138,13 +155,15 @@ def get_parser():
         "--num_inducing",
         type=int,
         default=50,
-        help="The number of inducing points to use when using GPI.")
+        help="The number of inducing points to use when using GPI.",
+    )
     parser.add_argument(
         "--use_kmeans",
         type=bool,
         default=True,
         help="Wether to use KMeans initialization for the inducing points"
-        "of the GP.")
+        "of the GP.",
+    )
     parser.add_argument(
         "--activation",
         type=str,

@@ -63,14 +63,16 @@ class Layer(torch.nn.Module):
                Mean values from conditional_ND applied to X.
         var : torch tensor of shape (..., N , self.num_outputs)
               Variance values from conditional_ND applied to X.
-        prior_samples : torch tensor of shape (self.num_coeffs, ..., 
+        prior_samples : torch tensor of shape (self.num_coeffs, ...,
                         N, self.num_outputs)
                         Prior samples from conditional_ND applied to X.
         """
-        z = torch.randn(X.shape,
-                        generator=self.generator,
-                        dtype=self.dtype,
-                        device=self.device)
+        z = torch.randn(
+            X.shape,
+            generator=self.generator,
+            dtype=self.dtype,
+            device=self.device,
+        )
         mean, var, prior_samples = self.conditional_ND(X, full_cov=full_cov)
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
@@ -78,34 +80,36 @@ class Layer(torch.nn.Module):
 
 
 class VIPLayer(Layer):
-    def __init__(self,
-                 generative_function,
-                 num_regression_coeffs,
-                 num_outputs,
-                 input_dim,
-                 log_layer_noise=-5,
-                 mean_function=None,
-                 seed=0,
-                 dtype=torch.float64):
+    def __init__(
+        self,
+        generative_function,
+        num_regression_coeffs,
+        num_outputs,
+        input_dim,
+        log_layer_noise=-5,
+        mean_function=None,
+        seed=0,
+        dtype=torch.float64,
+    ):
         """
         A variational implicit process layer.
 
         The underlying model performs a Bayesian linear regression
         approximation
-            
+
         f(x) = mean_function(x) + a^T \phi(x)
-        
+
         with
-        
+
         phi(x) = 1/S (f_1(x) - m(x), ..., f_S(x) - m(x)),  a ~ N(0, I)
-        
+
         Where S randomly sampled functions are used and m(x) denotes
         their empirical mean.
 
         The variational distribution over the regression coefficients is
-        
+
             Q(a) = N(a_mu, a_sqrt a_sqrt^T)
-        
+
         The layer holds D_out independent VIPs with the same kernel
         and regression coefficients.
 
@@ -120,7 +124,7 @@ class VIPLayer(Layer):
                                 Coincides with the number of samples of f.
         input_dim : int
                     Dimensionality of the given features. Used to
-                    pre-fix the shape of the different layers of the model.        
+                    pre-fix the shape of the different layers of the model.
         num_outputs : int
                       The number of independent VIP in this layer.
                       More precisely, q_mu has shape (S, num_outputs)
@@ -161,7 +165,8 @@ class VIPLayer(Layer):
                 np.ones(num_outputs) * log_layer_noise,
                 dtype=self.dtype,
                 device=self.device,
-            ))
+            )
+        )
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
@@ -228,16 +233,16 @@ class VIPLayer(Layer):
                Mean values from conditional_ND applied to X.
         var : torch tensor of shape (..., N , self.num_outputs)
               Variance values from conditional_ND applied to X.
-        prior_samples : torch tensor of shape (self.num_coeffs, ..., 
+        prior_samples : torch tensor of shape (self.num_coeffs, ...,
                         N, self.num_outputs)
                         Prior samples from conditional_ND applied to X.
         """
 
         # Let S = num_coeffs, D = num_outputs and N = num_samples
-
         # Shape (S, ... , N, D)
-        sX = torch.tile(X.unsqueeze(0),
-                        (self.num_coeffs, *np.ones(X.ndim, dtype=int)))
+        sX = torch.tile(
+            X.unsqueeze(0), (self.num_coeffs, *np.ones(X.ndim, dtype=int))
+        )
         # Shape (S, ..., N, D)
         f = self.generative_function(sX)
         # Compute mean value, shape (1, ... , N, D)
@@ -245,17 +250,21 @@ class VIPLayer(Layer):
 
         # Compute regresion function, shape (S, ... , N, D)
         phi = (f - m) / torch.sqrt(
-            torch.tensor(self.num_coeffs).type(self.dtype))
+            torch.tensor(self.num_coeffs).type(self.dtype)
+        )
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, ... , N, D)
-        mean = m.squeeze(axis=0) + torch.einsum("s...nd,sd->...nd", phi,
-                                                self.q_mu)
+        mean = m.squeeze(axis=0) + torch.einsum(
+            "s...nd,sd->...nd", phi, self.q_mu
+        )
 
         # Shape (S, S, D)
-        q_sqrt = (torch.zeros(
-            (self.num_coeffs, self.num_coeffs,
-             self.num_outputs)).to(self.dtype).to(self.device))
+        q_sqrt = (
+            torch.zeros((self.num_coeffs, self.num_coeffs, self.num_outputs))
+            .to(self.dtype)
+            .to(self.device)
+        )
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
         # Shape (S, S, D)

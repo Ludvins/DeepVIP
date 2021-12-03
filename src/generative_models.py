@@ -66,12 +66,9 @@ class GaussianSampler(NoiseSampler):
 
 
 class GenerativeFunction(torch.nn.Module):
-    def __init__(self,
-                 input_dim,
-                 output_dim,
-                 device=None,
-                 seed=0,
-                 dtype=torch.float64):
+    def __init__(
+        self, input_dim, output_dim, device=None, seed=0, dtype=torch.float64
+    ):
         """
         Generates samples from a stochastic function using sampled
         noise values and input values.
@@ -117,9 +114,9 @@ class BayesLinear(GenerativeFunction):
         dtype=torch.float64,
     ):
         """
-        Generates samples from a stochastic Bayesian Linear function 
+        Generates samples from a stochastic Bayesian Linear function
         f(x) = w^T x + b,   where w and b follow a Gaussian distribution,
-        parameterized by their mean and log standard deviation.  
+        parameterized by their mean and log standard deviation.
 
         Parameters:
         -----------
@@ -138,11 +135,9 @@ class BayesLinear(GenerativeFunction):
         dtype : data-type
                 The dtype of the layer's computations and weights.
         """
-        super(BayesLinear, self).__init__(input_dim,
-                                          output_dim,
-                                          device=device,
-                                          seed=seed,
-                                          dtype=dtype)
+        super(BayesLinear, self).__init__(
+            input_dim, output_dim, device=device, seed=seed, dtype=dtype
+        )
 
         # Instantiate Standard Gaussian sampler
         self.gaussian_sampler = GaussianSampler(seed)
@@ -164,7 +159,8 @@ class BayesLinear(GenerativeFunction):
         # Check the given input is valid
         if inputs.shape[-1] != self.input_dim:
             raise RuntimeError(
-                "Input shape does not match stored data dimension")
+                "Input shape does not match stored data dimension"
+            )
 
         # Given an input of shape (A1, A2, ..., AM, N, D), random values are
         # generated over every dimension but the batch one (N), that is,
@@ -173,7 +169,7 @@ class BayesLinear(GenerativeFunction):
         z_w_shape = (*inputs.shape[:-2], self.input_dim, self.output_dim)
         z_b_shape = (*inputs.shape[:-2], 1, self.output_dim)
 
-        #self.gaussian_sampler.set_seed()
+        # self.gaussian_sampler.set_seed()
 
         # Generate Gaussian values
         z_w = self.gaussian_sampler(z_w_shape)
@@ -189,8 +185,8 @@ class BayesLinear(GenerativeFunction):
 
     def KL(self):
         """
-        Computes the KL divergence of w and b from their prior value. 
-        
+        Computes the KL divergence of w and b from their prior value.
+
         Returns
         -------
         KL : int
@@ -202,41 +198,47 @@ class BayesLinear(GenerativeFunction):
         w_Sigma = torch.flatten(torch.square(torch.exp(self.weight_log_sigma)))
         w_m_prior = torch.flatten(self.w_mean_prior)
         w_Sigma_prior = torch.flatten(
-            torch.square(torch.exp(self.w_log_std_prior)))
+            torch.square(torch.exp(self.w_log_std_prior))
+        )
 
         # Compute b's flattened mean and covariance diagonal matrix
         b_m = torch.flatten(self.bias_mu)
         b_Sigma = torch.flatten(torch.square(torch.exp(self.bias_log_sigma)))
         b_m_prior = torch.flatten(self.b_mean_prior)
         b_Sigma_prior = torch.flatten(
-            torch.square(torch.exp(self.b_log_std_prior)))
+            torch.square(torch.exp(self.b_log_std_prior))
+        )
 
         # Compute the KL divergence of w
         KL = -w_m.size(dim=0)
         KL += torch.sum(w_Sigma / w_Sigma_prior)
-        KL += torch.sum((w_m_prior - w_m)**2 / w_Sigma_prior)
+        KL += torch.sum((w_m_prior - w_m) ** 2 / w_Sigma_prior)
         KL += 2 * torch.sum(self.w_log_std_prior) - 2 * torch.sum(
-            self.weight_log_sigma)
+            self.weight_log_sigma
+        )
 
         # Compute the KL divergence of b
         KL -= b_m.size(dim=0)
         KL += torch.sum(b_Sigma / b_Sigma_prior)
-        KL += torch.sum((b_m_prior - b_m)**2 / b_Sigma_prior)
+        KL += torch.sum((b_m_prior - b_m) ** 2 / b_Sigma_prior)
         KL += 2 * torch.sum(self.b_log_std_prior) - 2 * torch.sum(
-            self.bias_log_sigma)
+            self.bias_log_sigma
+        )
 
         return KL / 2
 
 
 class BayesianNN(GenerativeFunction):
-    def __init__(self,
-                 structure,
-                 activation,
-                 input_dim=1,
-                 output_dim=1,
-                 seed=0,
-                 device=None,
-                 dtype=torch.float64):
+    def __init__(
+        self,
+        structure,
+        activation,
+        input_dim=1,
+        output_dim=1,
+        seed=0,
+        device=None,
+        dtype=torch.float64,
+    ):
         """
         Defines a Bayesian Neural Network.
 
@@ -253,11 +255,9 @@ class BayesianNN(GenerativeFunction):
         input_dim : int or array
                     Dimensionality of the input values `x`.
         """
-        super().__init__(input_dim,
-                         output_dim,
-                         device=device,
-                         seed=seed,
-                         dtype=dtype)
+        super().__init__(
+            input_dim, output_dim, device=device, seed=seed, dtype=dtype
+        )
 
         self.structure = structure
         self.activation = activation
@@ -276,32 +276,46 @@ class BayesianNN(GenerativeFunction):
                     _in,
                     _out,
                     # Sampler the prior values from a Gaussian distribution
-                    w_mean_prior=torch.normal(mean=.0,
-                                              std=0.01,
-                                              size=(_in, _out),
-                                              generator=self.generator),
+                    w_mean_prior=torch.normal(
+                        mean=0.0,
+                        std=0.01,
+                        size=(_in, _out),
+                        generator=self.generator,
+                    ),
                     w_log_std_prior=torch.log(
                         torch.abs(
-                            torch.normal(mean=.01,
-                                         std=0.5,
-                                         size=(_in, _out),
-                                         generator=self.generator))),
-                    b_mean_prior=torch.normal(mean=.01,
-                                              std=.1,
-                                              size=[_out],
-                                              generator=self.generator),
+                            torch.normal(
+                                mean=0.01,
+                                std=0.5,
+                                size=(_in, _out),
+                                generator=self.generator,
+                            )
+                        )
+                    ),
+                    b_mean_prior=torch.normal(
+                        mean=0.01,
+                        std=0.1,
+                        size=[_out],
+                        generator=self.generator,
+                    ),
                     b_log_std_prior=torch.log(
                         torch.abs(
-                            torch.normal(mean=.0,
-                                         std=1.1,
-                                         size=[_out],
-                                         generator=self.generator))),
+                            torch.normal(
+                                mean=0.0,
+                                std=1.1,
+                                size=[_out],
+                                generator=self.generator,
+                            )
+                        )
+                    ),
                     device=device,
-                    dtype=dtype))
+                    dtype=dtype,
+                )
+            )
         self.layers = torch.nn.ModuleList(layers)
 
     def forward(self, inputs):
-        """ Forward pass over each inner layer, activation is applied on every
+        """Forward pass over each inner layer, activation is applied on every
         but the last level.
         """
         x = inputs
@@ -311,8 +325,8 @@ class BayesianNN(GenerativeFunction):
         return self.layers[-1](x)
 
     def KL(self):
-        """ Computes the Kl divergence of the model as the addition of the 
-        KL divergences of its sub-models. 
+        """Computes the Kl divergence of the model as the addition of the
+        KL divergences of its sub-models.
         """
         return torch.stack([layer.KL() for layer in self.layers]).sum()
 
@@ -322,12 +336,12 @@ def RBF(X1, X2, l=1):
 
     Arguments
     ---------
-    
+
     X1 : torch tensor of shape (..., N, D)
          First input tensor
     X2 : torch tensor of shape (..., N, D)
          Second input tensor
-         
+
     Returns
     -------
     K : torch tensor of shape (..., N, N)
@@ -338,23 +352,25 @@ def RBF(X1, X2, l=1):
     # Shape (..., 1, N, D)
     Y = X2.unsqueeze(-3)
     # X - Y has shape (..., N, N, D) due to broadcasting
-    K = ((X - Y)**2).sum(-1)
+    K = ((X - Y) ** 2).sum(-1)
 
-    return torch.exp(-K / l**2)
+    return torch.exp(-K / l ** 2)
 
 
 class GP(GenerativeFunction):
-    def __init__(self,
-                 X,
-                 y,
-                 kernel=RBF,
-                 noise=1e-6,
-                 device=None,
-                 seed=0,
-                 dtype=torch.float64):
-        """ Encapsulates an exact Gaussian process. The Cholesky decomposition
+    def __init__(
+        self,
+        X,
+        y,
+        kernel=RBF,
+        noise=1e-6,
+        device=None,
+        seed=0,
+        dtype=torch.float64,
+    ):
+        """Encapsulates an exact Gaussian process. The Cholesky decomposition
         of the kernel is used in order to speed up computations.
-        
+
         Arguments
         ---------
         X : torch tensor of shape (N, D)
@@ -364,7 +380,7 @@ class GP(GenerativeFunction):
         kernel : callable
                  The desired kernel function to use, must accept batched
                  inputs (..., N, D) and compute the kernel matrix with shape
-                 (..., N, N). 
+                 (..., N, N).
                  Defaults to RBF.
         noise : float
                 Considered noise value in the Gaussian Process.
@@ -377,78 +393,68 @@ class GP(GenerativeFunction):
 
         N, input_dim = X.shape
         output_dim = y.shape[-1]
-        super(GP, self).__init__(input_dim,
-                                 output_dim,
-                                 device=device,
-                                 seed=seed,
-                                 dtype=dtype)
+        super(GP, self).__init__(
+            input_dim, output_dim, device=device, seed=seed, dtype=dtype
+        )
 
         # Instantiate Standard Gaussian sampler
         self.gaussian_sampler = GaussianSampler(seed)
 
-        # Instantiate the given inputs and kernel
-        self.X = X
+        # Instantiate the kernel
         self.kernel = kernel
-        # Compute K(X, X) and store it Shape (N, N)
-        self.K = self.kernel(X, X)
-        # Compute cholesky decmoposition, lower triangular
-        self.L = torch.linalg.cholesky(self.K + noise * torch.eye(N))
-        # Compute alpha = (K(X, X) + sigma I)^{-1} y
-        #  Shape (N, D_out)
-        self.alpha = torch.cholesky_solve(y, self.L)
 
     def forward(self, inputs):
-        """ Creates a sample from the posterior distribution of the 
+        """Creates a sample from the posterior distribution of the
         Gaussian process.
 
         Arguments
         ---------
         inputs : torch tensor of shape (..., M, D)
                  Batched input values
-                 
+
         Returns
         -------
         sample : torch tensor of shape (...., M, D_out)
                  Generated sample
         """
-        # Compute K(X*, X) shape (..., M, N)
-        Ks = self.kernel(inputs, self.X)
 
         # Compute the posterior mean
         #  Shape (..., M, D_out)
-        mu = Ks @ self.alpha
+        mu = 0
 
-        # Compute beta = (K(X, X) + sigma I)^{-1} K(X, X*)
-        beta = torch.cholesky_solve(torch.transpose(Ks, -1, -2), self.L)
         # Compute K(X*, X*)
-        Kss = self.kernel(inputs, inputs)
-        # The posterior covariance matrix is
-        #  K(X*, X*) -  K(X*, X) (K(X, X) + sigma I)^{-1} K(X, X*)
-        cov = Kss - Ks @ beta
+        cov = self.kernel(inputs, inputs)
 
         # Create sample from posterior distribution using the cholesky
         #  decomposition of the covariance matrix
+        #  shape (20, 3, N, N)
         L = torch.linalg.cholesky(cov + 1e-5 * torch.eye(cov.shape[-1]))
-        z = self.gaussian_sampler(mu.shape)
-        # sample = mu + Lz
-        return mu + torch.matmul(L, z)
+        # (20, 3, 1)
+        self.gaussian_sampler.set_seed()
+        z = self.gaussian_sampler(L.shape[:-1])
+        z = z.unsqueeze(-1)
+
+        # Shape (20, 3, N, 1)
+        return mu + L @ z
 
     def KL(self):
         return 0.0
 
 
 class GP_Inducing(GenerativeFunction):
-    def __init__(self,
-                 input_dim,
-                 output_dim,
-                 kernel=RBF,
-                 noise=1e-6,
-                 inducing=None,
-                 num_inducing=10,
-                 device=None,
-                 seed=0,
-                 dtype=torch.float64):
-        """ Gaussian process with inducing points. This Model holds the kernel,
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        kernel=RBF,
+        noise=1e-6,
+        inducing=None,
+        num_inducing=10,
+        device=None,
+        seed=0,
+        dtype=torch.float64,
+    ):
+        """Gaussian process with inducing points. This Model holds the kernel,
         variational parameters and inducing points.
 
         The underlying model at inputs X is
@@ -457,9 +463,9 @@ class GP_Inducing(GenerativeFunction):
         The variational distribution over the inducing points is
         q(v) = N(q_mu, q_sqrt q_sqrt^T)
 
-        The layer holds D_out independent GPs with the same kernel 
+        The layer holds D_out independent GPs with the same kernel
         and inducing points.
-        
+
         Arguments
         ---------
         input_dim : int or array
@@ -469,7 +475,7 @@ class GP_Inducing(GenerativeFunction):
         kernel : callable
                  The desired kernel function to use, must accept batched
                  inputs (..., N, D) and compute the kernel matrix with shape
-                 (..., N, N). 
+                 (..., N, N).
                  Defaults to RBF.
         noise : float
                 Considered noise value in the Gaussian Process.
@@ -485,11 +491,9 @@ class GP_Inducing(GenerativeFunction):
                 The dtype of the layer's computations and weights.
         """
 
-        super(GP_Inducing, self).__init__(input_dim,
-                                          output_dim,
-                                          device=device,
-                                          seed=seed,
-                                          dtype=dtype)
+        super(GP_Inducing, self).__init__(
+            input_dim, output_dim, device=device, seed=seed, dtype=dtype
+        )
 
         # If no inducing points are provided, initialice these to 0
         if inducing is None:
@@ -497,8 +501,10 @@ class GP_Inducing(GenerativeFunction):
         else:
             # If they are, check the dimensions are correct
             if output_dim != inducing.shape[1]:
-                raise Exception("Labels dimension does not coincide"
-                                " with inducing points dimension")
+                raise Exception(
+                    "Labels dimension does not coincide"
+                    " with inducing points dimension"
+                )
 
         # Create torch tensor and Parameter for the inducing points
         inducing = torch.tensor(
@@ -535,14 +541,14 @@ class GP_Inducing(GenerativeFunction):
         self.kernel = kernel
 
     def forward(self, inputs):
-        """ Creates a sample from the posterior distribution of the 
+        """Creates a sample from the posterior distribution of the
         Gaussian process.
 
         Arguments
         ---------
         inputs : torch tensor of shape (..., M, D)
                  Batched input values
-                 
+
         Returns
         -------
         sample : torch tensor of shape (...., M, D_out)
@@ -562,9 +568,13 @@ class GP_Inducing(GenerativeFunction):
         mean = A.transpose(-1, -2) @ self.q_mu
 
         # Shape (num_inducing, num_inducing, D_out, )
-        q_sqrt = (torch.zeros(
-            (self.num_inducing, self.num_inducing,
-             self.output_dim)).to(self.dtype).to(self.device))
+        q_sqrt = (
+            torch.zeros(
+                (self.num_inducing, self.num_inducing, self.output_dim)
+            )
+            .to(self.dtype)
+            .to(self.device)
+        )
         li, lj = torch.tril_indices(self.num_inducing, self.num_inducing)
         q_sqrt[li, lj] = self.q_sqrt_tri
         # Shape (num_inducing, num_inducing, D_out)
