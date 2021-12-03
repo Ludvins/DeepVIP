@@ -85,6 +85,7 @@ class VIPLayer(Layer):
                  input_dim,
                  log_layer_noise=-5,
                  mean_function=None,
+                 seed=0,
                  dtype=torch.float64):
         """
         A variational implicit process layer.
@@ -133,7 +134,7 @@ class VIPLayer(Layer):
                 The dtype of the layer's computations and weights.
                 Refer to tf.keras.layers.Layer for more information.
         """
-        super().__init__(dtype=dtype, input_dim=input_dim)
+        super().__init__(dtype=dtype, input_dim=input_dim, seed=seed)
 
         self.num_coeffs = num_regression_coeffs
 

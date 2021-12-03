@@ -70,6 +70,7 @@ class GenerativeFunction(torch.nn.Module):
                  input_dim,
                  output_dim,
                  device=None,
+                 seed=0,
                  dtype=torch.float64):
         """
         Generates samples from a stochastic function using sampled
@@ -88,6 +89,7 @@ class GenerativeFunction(torch.nn.Module):
         self.output_dim = output_dim
         self.input_dim = input_dim
         self.device = device
+        self.seed = seed
         self.dtype = dtype
 
     def freeze_parameters(self):
@@ -111,6 +113,7 @@ class BayesLinear(GenerativeFunction):
         b_mean_prior,
         b_log_std_prior,
         device=None,
+        seed=0,
         dtype=torch.float64,
     ):
         """
@@ -138,10 +141,11 @@ class BayesLinear(GenerativeFunction):
         super(BayesLinear, self).__init__(input_dim,
                                           output_dim,
                                           device=device,
+                                          seed=seed,
                                           dtype=dtype)
 
         # Instantiate Standard Gaussian sampler
-        self.gaussian_sampler = GaussianSampler()
+        self.gaussian_sampler = GaussianSampler(seed)
 
         # Store prior values
         self.w_mean_prior = torch.clone(w_mean_prior)
@@ -249,9 +253,12 @@ class BayesianNN(GenerativeFunction):
         input_dim : int or array
                     Dimensionality of the input values `x`.
         """
-        super().__init__(input_dim, output_dim, device=device, dtype=dtype)
+        super().__init__(input_dim,
+                         output_dim,
+                         device=device,
+                         seed=seed,
+                         dtype=dtype)
 
-        self.seed = seed
         self.structure = structure
         self.activation = activation
         self.generator = torch.Generator()
@@ -343,6 +350,7 @@ class GP(GenerativeFunction):
                  kernel=RBF,
                  noise=1e-6,
                  device=None,
+                 seed=0,
                  dtype=torch.float64):
         """ Encapsulates an exact Gaussian process. The Cholesky decomposition
         of the kernel is used in order to speed up computations.
@@ -366,15 +374,17 @@ class GP(GenerativeFunction):
         dtype : data-type
                 The dtype of the layer's computations and weights.
         """
+
         N, input_dim = X.shape
         output_dim = y.shape[-1]
         super(GP, self).__init__(input_dim,
                                  output_dim,
                                  device=device,
+                                 seed=seed,
                                  dtype=dtype)
 
         # Instantiate Standard Gaussian sampler
-        self.gaussian_sampler = GaussianSampler()
+        self.gaussian_sampler = GaussianSampler(seed)
 
         # Instantiate the given inputs and kernel
         self.X = X
@@ -436,6 +446,7 @@ class GP_Inducing(GenerativeFunction):
                  inducing=None,
                  num_inducing=10,
                  device=None,
+                 seed=0,
                  dtype=torch.float64):
         """ Gaussian process with inducing points. This Model holds the kernel,
         variational parameters and inducing points.
@@ -477,6 +488,7 @@ class GP_Inducing(GenerativeFunction):
         super(GP_Inducing, self).__init__(input_dim,
                                           output_dim,
                                           device=device,
+                                          seed=seed,
                                           dtype=dtype)
 
         # If no inducing points are provided, initialice these to 0
@@ -517,7 +529,7 @@ class GP_Inducing(GenerativeFunction):
         self.q_sqrt_tri = torch.nn.Parameter(self.q_sqrt_tri)
 
         # Instantiate Standard Gaussian sampler
-        self.gaussian_sampler = GaussianSampler()
+        self.gaussian_sampler = GaussianSampler(seed)
 
         # Instantiate the given kernel
         self.kernel = kernel
@@ -539,7 +551,7 @@ class GP_Inducing(GenerativeFunction):
         # Compute K(u, u) and store it. shape (num_inducing, num_inducing)
         Ku = self.kernel(self.inducing, self.inducing)
         # Compute cholesky decomposition, lower triangular
-        Lu = torch.linalg.cholesky(Ku + 1e-5 * torch.eye(Ku.shape[0]))
+        Lu = torch.linalg.cholesky(Ku + 1e-3 * torch.eye(Ku.shape[0]))
 
         # Shape (..., num_inducing, M)
         Kuf = self.kernel(self.inducing, inputs)

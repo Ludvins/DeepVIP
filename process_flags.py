@@ -45,6 +45,9 @@ def manage_experiment_configuration():
     else:
         FLAGS["vip_layers"] = args.vip_layers
 
+    if args.dtype == "float64":
+        FLAGS["dtype"] = torch.float64
+
     return args
 
 
@@ -164,6 +167,11 @@ def get_parser():
         "--verbose",
         type=int,
         default=1,
+    )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default="float64",
     )
     parser.add_argument(
         "--name_flag",

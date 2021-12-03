@@ -1,3 +1,4 @@
+from torch._C import _set_backcompat_keepdim_warn
 from src.layers import VIPLayer
 import numpy as np
 import torch
@@ -25,7 +26,7 @@ class LinearProjection:
 
 def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
                 bnn_structure, activation, use_kmeans, num_inducing, seed,
-                device, **kwargs):
+                device, dtype, **kwargs):
     """
     Creates the Variational Implicit Process layers using the given
     information. If the dimensionality is reducen between layers,
@@ -111,32 +112,37 @@ def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
                            activation=activation,
                            output_dim=dim_out,
                            device=device,
-                           seed=seed)
+                           seed=seed,
+                           dtype=dtype)
         elif genf == "GP":
             f = GP(torch.tensor(X_running),
                    torch.tensor(labels),
+                   seed=seed,
+                   dtype=dtype,
                    device=device)
         elif genf == "GPI":
             z = None
             if use_kmeans:
                 from sklearn.cluster import KMeans
-                km = KMeans(num_inducing)
+                km = KMeans(num_inducing, random_state=seed)
                 km.fit(X_running)
                 z = km.cluster_centers_
             f = GP_Inducing(input_dim=dim_in,
                             output_dim=dim_out,
                             inducing=z,
                             num_inducing=num_inducing,
+                            seed=seed,
+                            dtype=dtype,
                             device=device)
 
         # Create layer
         layers.append(
-            VIPLayer(
-                f,
-                num_regression_coeffs=regression_coeffs,
-                num_outputs=dim_out,
-                input_dim=dim_in,
-                mean_function=mf,
-            ))
+            VIPLayer(f,
+                     num_regression_coeffs=regression_coeffs,
+                     num_outputs=dim_out,
+                     input_dim=dim_in,
+                     mean_function=mf,
+                     seed=seed,
+                     dtype=dtype))
 
     return layers
