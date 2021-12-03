@@ -430,7 +430,7 @@ class GP(GenerativeFunction):
         #  shape (20, 3, N, N)
         L = torch.linalg.cholesky(cov + 1e-5 * torch.eye(cov.shape[-1]))
         # (20, 3, 1)
-        self.gaussian_sampler.set_seed()
+
         z = self.gaussian_sampler(L.shape[:-1])
         z = z.unsqueeze(-1)
 
