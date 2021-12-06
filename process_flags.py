@@ -37,9 +37,11 @@ def manage_experiment_configuration():
 
     check_data(args)
 
+    FLAGS["activation_str"] = args.activation
     # Manage Generative function
     if args.genf == "BNN":
         FLAGS["bnn_structure"] = args.bnn_structure
+
         if args.activation == "tanh":
             FLAGS["activation"] = torch.tanh
         elif args.activation == "relu":
@@ -48,9 +50,8 @@ def manage_experiment_configuration():
             FLAGS["activation"] = torch.nn.Softplus()
         elif args.activation == "sigmoid":
             FLAGS["activation"] = torch.sigmoid
-    elif args.genf == "GPI":
-        FLAGS["num_inducing"] = args.num_inducing
-        FLAGS["use_kmeans"] = args.use_kmeans
+        elif args.activation == "cos":
+            FLAGS["activation"] = torch.cos
 
     if len(args.vip_layers) == 1:
         FLAGS["vip_layers"] = args.vip_layers[0]
@@ -107,11 +108,9 @@ def get_parser():
         "--genf",
         type=str,
         default="BNN",
-        help=(
-            "Generative function or model to use. Bayesian Neural Network"
-            " (BNN), Gaussian Process (GP) or Gaussian Process with "
-            " Inducing Points (GPI)"
-        ),
+        help=("Generative function or model to use. Bayesian Neural Network"
+              " (BNN), Gaussian Process (GP) or Gaussian Process with "
+              " Inducing Points (GPI)"),
     )
     parser.add_argument(
         "--dataset",
@@ -152,19 +151,6 @@ def get_parser():
         help="Number of regression coefficients to use",
     )
     parser.add_argument(
-        "--num_inducing",
-        type=int,
-        default=50,
-        help="The number of inducing points to use when using GPI.",
-    )
-    parser.add_argument(
-        "--use_kmeans",
-        type=bool,
-        default=True,
-        help="Wether to use KMeans initialization for the inducing points"
-        "of the GP.",
-    )
-    parser.add_argument(
         "--activation",
         type=str,
         default="tanh",
@@ -177,6 +163,20 @@ def get_parser():
         help="Training learning rate",
     )
     parser.add_argument("--warmup", type=int, default=0)
+    parser.add_argument("--fix_prior_noise",
+                        dest="fix_prior_noise",
+                        action='store_true')
+    parser.set_defaults(fix_prior_noise=False)
+    parser.add_argument("--freeze_prior",
+                        dest="freeze_prior",
+                        action='store_true')
+    parser.set_defaults(freeze_prior=False)
+    parser.add_argument("--freeze_posterior",
+                        dest="freeze_posterior",
+                        action='store_true')
+    parser.set_defaults(freeze_posterior=False)
+    parser.add_argument("--show", dest="show", action='store_true')
+    parser.set_defaults(show=False)
     parser.add_argument(
         "--seed",
         type=int,

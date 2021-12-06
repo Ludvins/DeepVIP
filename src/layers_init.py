@@ -1,8 +1,7 @@
-from torch._C import _set_backcompat_keepdim_warn
 from src.layers import VIPLayer
 import numpy as np
 import torch
-from src.generative_models import BayesianNN, GP, GP_Inducing
+from src.generative_models import BayesianNN, GP
 
 
 class LinearProjection:
@@ -25,8 +24,8 @@ class LinearProjection:
 
 
 def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
-                bnn_structure, activation, use_kmeans, num_inducing, seed,
-                device, dtype, **kwargs):
+                bnn_structure, activation, seed, device, dtype,
+                fix_prior_noise, **kwargs):
     """
     Creates the Variational Implicit Process layers using the given
     information. If the dimensionality is reducen between layers,
@@ -65,9 +64,6 @@ def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
     seed : int
            Random seed
     """
-
-    labels = (y_train - np.mean(y_train, keepdims=True, axis=0)) / np.std(
-        y_train, keepdims=True, axis=0)
 
     # Create VIP layers. If integer, replicate output dimension
     if isinstance(vip_layers, (int, np.integer)):
@@ -111,29 +107,17 @@ def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
                            structure=bnn_structure,
                            activation=activation,
                            output_dim=dim_out,
+                           fix_random_noise=fix_prior_noise,
                            device=device,
                            seed=seed,
                            dtype=dtype)
         elif genf == "GP":
-            f = GP(torch.tensor(X_running),
-                   torch.tensor(labels),
+            f = GP(input_dim=dim_in,
+                   output_dim=dim_out,
                    seed=seed,
+                   fix_random_noise=fix_prior_noise,
                    dtype=dtype,
                    device=device)
-        elif genf == "GPI":
-            z = None
-            if use_kmeans:
-                from sklearn.cluster import KMeans
-                km = KMeans(num_inducing, random_state=seed)
-                km.fit(X_running)
-                z = km.cluster_centers_
-            f = GP_Inducing(input_dim=dim_in,
-                            output_dim=dim_out,
-                            inducing=z,
-                            num_inducing=num_inducing,
-                            seed=seed,
-                            dtype=dtype,
-                            device=device)
 
         # Create layer
         layers.append(

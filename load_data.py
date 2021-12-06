@@ -3,10 +3,10 @@ from numpy.random import default_rng
 
 
 def test():
-    X_train = np.array([-2.0, 0.0, 5.0])
     y_train = np.array([2.0, 4.0, 1.0])
 
-    X_test = np.linspace(-5, 6, 50)
+    X_test = np.linspace(-5, 6, 60)
+    X_train = X_test[[2, 20, 40]]
     X_train = X_train[..., np.newaxis]
     X_test = X_test[..., np.newaxis]
     y_train = y_train[..., np.newaxis]

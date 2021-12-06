@@ -165,8 +165,7 @@ class VIPLayer(Layer):
                 np.ones(num_outputs) * log_layer_noise,
                 dtype=self.dtype,
                 device=self.device,
-            )
-        )
+            ))
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
@@ -240,31 +239,26 @@ class VIPLayer(Layer):
 
         # Let S = num_coeffs, D = num_outputs and N = num_samples
         # Shape (S, ... , N, D)
-        sX = torch.tile(
-            X.unsqueeze(0), (self.num_coeffs, *np.ones(X.ndim, dtype=int))
-        )
-        # Shape (S, ..., N, D)
+        sX = torch.tile(X.unsqueeze(0),
+                        (self.num_coeffs, *np.ones(X.ndim, dtype=int)))
+        # Shape (S, ... , N, D)
         f = self.generative_function(sX)
         # Compute mean value, shape (1, ... , N, D)
         m = torch.mean(f, dim=0, keepdims=True)
 
         # Compute regresion function, shape (S, ... , N, D)
         phi = (f - m) / torch.sqrt(
-            torch.tensor(self.num_coeffs).type(self.dtype)
-        )
+            torch.tensor(self.num_coeffs).type(self.dtype))
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, ... , N, D)
-        mean = m.squeeze(axis=0) + torch.einsum(
-            "s...nd,sd->...nd", phi, self.q_mu
-        )
+        mean = m.squeeze(axis=0) + torch.einsum("s...nd,sd->...nd", phi,
+                                                self.q_mu)
 
         # Shape (S, S, D)
-        q_sqrt = (
-            torch.zeros((self.num_coeffs, self.num_coeffs, self.num_outputs))
-            .to(self.dtype)
-            .to(self.device)
-        )
+        q_sqrt = (torch.zeros(
+            (self.num_coeffs, self.num_coeffs,
+             self.num_outputs)).to(self.dtype).to(self.device))
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
         # Shape (S, S, D)

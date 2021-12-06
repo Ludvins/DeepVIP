@@ -2,9 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def build_plot_name(vip_layers, bnn_structure, input_dim, output_dim, epochs,
-                    n_samples, dataset, name_flag, genf, num_inducing,
-                    **kwargs):
+def build_plot_name(vip_layers, bnn_structure, activation_str, input_dim,
+                    output_dim, epochs, n_samples, dataset, name_flag, genf,
+                    fix_prior_noise, freeze_prior, freeze_posterior, **kwargs):
     # Create title name
     dims = np.concatenate(
         ([input_dim], np.ones(vip_layers, dtype=int) * [output_dim]))
@@ -12,12 +12,17 @@ def build_plot_name(vip_layers, bnn_structure, input_dim, output_dim, epochs,
     dims_name = "-".join(map(str, dims))
     model_name = genf
     if genf == "BNN":
-        model_name += " " + "-".join(map(str, bnn_structure))
-    elif genf == "GPI":
-        model_name += " " + str(num_inducing)
+        model_name += " " + "-".join(map(str,
+                                         bnn_structure)) + " " + activation_str
 
     path = "plots/{}_{}_layers={}_bnn={}_epochs={}_batchsize={}".format(
         dataset, name_flag, dims_name, model_name, epochs, n_samples)
+    if fix_prior_noise:
+        path = path + "_fixed_noise"
+    if freeze_posterior:
+        path = path + "_no_posterior"
+    if freeze_prior:
+        path = path + "_no_prior"
     title = "Layers: {}({}) {}".format(vip_layers, dims_name, model_name)
     return title, path
 

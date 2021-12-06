@@ -282,10 +282,12 @@ class DVIP_Base(torch.nn.Module):
                  Contains the S prior samples for each layer at each data
                  point.
         """
-        _, _, _, Fpriors = self.propagate(X, num_samples=1, full_cov=full_cov)
+        _, _, _, Fpriors = self.propagate(X,
+                                          num_samples=self.num_samples,
+                                          full_cov=full_cov)
 
         # Squeeze the MonteCarlo dimension
-        Fpriors = torch.stack(Fpriors).squeeze(2)
+        Fpriors = torch.stack(Fpriors)[:, :, 0, :, :]
         # Scale data
         return Fpriors * self.y_std + self.y_mean
 
@@ -330,7 +332,7 @@ class DVIP_Base(torch.nn.Module):
         # Compute KL term
         KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
 
-        return -(scale * likelihood - KL)
+        return -scale * likelihood + KL
 
     @property
     def metrics(self):

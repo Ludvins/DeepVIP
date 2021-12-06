@@ -30,11 +30,9 @@ layers = init_layers(**vars(args))
 train_dataset = DVIP_Dataset(args.X_train, args.y_train)
 test_dataset = DVIP_Dataset(args.X_test, args.y_test, normalize=False)
 
-train_loader = DataLoader(train_dataset,
-                          batch_size=args.batch_size,
-                          shuffle=True)
-predict_loader = DataLoader(train_dataset, batch_size=len(train_dataset))
-test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
+predict_loader = DataLoader(train_dataset, batch_size=args.batch_size)
+test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 # Instantiate Likelihood
 ll = Gaussian()
@@ -49,6 +47,11 @@ dvip = DVIP_Base(
     y_std=train_dataset.targets_std,
 )
 
+if args.freeze_prior:
+    dvip.freeze_prior()
+if args.freeze_posterior:
+    dvip.freeze_posterior()
+
 dvip.print_variables()
 
 # Define optimizer and compile model
@@ -59,10 +62,9 @@ train(dvip, train_loader, opt, epochs=args.epochs)
 
 dvip.print_variables()
 
-dvip.num_samples = args.num_samples_test
-
 # Predict Train and Test
 train_mean, train_var = predict(dvip, predict_loader)
+#dvip.num_samples = args.num_samples_test
 test_mean, test_var = predict(dvip, test_loader)
 
 train_prior_samples = predict_prior_samples(dvip, predict_loader)
@@ -71,15 +73,13 @@ test_prior_samples = predict_prior_samples(dvip, test_loader)
 # Create plot title and path
 fig_title, path = build_plot_name(**vars(args))
 
-plot_train_test(
-    (train_mean, train_var),
-    (test_mean, test_var),
-    args.X_train,
-    args.y_train,
-    args.X_test,
-    args.y_test,
-    train_prior_samples,
-    test_prior_samples,
-    title=fig_title,
-    path=path,
-)
+plot_train_test((train_mean, train_var), (test_mean, test_var),
+                args.X_train,
+                args.y_train,
+                args.X_test,
+                args.y_test,
+                train_prior_samples,
+                test_prior_samples,
+                title=fig_title,
+                path=path,
+                show=args.show)
