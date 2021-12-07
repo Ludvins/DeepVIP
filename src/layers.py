@@ -58,7 +58,7 @@ class Layer(torch.nn.Module):
         Returns
         -------
         samples : torch tensor of shape (..., N, self.num_outputs)
-                  Samples from a Gaussian given by mean and var. See below.
+                  Samples from a Gaussian given by mean and var.
         mean : torch tensor of shape (..., N, self.num_outputs)
                Mean values from conditional_ND applied to X.
         var : torch tensor of shape (..., N , self.num_outputs)
@@ -75,7 +75,6 @@ class Layer(torch.nn.Module):
         )
         mean, var, prior_samples = self.conditional_ND(X, full_cov=full_cov)
         samples = reparameterize(mean, var, z, full_cov=full_cov)
-
         return samples, mean, var, prior_samples
 
 
@@ -84,8 +83,8 @@ class VIPLayer(Layer):
         self,
         generative_function,
         num_regression_coeffs,
-        num_outputs,
         input_dim,
+        output_dim,
         log_layer_noise=-5,
         mean_function=None,
         seed=0,
@@ -125,10 +124,10 @@ class VIPLayer(Layer):
         input_dim : int
                     Dimensionality of the given features. Used to
                     pre-fix the shape of the different layers of the model.
-        num_outputs : int
+        output_dim : int
                       The number of independent VIP in this layer.
-                      More precisely, q_mu has shape (S, num_outputs)
-        log_layer_noise : float or tf.tensor of shape (num_outputs)
+                      More precisely, q_mu has shape (S, output_dim)
+        log_layer_noise : float or tf.tensor of shape (output_dim)
                           Contains the noise of each VIP contained in this
                           layer, i.e, epsilon ~ N(0, exp(log_layer_noise))
         mean_function : callable
@@ -137,6 +136,8 @@ class VIPLayer(Layer):
         dtype : data-type
                 The dtype of the layer's computations and weights.
                 Refer to tf.keras.layers.Layer for more information.
+        seed : int
+               integer to use as seed for randomness.
         """
         super().__init__(dtype=dtype, input_dim=input_dim, seed=seed)
 
@@ -144,7 +145,7 @@ class VIPLayer(Layer):
 
         # Regression Coefficients prior mean
         self.q_mu = torch.tensor(
-            np.zeros((self.num_coeffs, num_outputs)),
+            np.zeros((self.num_coeffs, output_dim)),
             dtype=self.dtype,
             device=self.device,
         )
@@ -154,7 +155,7 @@ class VIPLayer(Layer):
         self.mean_function = mean_function
 
         # Verticality of the layer
-        self.num_outputs = torch.tensor(num_outputs, dtype=torch.int32)
+        self.num_outputs = torch.tensor(output_dim, dtype=torch.int32)
 
         # Initialize generative function
         self.generative_function = generative_function
@@ -162,7 +163,7 @@ class VIPLayer(Layer):
         # Initialize the layer's noise
         self.log_layer_noise = torch.nn.Parameter(
             torch.tensor(
-                np.ones(num_outputs) * log_layer_noise,
+                np.ones(output_dim) * log_layer_noise,
                 dtype=self.dtype,
                 device=self.device,
             ))
@@ -173,7 +174,7 @@ class VIPLayer(Layer):
         q_sqrt = np.eye(self.num_coeffs)
         # Replicate it num_outputs times
         # Shape (num_coeffs, num_coeffs, num_outputs)
-        q_sqrt = np.tile(q_sqrt[:, :, None], [1, 1, num_outputs])
+        q_sqrt = np.tile(q_sqrt[:, :, None], [1, 1, output_dim])
         # Create tensor with triangular representation.
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
@@ -186,11 +187,13 @@ class VIPLayer(Layer):
         self.q_sqrt_tri = torch.nn.Parameter(self.q_sqrt_tri)
 
     def freeze_posterior(self):
+        """Sets the model parameters as non-trainable. """
         self.q_mu.requires_grad = False
         self.q_sqrt_tri.requires_grad = False
         self.log_layer_noise.requires_grad = False
 
     def freeze_prior(self):
+        """Sets the prior parameters of this layer as non trainable. """
         self.generative_function.freeze_parameters()
 
     def conditional_ND(self, X, full_cov=False):
@@ -236,13 +239,9 @@ class VIPLayer(Layer):
                         N, self.num_outputs)
                         Prior samples from conditional_ND applied to X.
         """
-
         # Let S = num_coeffs, D = num_outputs and N = num_samples
         # Shape (S, ... , N, D)
-        sX = torch.tile(X.unsqueeze(0),
-                        (self.num_coeffs, *np.ones(X.ndim, dtype=int)))
-        # Shape (S, ... , N, D)
-        f = self.generative_function(sX)
+        f = self.generative_function(X, self.num_coeffs)
         # Compute mean value, shape (1, ... , N, D)
         m = torch.mean(f, dim=0, keepdims=True)
 
@@ -319,4 +318,4 @@ class VIPLayer(Layer):
         # Mean term
         KL += 0.5 * torch.sum(torch.square(self.q_mu))
 
-        return KL  # + self.generative_function.KL()
+        return KL  #+ self.generative_function.KL()
