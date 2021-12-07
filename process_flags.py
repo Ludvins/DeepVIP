@@ -93,14 +93,14 @@ def get_parser():
     parser.add_argument(
         "--num_samples_train",
         type=int,
-        default=3,
+        default=5,
         help="Number of Monte Carlo samples of the posterior to "
         "use during training",
     )
     parser.add_argument(
         "--num_samples_test",
         type=int,
-        default=10,
+        default=100,
         help="Number of Monte Carlo samples of the posterior to "
         "use during inference",
     )
@@ -153,7 +153,7 @@ def get_parser():
     parser.add_argument(
         "--activation",
         type=str,
-        default="tanh",
+        default="cos",
         help="Activation function to use in the Bayesian NN",
     )
     parser.add_argument(
@@ -163,10 +163,10 @@ def get_parser():
         help="Training learning rate",
     )
     parser.add_argument("--warmup", type=int, default=0)
-    parser.add_argument("--fix_prior_noise",
+    parser.add_argument("--no-fix_prior_noise",
                         dest="fix_prior_noise",
-                        action='store_true')
-    parser.set_defaults(fix_prior_noise=False)
+                        action='store_false')
+    parser.set_defaults(fix_prior_noise=True)
     parser.add_argument("--freeze_prior",
                         dest="freeze_prior",
                         action='store_true')
