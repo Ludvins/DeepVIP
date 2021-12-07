@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 def build_plot_name(vip_layers, bnn_structure, activation_str, input_dim,
                     output_dim, epochs, n_samples, dataset, name_flag, genf,
                     fix_prior_noise, freeze_prior, freeze_posterior, **kwargs):
+    """ Generates the title and the path of the figure using the configuration
+    of the experiment.
+    """
     # Create title name
     dims = np.concatenate(
         ([input_dim], np.ones(vip_layers, dtype=int) * [output_dim]))
@@ -27,8 +30,12 @@ def build_plot_name(vip_layers, bnn_structure, activation_str, input_dim,
     return title, path
 
 
-def plot_train_test(train_pred,
-                    test_pred,
+def plot_train_test(train_mixture_means,
+                    train_prediction_mean,
+                    train_prediction_sqrt,
+                    test_mixture_means,
+                    test_prediction_mean,
+                    test_prediction_sqrt,
                     X_train,
                     y_train,
                     X_test,
@@ -38,8 +45,10 @@ def plot_train_test(train_pred,
                     title=None,
                     path=None,
                     show=True):
-    mean_train, std_train = train_pred
-    mean_test, std_test = test_pred
+    """ 
+    Generates a plot consisting in two subplots, one with the training
+    results and one with the test results.
+    """
 
     _, ax = plt.subplots(2,
                          2,
@@ -48,29 +57,31 @@ def plot_train_test(train_pred,
 
     plt.suptitle(title)
 
+    # Plot the training results.
+    ax[0][0].set_title("Training results")
     plot_results(
-        X=X_train.flatten(),
-        mean=mean_train,
-        std=std_train,
+        X=X_train,
+        means=train_mixture_means,
+        predictive_mean=train_prediction_mean,
+        predictive_std=train_prediction_sqrt,
         y=y_train,
-        prior_samples=train_prior_samples[-1],
+        prior_samples=train_prior_samples,
         ax=ax.T[0],
     )
 
-    if y_test is not None:
-        y_test.flatten()
-
+    # Plot the test results
+    ax[0][1].set_title("Test results")
     plot_results(
-        X=X_test.flatten(),
-        mean=mean_test,
-        std=std_test,
+        X=X_test,
+        means=test_mixture_means,
+        predictive_mean=test_prediction_mean,
+        predictive_std=test_prediction_sqrt,
         y=y_test,
-        prior_samples=test_prior_samples[-1],
+        prior_samples=test_prior_samples,
         ax=ax.T[1],
     )
 
-    ax[0][0].set_title("Training results")
-    ax[0][1].set_title("Test results")
+    # Save and show the figure
     plt.savefig(path + ".svg", format="svg")
     plt.savefig(path + ".png", format="png")
     if show:
@@ -78,26 +89,38 @@ def plot_train_test(train_pred,
     plt.close()
 
 
-def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
+def plot_results(X,
+                 means,
+                 predictive_mean,
+                 predictive_std,
+                 y=None,
+                 prior_samples=None,
+                 ax=None):
+    """ Makes a plot consisting in two subplots joined vertically.
+    The upper one shows the points and the predictions and the lower one
+    shows the standard deviation of the predictive distribution at each point.
+    """
+
     if ax is None:
         _, ax = plt.subplots(2, 1, gridspec_kw={"height_ratios": [3, 1]})
 
+    # Some datasets may not be labeled.
     if y is not None:
         scatter_data(X, y, label="Points", color="blue", ax=ax[0])
 
-    prediction_mean = np.mean(mean, axis=0)
-    prediction_std = np.mean(std, axis=0)
+    # Plot predictive mean with confidence interval using predictive sqrt
     plot_prediction(
         X,
-        prediction_mean.flatten(),
-        prediction_std.flatten(),
+        predictive_mean.flatten(),
+        predictive_std.flatten(),
         label="VIP Predictive Mean",
         mean_color="#029386",
         std_color="#cfe6fc",
         ax=ax[0],
     )
 
-    for i, pred in enumerate(mean):
+    # Plot each of the used samples from the Gaussian Mixture
+    for i, pred in enumerate(means):
         plot_prediction(
             X,
             pred.flatten(),
@@ -109,7 +132,7 @@ def plot_results(X, mean, std, y=None, prior_samples=None, ax=None):
 
     plot_standard_deviation(
         X,
-        prediction_std.flatten(),
+        predictive_std.flatten(),
         color="#cfe6fc",
         alpha=0.8,
         label="VIP Prediction Standard Deviation",
@@ -141,7 +164,7 @@ def plot_prediction(
     ax=None,
 ):
     if ax is None:
-        fig, ax = plt.subplots()
+        _, ax = plt.subplots()
 
     sort = np.argsort(X)
     X = X[sort]
