@@ -5,7 +5,12 @@ from tqdm import tqdm
 from utils import *
 
 
-def train(model, training_generator, optimizer, epochs=2000, device=None):
+def train(model,
+          training_generator,
+          optimizer,
+          scheduler=None,
+          epochs=2000,
+          device=None):
 
     model.train()
 
@@ -47,6 +52,8 @@ def train(model, training_generator, optimizer, epochs=2000, device=None):
                         "nll_train":
                         "{:3f}".format(NLL.detach().cpu().numpy()),
                     })
+            if scheduler is not None:
+                scheduler.step()
 
 
 def predict(model, generator, device=None):
