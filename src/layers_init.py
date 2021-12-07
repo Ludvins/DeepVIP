@@ -123,8 +123,8 @@ def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
         layers.append(
             VIPLayer(f,
                      num_regression_coeffs=regression_coeffs,
-                     num_outputs=dim_out,
                      input_dim=dim_in,
+                     output_dim=dim_out,
                      mean_function=mf,
                      seed=seed,
                      dtype=dtype))

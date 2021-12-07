@@ -51,6 +51,14 @@ class DVIP_Base(torch.nn.Module):
 
         self.likelihood = likelihood
         self.vip_layers = torch.nn.ModuleList(layers)
+        if len(self.vip_layers) == 1 and self.num_samples > 1:
+            print("\nWARNING: Using MonteCarlo re-samples with only one layer "
+                  "lowers the computational efficiency of the training loop.")
+            print("As only one layer is used, all MonteCarlo resamples "
+                  "raise the same result.")
+            print("For this reason the number of MC "
+                  "samples is reduced to 1 when only one layer is considered.")
+            self.num_samples = 1
 
         self.device = device
         self.dtype = dtype
@@ -71,7 +79,8 @@ class DVIP_Base(torch.nn.Module):
         Returns
         -------
         loss : float
-               The nelbo of the model at the current state for the given inputs
+               The nelbo of the model at the current state for the
+               given inputs.
         """
 
         # If targets are unidimensional,
@@ -140,7 +149,7 @@ class DVIP_Base(torch.nn.Module):
 
         return loss
 
-    def forward(self, predict_at):
+    def forward(self, predict_at, full_cov=False):
         """
         Computes the predicted labels for the given input.
 
@@ -157,8 +166,17 @@ class DVIP_Base(torch.nn.Module):
         and the predicted mean and standard deviation.
         """
 
-        mean, var = self.predict_y(predict_at, self.num_samples)
+        mean, var = self.predict_y(predict_at,
+                                   self.num_samples,
+                                   full_cov=full_cov)
         return mean * self.y_std + self.y_mean, var.sqrt() * self.y_std
+
+    def get_predictive_results(_, means, vars):
+        import numpy as np
+        prediction_mean = np.mean(means, axis=0)
+        prediction_var = np.mean(vars + means**2, axis=0) - prediction_mean**2
+
+        return prediction_mean, prediction_var
 
     def propagate(self, X, num_samples=1, full_cov=False):
         """
@@ -197,11 +215,9 @@ class DVIP_Base(torch.nn.Module):
 
         # The first input values are the original ones
         F = sX
-
         for layer in self.vip_layers:
             F, Fmean, Fvar, Fprior = layer.sample_from_conditional(
                 F, full_cov=full_cov)
-
             Fs.append(F)
             Fmeans.append(Fmean)
             Fvars.append(Fvar)
@@ -239,7 +255,7 @@ class DVIP_Base(torch.nn.Module):
         )
         return Fmeans[-1], Fvars[-1]
 
-    def predict_y(self, predict_at, num_samples):
+    def predict_y(self, predict_at, num_samples, full_cov=False):
         """
         Returns the predicted mean and variance for the given inputs.
         Takes the predictions from the last layer and considers 
@@ -260,7 +276,8 @@ class DVIP_Base(torch.nn.Module):
         """
         Fmean, Fvar = self.predict_f(predict_at,
                                      num_samples=num_samples,
-                                     full_cov=False)
+                                     full_cov=full_cov)
+
         return self.likelihood.predict_mean_and_var(Fmean, Fvar)
 
     def get_prior_samples(self, X, full_cov=False):
@@ -348,14 +365,17 @@ class DVIP_Base(torch.nn.Module):
         return metrics
 
     def freeze_posterior(self):
+        """Sets the posterior parameters of every layer as non-trainable. """
         for layer in self.vip_layers:
             layer.freeze_posterior()
 
     def freeze_prior(self):
+        """Sets the prior parameters of each layer as non-trainable."""
         for layer in self.vip_layers:
             layer.freeze_prior()
 
     def freeze_ll_variance(self):
+        """Sets the likelihood variance as a non-trainable parameter."""
         self.likelihood.log_variance.requires_grad = False
 
     def print_variables(self):
