@@ -57,23 +57,25 @@ class Layer(torch.nn.Module):
                    the diagonal.
         Returns
         -------
-        samples : torch tensor of shape (..., N, self.num_outputs)
+        samples : torch tensor of shape (..., N, self.output_dim)
                   Samples from a Gaussian given by mean and var.
-        mean : torch tensor of shape (..., N, self.num_outputs)
+        mean : torch tensor of shape (..., N, self.output_dim)
                Mean values from conditional_ND applied to X.
-        var : torch tensor of shape (..., N , self.num_outputs)
+        var : torch tensor of shape (..., N , self.output_dim)
               Variance values from conditional_ND applied to X.
         prior_samples : torch tensor of shape (self.num_coeffs, ...,
-                        N, self.num_outputs)
+                        N, self.output_dim)
                         Prior samples from conditional_ND applied to X.
         """
+
+        mean, var, prior_samples = self.conditional_ND(X, full_cov=full_cov)
+
         z = torch.randn(
-            X.shape,
+            mean.shape,
             generator=self.generator,
             dtype=self.dtype,
             device=self.device,
         )
-        mean, var, prior_samples = self.conditional_ND(X, full_cov=full_cov)
         samples = reparameterize(mean, var, z, full_cov=full_cov)
         return samples, mean, var, prior_samples
 
@@ -155,7 +157,7 @@ class VIPLayer(Layer):
         self.mean_function = mean_function
 
         # Verticality of the layer
-        self.num_outputs = torch.tensor(output_dim, dtype=torch.int32)
+        self.output_dim = torch.tensor(output_dim, dtype=torch.int32)
 
         # Initialize generative function
         self.generative_function = generative_function
@@ -172,11 +174,11 @@ class VIPLayer(Layer):
         # identity matrix
         # Shape (num_coeffs, num_coeffs)
         q_sqrt = np.eye(self.num_coeffs)
-        # Replicate it num_outputs times
-        # Shape (num_coeffs, num_coeffs, num_outputs)
+        # Replicate it output_dim times
+        # Shape (num_coeffs, num_coeffs, output_dim)
         q_sqrt = np.tile(q_sqrt[:, :, None], [1, 1, output_dim])
         # Create tensor with triangular representation.
-        # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
+        # Shape (output_dim, num_coeffs*(num_coeffs + 1)/2)
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         triangular_q_sqrt = q_sqrt[li, lj]
         self.q_sqrt_tri = torch.tensor(
@@ -231,15 +233,16 @@ class VIPLayer(Layer):
                    Determines the shape of the variance output.
         Returns:
         --------
-        mean : torch tensor of shape (..., N, self.num_outputs)
+        mean : torch tensor of shape (..., N, self.output_dim)
                Mean values from conditional_ND applied to X.
-        var : torch tensor of shape (..., N , self.num_outputs)
+        var : torch tensor of shape (..., N , self.output_dim)
               Variance values from conditional_ND applied to X.
         prior_samples : torch tensor of shape (self.num_coeffs, ...,
-                        N, self.num_outputs)
+                        N, self.output_dim)
                         Prior samples from conditional_ND applied to X.
         """
-        # Let S = num_coeffs, D = num_outputs and N = num_samples
+
+        # Let S = num_coeffs, D = output_dim and N = num_samples
         # Shape (S, ... , N, D)
         f = self.generative_function(X, self.num_coeffs)
         # Compute mean value, shape (1, ... , N, D)
@@ -257,7 +260,7 @@ class VIPLayer(Layer):
         # Shape (S, S, D)
         q_sqrt = (torch.zeros(
             (self.num_coeffs, self.num_coeffs,
-             self.num_outputs)).to(self.dtype).to(self.device))
+             self.output_dim)).to(self.dtype).to(self.device))
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
         # Shape (S, S, D)
@@ -268,11 +271,11 @@ class VIPLayer(Layer):
         K = torch.einsum("s...nd,skd->k...nd", phi, Delta)
 
         if full_cov:
-            # var shape (num_points, num_points, num_outputs)
+            # var shape (num_points, num_points, output_dim)
             # Multiply by phi again distinguishing data_points
             K = torch.einsum("s...nd,s...md->...nmd", K, phi)
         else:
-            # var shape (num_points, num_outputs)
+            # var shape (num_points, output_dim)
             # Multiply by phi again, using the same points twice
             K = torch.einsum("s...nd,s...nd->...nd", K, phi)
 
@@ -305,7 +308,7 @@ class VIPLayer(Layer):
         diag_indexes = np.cumsum(np.arange(1, self.num_coeffs + 1)) - 1
         diag = self.q_sqrt_tri[diag_indexes]
         # Constant dimensionality term
-        KL = -0.5 * self.num_outputs * self.num_coeffs
+        KL = -0.5 * self.output_dim * self.num_coeffs
 
         # Log of determinant of covariance matrix.
         # Det(Sigma) = Det(q_sqrt q_sqrt^T) = Det(q_sqrt) Det(q_sqrt^T)

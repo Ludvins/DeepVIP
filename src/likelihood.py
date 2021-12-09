@@ -2,6 +2,7 @@
 
 import torch
 import numpy as np
+import properscoring as ps
 
 
 class Likelihood(torch.nn.Module):
@@ -50,6 +51,7 @@ class Gaussian(Likelihood):
         self.log_variance = torch.nn.Parameter(self.log_variance)
         self.rmse_metric = torch.nn.MSELoss()
         self.nll_metric = torch.mean
+        self.crps_metric = torch.mean
 
     @property
     def metrics(self):
@@ -70,6 +72,8 @@ class Gaussian(Likelihood):
         nll = -nll.mean()
 
         self.nll_val = nll
+
+        self.crps_val = ps.crps_gaussian(y, mean_pred, std_pred)
 
     def logdensity(self, x, mu, var):
         return -0.5 * (np.log(2 * np.pi) + var.log() + (mu - x).square() / var)

@@ -23,7 +23,7 @@ class LinearProjection:
         return torch.einsum("...a, ab -> ...b", inputs, self.P)
 
 
-def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
+def init_layers(X_train, output_dim, vip_layers, genf, regression_coeffs,
                 bnn_structure, activation, seed, device, dtype,
                 fix_prior_noise, **kwargs):
     """
@@ -66,13 +66,15 @@ def init_layers(X_train, y_train, vip_layers, genf, regression_coeffs,
     """
 
     # Create VIP layers. If integer, replicate output dimension
-    if isinstance(vip_layers, (int, np.integer)):
-        dims = np.concatenate(
-            ([X_train.shape[1]],
-             np.ones(vip_layers, dtype=int) * y_train.shape[1]))
+    if (len(vip_layers) == 1)\
+            and X_train.shape[1] == 1 and output_dim == 1:
+        dims = np.ones(vip_layers[0] + 1, dtype=int)
     # Otherwise, append thedata dimensions to the array.
     else:
-        dims = [X_train.shape[1]] + vip_layers + [y_train.shape[1]]
+        if vip_layers[-1] != output_dim:
+            raise RuntimeError(
+                "Last vip layer does not correspond with data label")
+        dims = [X_train.shape[1]] + vip_layers
 
     # Initialize layers array
     layers = []

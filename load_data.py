@@ -1,17 +1,23 @@
 import numpy as np
 from numpy.random import default_rng
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+uci_base = 'https://archive.ics.uci.edu/ml/machine-learning-databases/'
 
 
 def test():
-    y_train = np.array([2.0, 4.0, 1.0])
 
-    X_test = np.linspace(-5, 6, 60)
-    X_train = X_test[[2, 20, 40]]
+    X_test = np.linspace(-2, 2, 200)
+    X_train = np.linspace(-1, 1, 50)
+    y_train = np.sign(X_train)
+    y_test = np.sign(X_test)
+
     X_train = X_train[..., np.newaxis]
     X_test = X_test[..., np.newaxis]
     y_train = y_train[..., np.newaxis]
 
-    return X_train, y_train, X_test, None
+    return X_train, y_train, X_test, y_test
 
 
 def SPGP():
@@ -50,12 +56,18 @@ def synthetic():
 
 
 def boston():
-    (X_train, y_train), (
-        X_test,
-        y_test,
-    ) = tf.keras.datasets.boston_housing.load_data()
+    print("Loading boston....")
+    data_url = '{}{}'.format(uci_base, 'housing/housing.data')
+    raw_df = pd.read_fwf(data_url, header=None).to_numpy()
+    data = raw_df[:, :-1]
+    target = raw_df[:, -1][..., np.newaxis]
 
-    y_train = y_train[..., np.newaxis]
-    y_test = y_test[..., np.newaxis]
+    X_train, X_test, y_train, y_test = train_test_split(data,
+                                                        target,
+                                                        test_size=0.10,
+                                                        random_state=42)
 
-    return X_train, y_train, X_test, y_test
+    X_mean = np.mean(X_train, axis=0)
+    X_std = np.std(X_train, axis=0)
+    return ((X_train - X_mean) / X_std, y_train, (X_test - X_mean) / X_std,
+            y_test)

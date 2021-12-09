@@ -345,10 +345,8 @@ class DVIP_Base(torch.nn.Module):
         # scale loss term corresponding to minibatch size
         scale = self.num_data
         scale /= X.shape[0]
-
         # Compute KL term
         KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
-
         return -scale * likelihood + KL
 
     @property

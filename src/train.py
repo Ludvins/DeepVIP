@@ -8,8 +8,10 @@ from utils import *
 def train(model,
           training_generator,
           optimizer,
+          val_generator=None,
           scheduler=None,
           epochs=2000,
+          early_stopping=False,
           device=None):
 
     model.train()
@@ -39,21 +41,86 @@ def train(model,
                 avg_rmse += model.likelihood.rmse_val
                 avg_nll += model.likelihood.nll_val
 
-                NELBO = avg_nelbo / train_per_epoch
-                NLL = avg_nll / train_per_epoch
-                RMSE = avg_rmse / train_per_epoch
+            NELBO = avg_nelbo / train_per_epoch
+            NLL = avg_nll / train_per_epoch
+            RMSE = avg_rmse / train_per_epoch
 
+            if val_generator is None:
                 if epoch % miniters == 0:
                     tepoch.set_postfix({
                         "nelbo_train":
-                        "{:3f}".format(NELBO.detach().cpu().numpy()),
+                        "{0:.2f}".format(NELBO.detach().cpu().numpy()),
                         "rmse_train":
-                        "{:3f}".format(RMSE.detach().cpu().numpy()),
+                        "{0:.2f}".format(RMSE.detach().cpu().numpy()),
                         "nll_train":
-                        "{:3f}".format(NLL.detach().cpu().numpy()),
+                        "{0:.2f}".format(NLL.detach().cpu().numpy()),
                     })
+
+            if val_generator is not None:
+                avg_nelbo_val = 0.0
+                avg_rmse_val = 0
+                avg_nll_val = 0
+
+                for data, target in val_generator:
+
+                    loss = model.test_step(data.to(device), target.to(device))
+                    avg_nelbo_val += loss
+                    avg_rmse_val += model.likelihood.rmse_val
+                    avg_nll_val += model.likelihood.nll_val
+
+                NELBO_val = avg_nelbo_val / len(val_generator)
+                NLL_val = avg_nll_val / len(val_generator)
+                RMSE_val = avg_rmse_val / len(val_generator)
+                if epoch % miniters == 0:
+                    tepoch.set_postfix({
+                        "nelbo_train":
+                        "{0:5.2f}".format(NELBO.detach().cpu().numpy()),
+                        "rmse_train":
+                        "{0:5.2f}".format(RMSE.detach().cpu().numpy()),
+                        "nll_train":
+                        "{0:5.2f}".format(NLL.detach().cpu().numpy()),
+                        "rmse_val":
+                        "{0:5.2f}".format(RMSE_val.detach().cpu().numpy()),
+                        "nll_val":
+                        "{0:5.2f}".format(NLL_val.detach().cpu().numpy()),
+                    })
+
             if scheduler is not None:
                 scheduler.step()
+
+    return {"nelbo": NELBO, "nll": NLL, "rmse": RMSE}
+
+
+def test(model, generator, device=None):
+
+    model.train()
+
+    batch_size = generator.batch_size
+
+    length_dataset = len(generator.dataset)
+    if batch_size <= length_dataset:
+        batch_size = length_dataset
+
+    avg_nelbo = 0.0
+    avg_rmse = 0
+    avg_nll = 0
+
+    for data, target in generator:
+
+        loss = model.test_step(data.to(device), target.to(device))
+        avg_nelbo += loss
+        avg_rmse += model.likelihood.rmse_val
+        avg_nll += model.likelihood.nll_val
+
+    NELBO = avg_nelbo / len(generator)
+    NLL = avg_nll / len(generator)
+    RMSE = avg_rmse / len(generator)
+
+    return {
+        "nelbo": NELBO.detach().cpu().numpy(),
+        "nll": NLL.detach().cpu().numpy(),
+        "rmse": RMSE.detach().cpu().numpy()
+    }
 
 
 def predict(model, generator, device=None):

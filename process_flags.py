@@ -1,41 +1,23 @@
 import argparse
-from load_data import SPGP, synthetic, test
+from load_data import SPGP, synthetic, test, boston
 import torch
 import numpy as np
 
+from src.dataset import Boston_Dataset
 
-def manage_experiment_configuration():
 
-    # Get parser arguments
-    parser = get_parser()
-    args = parser.parse_args()
+def manage_experiment_configuration(args=None):
+
+    if args is None:
+        # Get parser arguments
+        parser = get_parser()
+        args = parser.parse_args()
 
     FLAGS = vars(args)
 
     # Manage Dataset
-    if args.dataset == "SPGP":
-        (
-            FLAGS["X_train"],
-            FLAGS["y_train"],
-            FLAGS["X_test"],
-            FLAGS["y_test"],
-        ) = SPGP()
-    elif args.dataset == "synthetic":
-        (
-            FLAGS["X_train"],
-            FLAGS["y_train"],
-            FLAGS["X_test"],
-            FLAGS["y_test"],
-        ) = synthetic()
-    elif args.dataset == "test":
-        (
-            FLAGS["X_train"],
-            FLAGS["y_train"],
-            FLAGS["X_test"],
-            FLAGS["y_test"],
-        ) = test()
-
-    check_data(args)
+    if args.dataset_name == "SPGP":
+        args.dataset = Boston_Dataset()
 
     FLAGS["activation_str"] = args.activation
     # Manage Generative function
@@ -53,36 +35,32 @@ def manage_experiment_configuration():
         elif args.activation == "cos":
             FLAGS["activation"] = torch.cos
 
-    if len(args.vip_layers) == 1:
-        FLAGS["vip_layers"] = args.vip_layers[0]
-    else:
-        FLAGS["vip_layers"] = args.vip_layers
-
     if args.dtype == "float64":
         FLAGS["dtype"] = torch.float64
 
     return args
 
 
-def check_data(args):
-    if args.X_train.shape[0] != args.y_train.shape[0]:
+def check_data(X_train, y_train, verbose=1):
+    if X_train.shape[0] != y_train.shape[0]:
         print("Labels and features differ in the number of samples")
         return
 
-    d = vars(args)
     # Compute data information
-    d["n_samples"] = args.X_train.shape[0]
-    d["input_dim"] = args.X_train.shape[1]
-    d["output_dim"] = args.X_train.shape[1]
-    d["y_mean"] = np.mean(args.y_train)
-    d["y_std"] = np.std(args.y_train)
+    n_samples = X_train.shape[0]
+    input_dim = X_train.shape[1]
+    output_dim = y_train.shape[1]
+    y_mean = np.mean(y_train, axis=0)
+    y_std = np.std(y_train, axis=0)
 
-    if args.verbose > 0:
-        print("Number of samples: ", args.n_samples)
-        print("Input dimension: ", args.input_dim)
-        print("Label dimension: ", args.output_dim)
-        print("Labels mean value: ", args.y_mean)
-        print("Labels standard deviation: ", args.y_std)
+    if verbose > 0:
+        print("Number of samples: ", n_samples)
+        print("Input dimension: ", input_dim)
+        print("Label dimension: ", output_dim)
+        print("Labels mean value: ", y_mean)
+        print("Labels standard deviation: ", y_std)
+
+    return n_samples, input_dim, output_dim, y_mean, y_std
 
 
 def get_parser():
@@ -93,14 +71,14 @@ def get_parser():
     parser.add_argument(
         "--num_samples_train",
         type=int,
-        default=5,
+        default=1,
         help="Number of Monte Carlo samples of the posterior to "
         "use during training",
     )
     parser.add_argument(
         "--num_samples_test",
         type=int,
-        default=100,
+        default=200,
         help="Number of Monte Carlo samples of the posterior to "
         "use during inference",
     )
@@ -113,7 +91,7 @@ def get_parser():
               " Inducing Points (GPI)"),
     )
     parser.add_argument(
-        "--dataset",
+        "--dataset_name",
         type=str,
         default="SPGP",
         help="Dataset to use (SPGP, synthethic or boston)",
@@ -147,7 +125,7 @@ def get_parser():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=128,
+        default=1000,
         help="Number of regression coefficients to use",
     )
     parser.add_argument(

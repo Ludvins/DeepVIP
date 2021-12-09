@@ -255,7 +255,7 @@ class BayesLinear(GenerativeFunction):
         KL : int
              The addition of the 2 KL terms computed
         """
-        return torch.tensor(0.0)
+        #return torch.tensor(0.0)
         # Compute w's flattened mean and covariance diagonal matrix
         w_m = torch.flatten(self.weight_mu)
         w_Sigma = torch.flatten(torch.square(torch.exp(self.weight_log_sigma)))
@@ -392,7 +392,6 @@ class BayesianNN(GenerativeFunction):
                        (num_samples, *np.ones(inputs.ndim, dtype=int)))
         for layer in self.layers[:-1]:
             x = self.activation(layer(x))
-
         return self.layers[-1](x)
 
     def KL(self):
