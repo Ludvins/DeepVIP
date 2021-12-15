@@ -1,5 +1,5 @@
-import torch
 import numpy as np
+import torch
 
 
 class NoiseSampler:
@@ -25,7 +25,7 @@ class NoiseSampler:
 
 
 class GaussianSampler(NoiseSampler):
-    def __init__(self, seed=2147483647, dtype=torch.float64):
+    def __init__(self, seed=2147483647, device="cpu", dtype=torch.float64):
         """
         Generates noise samples from a Standar Gaussian distribution N(0, 1).
 
@@ -33,14 +33,21 @@ class GaussianSampler(NoiseSampler):
         -----------
         seed : int
                Integer value used to generate reproducible results.
+        device : torch.device
+                 The device in which the computations are made.
         dtype : data-type
                 The dtype of the layer's computations and weights.
         """
         super().__init__(seed, dtype)
-        self.generator = torch.Generator()
+        self.device = device
+        self.generator = torch.Generator(device)
         self.generator.manual_seed(seed)
 
     def set_seed(self):
+        """
+        Sets the random seed so that the same random samples can be
+        generated if desired.
+        """
         self.generator.manual_seed(self.seed)
 
     def __call__(self, size):
@@ -63,17 +70,20 @@ class GaussianSampler(NoiseSampler):
             size=size,
             generator=self.generator,
             dtype=self.dtype,
+            device=self.device,
         )
 
 
 class GenerativeFunction(torch.nn.Module):
-    def __init__(self,
-                 input_dim,
-                 output_dim,
-                 device=None,
-                 fix_random_noise=False,
-                 seed=0,
-                 dtype=torch.float64):
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        device=None,
+        fix_random_noise=False,
+        seed=0,
+        dtype=torch.float64,
+    ):
         """
         Generates samples from a stochastic function using sampled
         noise values and input values.
@@ -88,7 +98,7 @@ class GenerativeFunction(torch.nn.Module):
                  The device in which the computations are made.
         fix_random_noise : boolean
                            Wether to reset the Random Generator's seed in each
-                           iteration. 
+                           iteration.
         seed : int
                Initial seed for the random number generator.
         dtype : data-type
@@ -103,12 +113,12 @@ class GenerativeFunction(torch.nn.Module):
         self.dtype = dtype
 
     def freeze_parameters(self):
-        """ Makes the model parameters non-trainable. """
+        """Makes the model parameters non-trainable."""
         for param in self.parameters():
             param.requires_grad = False
 
     def defreeze_parameters(self):
-        """ Set the model parameters as trainable. """
+        """Set the model parameters as trainable."""
         for param in self.parameters():
             param.requires_grad = True
 
@@ -124,10 +134,10 @@ class BayesLinear(GenerativeFunction):
         self,
         input_dim,
         output_dim,
-        w_mean_prior,
-        w_log_std_prior,
-        b_mean_prior,
-        b_log_std_prior,
+        w_mean,
+        w_log_std,
+        b_mean,
+        b_log_std,
         device=None,
         fix_random_noise=False,
         seed=0,
@@ -144,72 +154,73 @@ class BayesLinear(GenerativeFunction):
                     Dimensionality of the input values `x`.
         output_dim : int
                      Dimensionality of the function output.
-        w_mean_prior : torch tensor of shape (input_dim, output_dim)
-                       Prior value w's mean.
-        w_log_std_prior : torch tensor of shape (input_dim, output_dim)
-                          Logarithm of the prior standard deviation of w.
-        b_mean_prior : torch tensor of shape (1, output_dim)
-                       Prior value b's mean.
-        b_log_std_prior : torch tensor of shape (1, output_dim)
-                          Logarithm of the prior standard deviation of b.
+        w_mean : torch tensor of shape (input_dim, output_dim)
+                 Initial value w's mean.
+        w_log_std : torch tensor of shape (input_dim, output_dim)
+                    Logarithm of the initial standard deviation of w.
+        b_mean : torch tensor of shape (1, output_dim)
+                 Initial value b's mean.
+        b_log_std : torch tensor of shape (1, output_dim)
+                    Logarithm of the initial standard deviation of b.
         device : torch.device
                  The device in which the computations are made.
         fix_random_noise : boolean
                            Wether to reset the Random Generator's seed in each
-                           iteration. 
+                           iteration.
         seed : int
                Initial seed for the random number generator.
         dtype : data-type
                 The dtype of the layer's computations and weights.
         """
-        super(BayesLinear, self).__init__(input_dim,
-                                          output_dim,
-                                          device=device,
-                                          fix_random_noise=fix_random_noise,
-                                          seed=seed,
-                                          dtype=dtype)
+        super(BayesLinear, self).__init__(
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
 
         # Instantiate Standard Gaussian sampler
-        self.gaussian_sampler = GaussianSampler(seed)
+        self.gaussian_sampler = GaussianSampler(seed, device)
 
         # Check prior values fit the given dimensionality
-        if (w_mean_prior.shape != (input_dim, output_dim)) or \
-            (w_log_std_prior.shape != (input_dim, output_dim)) or \
-            (b_mean_prior.size(0) != output_dim) or \
-            (b_log_std_prior.size(0) != output_dim):
+        if ((w_mean.shape != (input_dim, output_dim))
+                or (w_log_std.shape !=
+                    (input_dim, output_dim)) or (b_mean.size(0) != output_dim)
+                or (b_log_std.size(0) != output_dim)):
             raise RuntimeError("Provided prior values do not fit the given"
                                " dimensionality.")
 
-        # Store prior values
-        self.w_mean_prior = torch.clone(w_mean_prior)
-        self.w_log_std_prior = torch.clone(w_log_std_prior)
-        self.b_mean_prior = torch.clone(b_mean_prior)
-        self.b_log_std_prior = torch.clone(b_log_std_prior)
-
         # Create trainable parameters
-        self.weight_mu = torch.nn.Parameter(w_mean_prior)
-        self.weight_log_sigma = torch.nn.Parameter(w_log_std_prior)
-        self.bias_mu = torch.nn.Parameter(b_mean_prior)
-        self.bias_log_sigma = torch.nn.Parameter(b_log_std_prior)
+        self.weight_mu = torch.nn.Parameter(w_mean)
+        self.weight_log_sigma = torch.nn.Parameter(w_log_std)
+        self.bias_mu = torch.nn.Parameter(b_mean)
+        self.bias_log_sigma = torch.nn.Parameter(b_log_std)
+
+        if self.fix_random_noise:
+            # Store the noise as a dictionary with the number of samples as
+            # key value
+            self.noise = dict()
 
     def forward(self, inputs, num_samples=None):
-        """ Forwards the given input through the Bayesian Neural Network. 
+        """Forwards the given input through the Bayesian Neural Network.
         Generates as many samples of the stochastic output as indicated.
-        
+
         Arguments
         ---------
-        
+
         inputs : torch tensor of shape (..., N, D)
                  Input tensor where the last two dimensions are batch and
                  data dimensionality.
-        
+
         num_samples : int
                       Number of samples to generate from the stochastic
-                      function. If not specified, if inputs has at least 
-                      three dimensions and the first one will be used to 
+                      function. If not specified, if inputs has at least
+                      three dimensions, the first one will be used to
                       store the different samples. Otherwise, only one sample
-                      is computed.
-        
+                      is generated.
+
         """
 
         # Check the given input is valid
@@ -218,71 +229,81 @@ class BayesLinear(GenerativeFunction):
                 "Input shape does not match stored data dimension")
 
         if num_samples is None:
-            # The number of samples corresponds to the first dimension.
-            num_samples = inputs.size(0)
-            # The rest of dimensions must be padded with ones (the same random
-            # numbers are used).
-            padd = np.ones(inputs.ndim - 3, dtype=int)
+            # The number of samples corresponds to the first dimension
+            if inputs.ndim >= 3:
+                num_samples = inputs.size(0)
+            else:
+                num_samples = 1
+                inputs = inputs.unsqueeze(0)
+
+        # When generating the same random numbers, retrieve from stored
+        #  noise dict when possible.
+        if self.fix_random_noise and num_samples in self.noise:
+            z_w, z_b = self.noise[num_samples]
         else:
-            # In this case only two dimensions are not padded (the last two).
-            padd = np.ones(inputs.ndim - 2, dtype=int)
+            # Otherwise, generate the noise value
+            # Noise shape
+            z_w_shape = (num_samples, self.input_dim, self.output_dim)
+            z_b_shape = (num_samples, 1, self.output_dim)
 
-        # Noise shape
-        z_w_shape = (num_samples, *padd, self.input_dim, self.output_dim)
-        z_b_shape = (num_samples, *padd, 1, self.output_dim)
+            # Generate Gaussian values
+            z_w = self.gaussian_sampler(z_w_shape)
+            z_b = self.gaussian_sampler(z_b_shape)
 
-        if self.fix_random_noise:
-            self.gaussian_sampler.set_seed()
-
-        # Generate Gaussian values
-        z_w = self.gaussian_sampler(z_w_shape)
-        z_b = self.gaussian_sampler(z_b_shape)
+            # Store it if necessary
+            if self.fix_random_noise:
+                self.noise[num_samples] = (z_w, z_b)
 
         # Perform reparameterization trick
         w = self.weight_mu + z_w * torch.exp(self.weight_log_sigma)
         b = self.bias_mu + z_b * torch.exp(self.bias_log_sigma)
 
-        # Apply linear transformation, dotwise over the first dimension
-        #  and matrix multiplication over the last one.
+        # Padd the variables dimension so that computation can be easily
+        #  performed.
+        w = w.reshape((
+            num_samples,
+            *np.ones(inputs.ndim - w.ndim, dtype=int),
+            self.input_dim,
+            self.output_dim,
+        ))
+        b = b.reshape((
+            num_samples,
+            *np.ones(inputs.ndim - b.ndim, dtype=int),
+            1,
+            self.output_dim,
+        ))
+        # Apply linear transformation.
         return torch.einsum("...nd, ...do -> ...no", inputs, w) + b
 
     def KL(self):
         """
-        Computes the KL divergence of w and b from their prior value.
+        Computes the KL divergence of w and b to their prior distribution,
+        a standard Gaussian N(0, I).
 
         Returns
         -------
         KL : int
              The addition of the 2 KL terms computed
         """
-        #return torch.tensor(0.0)
         # Compute w's flattened mean and covariance diagonal matrix
         w_m = torch.flatten(self.weight_mu)
         w_Sigma = torch.flatten(torch.square(torch.exp(self.weight_log_sigma)))
-        w_m_prior = torch.flatten(self.w_mean_prior)
-        w_Sigma_prior = torch.flatten(
-            torch.square(torch.exp(self.w_log_std_prior)))
 
         # Compute b's flattened mean and covariance diagonal matrix
         b_m = torch.flatten(self.bias_mu)
         b_Sigma = torch.flatten(torch.square(torch.exp(self.bias_log_sigma)))
-        b_m_prior = torch.flatten(self.b_mean_prior)
-        b_Sigma_prior = torch.flatten(
-            torch.square(torch.exp(self.b_log_std_prior)))
 
         # Compute the KL divergence of w
         KL = -w_m.size(dim=0)
-        KL += torch.sum(w_Sigma / w_Sigma_prior)
-        KL += torch.sum((w_m_prior - w_m)**2 / w_Sigma_prior)
-        KL += 2 * torch.sum(self.w_log_std_prior) - 2 * torch.sum(
-            self.weight_log_sigma)
+        KL += torch.sum(w_Sigma)
+        KL += torch.sum(w_m**2)
+        KL -= 2 * torch.sum(self.weight_log_sigma)
 
         # Compute the KL divergence of b
         KL -= b_m.size(dim=0)
-        KL += torch.sum(b_Sigma / b_Sigma_prior)
-        KL += torch.sum((b_m_prior - b_m)**2 / b_Sigma_prior)
-        KL += 2 * torch.sum(self.b_log_std_prior) - 2 * torch.sum(
-            self.bias_log_sigma)
+        KL += torch.sum(b_Sigma)
+        KL += torch.sum(b_m**2)
+        KL -= 2 * torch.sum(self.bias_log_sigma)
 
         return KL / 2
 
@@ -294,7 +315,8 @@ class BayesianNN(GenerativeFunction):
         activation,
         input_dim=1,
         output_dim=1,
-        seed=0,
+        dropout=0.05,
+        seed=2147483647,
         fix_random_noise=False,
         device=None,
         dtype=torch.float64,
@@ -318,25 +340,27 @@ class BayesianNN(GenerativeFunction):
                  The device in which the computations are made.
         fix_random_noise : boolean
                            Wether to reset the Random Generator's seed in each
-                           iteration. 
+                           iteration.
         seed : int
                Initial seed for the random number generator.
         dtype : data-type
                 The dtype of the layer's computations and weights.
 
         """
-        super().__init__(input_dim,
-                         output_dim,
-                         device=device,
-                         fix_random_noise=fix_random_noise,
-                         seed=seed,
-                         dtype=dtype)
+        super().__init__(
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
 
         self.structure = structure
         self.activation = activation
         self.generator = torch.Generator()
         self.generator.manual_seed(self.seed)
-
+        self.dropout = torch.nn.Dropout(dropout)
         # Create an array symbolizing the dimensionality of the data at
         # each inner layer.
         dims = [input_dim] + structure + [output_dim]
@@ -348,35 +372,34 @@ class BayesianNN(GenerativeFunction):
                 BayesLinear(
                     _in,
                     _out,
-                    # Sampler the prior values from a Gaussian distribution
-                    w_mean_prior=torch.normal(
+                    w_mean=torch.normal(
                         mean=0.0,
                         std=1.00,
                         size=(_in, _out),
                         generator=self.generator,
-                    ),
-                    w_log_std_prior=torch.log(
+                    ).to(device),
+                    w_log_std=torch.log(
                         torch.abs(
                             torch.normal(
-                                mean=.0,
-                                std=1.,
+                                mean=0.0,
+                                std=1.0,
                                 size=(_in, _out),
                                 generator=self.generator,
-                            ))),
-                    b_mean_prior=torch.normal(
+                            ).to(device))),
+                    b_mean=torch.normal(
                         mean=0.0,
-                        std=1.,
+                        std=1.0,
                         size=[_out],
                         generator=self.generator,
-                    ),
-                    b_log_std_prior=torch.log(
+                    ).to(device),
+                    b_log_std=torch.log(
                         torch.abs(
                             torch.normal(
-                                mean=.0,
-                                std=1.,
+                                mean=0.0,
+                                std=1.0,
                                 size=[_out],
                                 generator=self.generator,
-                            ))),
+                            ).to(device))),
                     device=device,
                     fix_random_noise=fix_random_noise,
                     dtype=dtype,
@@ -388,10 +411,16 @@ class BayesianNN(GenerativeFunction):
         but the last level.
         """
 
-        x = torch.tile(inputs.unsqueeze(0),
-                       (num_samples, *np.ones(inputs.ndim, dtype=int)))
+        # Replicate the input on the first dimension as many times as
+        #  desired samples.
+        x = torch.tile(
+            inputs.unsqueeze(0),
+            (num_samples, *np.ones(inputs.ndim, dtype=int)),
+        )
+
         for layer in self.layers[:-1]:
             x = self.activation(layer(x))
+            x = self.dropout(x)
         return self.layers[-1](x)
 
     def KL(self):
@@ -435,7 +464,7 @@ class GP(GenerativeFunction):
         kernel=RBF,
         device=None,
         fix_random_noise=False,
-        seed=0,
+        seed=2147483647,
         dtype=torch.float64,
     ):
         """Encapsulates an exact Gaussian process. The Cholesky decomposition
@@ -456,19 +485,21 @@ class GP(GenerativeFunction):
                  The device in which the computations are made.
         fix_random_noise : boolean
                            Wether to reset the Random Generator's seed in each
-                           iteration. 
+                           iteration.
         seed : int
                Initial seed for the random number generator.
         dtype : data-type
                 The dtype of the layer's computations and weights.
         """
 
-        super(GP, self).__init__(input_dim,
-                                 output_dim,
-                                 device=device,
-                                 fix_random_noise=fix_random_noise,
-                                 seed=seed,
-                                 dtype=dtype)
+        super(GP, self).__init__(
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
 
         # Instantiate Standard Gaussian sampler
         self.gaussian_sampler = GaussianSampler(seed)
@@ -484,6 +515,8 @@ class GP(GenerativeFunction):
         ---------
         inputs : torch tensor of shape (..., M, D)
                  Batched input values
+        num_samples : int
+                      Number of samples to generate.
 
         Returns
         -------

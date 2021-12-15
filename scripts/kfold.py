@@ -1,24 +1,21 @@
-from src.dataset import Boston_Dataset, DVIP_Dataset, Energy_Dataset, Training_Dataset, Test_Dataset
-from utils import (
-    plot_train_test,
-    build_plot_name,
-    plot_prior_over_layers,
-)
-import numpy as np
-from collections import Counter
 import torch
+from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader
+import sys
 
-from src.train import predict_prior_samples, train, predict, test
-from src.likelihood import Gaussian
+sys.path.append(".")
+
 from src.dvip import DVIP_Base
 from src.layers_init import init_layers
-
-from sklearn.model_selection import KFold
-from process_flags import manage_experiment_configuration
-from torch.utils.data import random_split
+from src.likelihood import Gaussian
+from utils.dataset import Test_Dataset, Training_Dataset
+from utils.metrics import Metrics
+from utils.process_flags import manage_experiment_configuration
+from utils.pytorch_learning import fit, score
 
 args = manage_experiment_configuration()
+
+torch.manual_seed(2147483647)
 
 # CUDA for PyTorch
 use_cuda = torch.cuda.is_available()
@@ -26,18 +23,20 @@ device = torch.device("cuda:0" if use_cuda else "cpu")
 torch.backends.cudnn.benchmark = True
 vars(args)["device"] = device
 
-dataset = Boston_Dataset()
-
-results_dict = {"nelbo": 0.0, "rmse": 0.0, "nll": 0.0}
-
 n_splits = 10
-kfold = KFold(n_splits, shuffle=True, random_state=42)
+test_history = Metrics().get_dict()
+kfold = KFold(n_splits, shuffle=True, random_state=2147483647)
 
-for train_indexes, test_indexes in kfold.split(dataset.inputs):
-    train_dataset = Training_Dataset(dataset.inputs[train_indexes],
-                                     dataset.targets[train_indexes])
-    test_dataset = Test_Dataset(dataset.inputs[test_indexes],
-                                dataset.targets[test_indexes])
+for train_indexes, test_indexes in kfold.split(args.dataset.inputs):
+    train_dataset = Training_Dataset(
+        args.dataset.inputs[train_indexes],
+        args.dataset.targets[train_indexes],
+        verbose=False,
+    )
+    test_dataset = Test_Dataset(args.dataset.inputs[test_indexes],
+                                args.dataset.targets[test_indexes],
+                                train_dataset.inputs_mean,
+                                train_dataset.inputs_std)
 
     # Get VIP layers
     layers = init_layers(train_dataset.inputs, train_dataset.output_dim,
@@ -57,41 +56,40 @@ for train_indexes, test_indexes in kfold.split(dataset.inputs):
         num_samples=args.num_samples_train,
         y_mean=train_dataset.targets_mean,
         y_std=train_dataset.targets_std,
+        dtype=args.dtype,
+        device=args.device,
     )
-    #dvip.freeze_prior()
+    # dvip.freeze_prior()
 
     # Define optimizer and compile model
     opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
-    #scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.999)
 
     # Perform training
-    train_metrics = train(
+    dvip.num_samples = args.num_samples_train
+    train_hist = fit(
         dvip,
         train_loader,
         opt,
-        val_generator=val_loader,
-        #scheduler,
-        epochs=args.epochs)
-    test_metrics = test(dvip, val_loader)
+        # val_generator=val_loader,
+        epochs=args.epochs,
+        verbose=0,
+        device=args.device)
+    dvip.num_samples = args.num_samples_test
+    test_metrics = score(dvip, val_loader, device=args.device)
 
-    print("TRAINING RESULTS: ")
-    print("\t - NELBO: {}".format(train_metrics["nelbo"]))
-    print("\t - NLL: {}".format(train_metrics["nll"]))
-    print("\t - RMSE: {}".format(train_metrics["rmse"]))
-
-    print("TEST RESULTS: ")
-    print("\t - NELBO: {}".format(test_metrics["nelbo"]))
-    print("\t - NLL: {}".format(test_metrics["nll"]))
-    print("\t - RMSE: {}".format(test_metrics["rmse"]))
-
-    results_dict["nelbo"] += test_metrics["nelbo"]
-    results_dict["rmse"] += test_metrics["rmse"]
-    results_dict["nll"] += test_metrics["nll"]
+    test_history = {
+        key: test_history[key] + test_metrics[key]
+        for key in test_history.keys()
+    }
+    print("FOLD RESULTS: ")
+    print("\t - NELBO: {}".format(test_metrics["LOSS"]))
+    print("\t - NLL: {}".format(test_metrics["NLL"]))
+    print("\t - RMSE: {}".format(test_metrics["RMSE"]))
 
 print("TEST RESULTS: ")
-print("\t - NELBO: {}".format(results_dict["nelbo"] / n_splits))
-print("\t - NLL: {}".format(results_dict["nll"] / n_splits))
-print("\t - RMSE: {}".format(results_dict["rmse"] / n_splits))
+print("\t - NELBO: {}".format(test_history["LOSS"] / n_splits))
+print("\t - NLL: {}".format(test_history["NLL"] / n_splits))
+print("\t - RMSE: {}".format(test_history["RMSE"] / n_splits))
 """ 
     # Predict Train and Test
     train_mean, train_var = predict(dvip, predict_loader)

@@ -1,7 +1,5 @@
 import torch
 
-from src.layers import VIPLayer
-
 
 class DVIP_Base(torch.nn.Module):
     def name(self):
@@ -25,47 +23,69 @@ class DVIP_Base(torch.nn.Module):
         Parameters
         ----------
         likelihood : Likelihood
-                     Indicates the likelihood distribution of the data
+                     Indicates the likelihood distribution of the data.
         layers : array of Layer
                  Contains the different Variational Implicit Process layers
-                 that make up this model.
+                 that define this model.
         num_data : int
-                   Amount of data samples
+                   Amount of data samples in the full dataset. This is used
+                   to scale the likelihood in the loss function to the size
+                   of the minibatch.
         num_samples : int
-                      Number of Monte Carlo samples to broadcast by default.
+                      The number of samples to generate from the
+                      posterior distribution.
         y_mean : float or array-like
-                 Original value of the normalized labels
+                 The given target values at training must be normalized.
+                 This variable indicates the original mean value so that
+                 the computed metrics follow the original scale.
         y_std : float or array-like
-                Original standar deviation of the normalized labels
+                Original standar deviation of the normalized targets.
         device : torch.device
                  The device in which the computations are made.
         dtype : data-type
                 The dtype of the layer's computations and weights.
+
+        Raises
+        ------
+        Warning
+             When using only one layer, all posterior samples coincide.
+             If the number of posterior samples is greater than one,
+             a message is shown informing of this.
         """
         super().__init__()
+        # Store data information
         self.num_data = num_data
-        self.y_mean = y_mean
-        self.y_std = y_std
+        self.y_mean = torch.tensor(y_mean, device=device)
+        self.y_std = torch.tensor(y_std, device=device)
 
+        # Set the amount of MC samples in training and test
         self.num_samples = num_samples
 
+        # Store likelihood and Variational Implicit layers
         self.likelihood = likelihood
         self.vip_layers = torch.nn.ModuleList(layers)
-        if len(self.vip_layers) == 1 and self.num_samples > 1:
-            print("\nWARNING: Using MonteCarlo re-samples with only one layer "
-                  "lowers the computational efficiency of the training loop.")
-            print("As only one layer is used, all MonteCarlo resamples "
-                  "raise the same result.")
-            print("For this reason the number of MC "
-                  "samples is reduced to 1 when only one layer is considered.")
-            self.num_samples = 1
 
+        # Warning about vip_layers and posterior samples
+        if len(self.vip_layers) == 1 and self.num_samples > 1:
+            import warnings
+
+            self.num_samples = 1
+            warnings.warn(
+                "Using more than one posterior sample seriously affects the"
+                " computational time. When wsing only one layer all posterior"
+                " samples coincide. The number of samples will be set to 1."
+            )
+
+        # Set device and data type (precision)
         self.device = device
         self.dtype = dtype
 
     def train_step(self, optimizer, X, y):
         """
-        Defines the training step for the DVIP model.
+        Defines the training step for the DVIP model. Using a simple optimizer.
+        This method illustrates a standard training step. If more complex
+        operations are needed, such as optimizers with double steps.
+        Create your own training step, calling this one is not compulsory.
 
         Parameters
         ----------
@@ -104,27 +124,17 @@ class DVIP_Base(torch.nn.Module):
         # Make optimization step
         optimizer.step()
 
-        # Create predictions to update the model's metrics. Turn off gradients
-        # computations as they are not necessary.
-        with torch.no_grad():
-            means, variances = self.forward(X)
-            # Update likelihood metrics using re-escaled targets.
-            self.likelihood.update_metrics(y * self.y_std + self.y_mean, means,
-                                           variances)
-
         return loss
 
     def test_step(self, X, y):
         """
         Defines the test step for the DVIP model.
-
         Parameters
         ----------
         X : torch tensor of shape (batch_size, data_dim)
             Contains the input features.
         y : torch tensor of shape (batch_size, output_dim)
             Targets of the given input, must be standardized.
-
         Returns
         -------
         loss : float
@@ -142,12 +152,10 @@ class DVIP_Base(torch.nn.Module):
         # Compute predictions
         with torch.no_grad():
             mean_pred, var_pred = self(X)  # Forward pass
-
             # Compute the loss
             loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
-            self.likelihood.update_metrics(y, mean_pred, var_pred)
 
-        return loss
+        return loss, mean_pred, var_pred
 
     def forward(self, predict_at, full_cov=False):
         """
@@ -166,17 +174,10 @@ class DVIP_Base(torch.nn.Module):
         and the predicted mean and standard deviation.
         """
 
-        mean, var = self.predict_y(predict_at,
-                                   self.num_samples,
-                                   full_cov=full_cov)
-        return mean * self.y_std + self.y_mean, var.sqrt() * self.y_std
-
-    def get_predictive_results(_, means, vars):
-        import numpy as np
-        prediction_mean = np.mean(means, axis=0)
-        prediction_var = np.mean(vars + means**2, axis=0) - prediction_mean**2
-
-        return prediction_mean, prediction_var
+        mean, var = self.predict_y(
+            predict_at, self.num_samples, full_cov=full_cov
+        )
+        return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
 
     def propagate(self, X, num_samples=1, full_cov=False):
         """
@@ -217,7 +218,8 @@ class DVIP_Base(torch.nn.Module):
         F = sX
         for layer in self.vip_layers:
             F, Fmean, Fvar, Fprior = layer.sample_from_conditional(
-                F, full_cov=full_cov)
+                F, full_cov=full_cov
+            )
             Fs.append(F)
             Fmeans.append(Fmean)
             Fvars.append(Fvar)
@@ -258,7 +260,7 @@ class DVIP_Base(torch.nn.Module):
     def predict_y(self, predict_at, num_samples, full_cov=False):
         """
         Returns the predicted mean and variance for the given inputs.
-        Takes the predictions from the last layer and considers 
+        Takes the predictions from the last layer and considers
         applies the likelihood.
 
         Parameters
@@ -274,15 +276,15 @@ class DVIP_Base(torch.nn.Module):
         Fvars : torch tensor of shape (num_layers, batch_size, output_dim)
                 Contains the standard deviation of the predictions.
         """
-        Fmean, Fvar = self.predict_f(predict_at,
-                                     num_samples=num_samples,
-                                     full_cov=full_cov)
+        Fmean, Fvar = self.predict_f(
+            predict_at, num_samples=num_samples, full_cov=full_cov
+        )
 
         return self.likelihood.predict_mean_and_var(Fmean, Fvar)
 
     def get_prior_samples(self, X, full_cov=False):
         """
-        Returns the prior samples of the given inputs using 1 MonteCarlo 
+        Returns the prior samples of the given inputs using 1 MonteCarlo
         resample.
 
         Parameters
@@ -299,9 +301,9 @@ class DVIP_Base(torch.nn.Module):
                  Contains the S prior samples for each layer at each data
                  point.
         """
-        _, _, _, Fpriors = self.propagate(X,
-                                          num_samples=self.num_samples,
-                                          full_cov=full_cov)
+        _, _, _, Fpriors = self.propagate(
+            X, num_samples=self.num_samples, full_cov=full_cov
+        )
 
         # Squeeze the MonteCarlo dimension
         Fpriors = torch.stack(Fpriors)[:, :, 0, :, :]
@@ -312,7 +314,7 @@ class DVIP_Base(torch.nn.Module):
         """
         Compute expectations of the data log likelihood under the variational
         distribution with MC samples.
-        
+
         Parameters
         ----------
         X : torch tensor of shape (batch_size, data_dim)
@@ -321,17 +323,18 @@ class DVIP_Base(torch.nn.Module):
             Targets of the given input, must be standardized.
 
         """
-        F_mean, F_var = self.predict_f(X,
-                                       num_samples=self.num_samples,
-                                       full_cov=False)
+        F_mean, F_var = self.predict_f(
+            X, num_samples=self.num_samples, full_cov=False
+        )
         var_exp = self.likelihood.variational_expectations(
-            F_mean, F_var, Y)  # Shape [S, N, D]
+            F_mean, F_var, Y
+        )  # Shape [S, N, D]
         return torch.mean(var_exp, dim=0)  # Shape [N, D]
 
     def nelbo(self, X, y):
         """
         Computes the evidence lower bound.
-        
+
         Parameters
         ----------
         X : torch tensor of shape (batch_size, data_dim)
@@ -349,21 +352,8 @@ class DVIP_Base(torch.nn.Module):
         KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
         return -scale * likelihood + KL
 
-    @property
-    def metrics(self):
-        # We list our `Metric` objects here so that `reset_states()` can be
-        # called automatically at the start of each epoch
-        # or at the start of `evaluate()`.
-        # If you don't implement this property, you have to call
-        # `reset_states()` yourself at the time of your choosing.
-        metrics = [self.loss_tracker]
-        for metric in self.likelihood.metrics:
-            metrics.append(metric)
-
-        return metrics
-
     def freeze_posterior(self):
-        """Sets the posterior parameters of every layer as non-trainable. """
+        """Sets the posterior parameters of every layer as non-trainable."""
         for layer in self.vip_layers:
             layer.freeze_posterior()
 
@@ -377,6 +367,7 @@ class DVIP_Base(torch.nn.Module):
         self.likelihood.log_variance.requires_grad = False
 
     def print_variables(self):
+        """Prints the model variables in a prettier way."""
         import numpy as np
 
         print("\n---- MODEL PARAMETERS ----")
@@ -388,13 +379,14 @@ class DVIP_Base(torch.nn.Module):
 
                 if name[i] not in sections:
                     print("\t" * i, name[i].upper())
-                    sections = name[:i + 1]
+                    sections = name[: i + 1]
 
             padding = "\t" * (len(name) - 1)
             print(
                 padding,
-                "{}: {}".format(name[-1],
-                                param.data.detach().cpu().numpy().flatten()),
+                "{}: {}".format(
+                    name[-1], param.data.detach().cpu().numpy().flatten()
+                ),
             )
 
         print("\n---------------------------\n\n")

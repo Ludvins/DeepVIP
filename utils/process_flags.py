@@ -1,9 +1,8 @@
 import argparse
-from load_data import SPGP, synthetic, test, boston
-import torch
-import numpy as np
 
-from src.dataset import Boston_Dataset
+import numpy as np
+import torch
+from .dataset import get_dataset
 
 
 def manage_experiment_configuration(args=None):
@@ -16,8 +15,7 @@ def manage_experiment_configuration(args=None):
     FLAGS = vars(args)
 
     # Manage Dataset
-    if args.dataset_name == "SPGP":
-        args.dataset = Boston_Dataset()
+    args.dataset = get_dataset(args.dataset_name)
 
     FLAGS["activation_str"] = args.activation
     # Manage Generative function
@@ -93,8 +91,7 @@ def get_parser():
     parser.add_argument(
         "--dataset_name",
         type=str,
-        default="SPGP",
-        help="Dataset to use (SPGP, synthethic or boston)",
+        help="Dataset to use",
     )
     parser.add_argument(
         "--epochs",
@@ -125,14 +122,20 @@ def get_parser():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1000,
+        default=10000,
         help="Number of regression coefficients to use",
     )
     parser.add_argument(
         "--activation",
         type=str,
-        default="cos",
+        default="tanh",
         help="Activation function to use in the Bayesian NN",
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.05,
+        help="Dropout to use in the Bayesian NN",
     )
     parser.add_argument(
         "--lr",
@@ -143,22 +146,22 @@ def get_parser():
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--no-fix_prior_noise",
                         dest="fix_prior_noise",
-                        action='store_false')
+                        action="store_false")
     parser.set_defaults(fix_prior_noise=True)
     parser.add_argument("--freeze_prior",
                         dest="freeze_prior",
-                        action='store_true')
+                        action="store_true")
     parser.set_defaults(freeze_prior=False)
     parser.add_argument("--freeze_posterior",
                         dest="freeze_posterior",
-                        action='store_true')
+                        action="store_true")
     parser.set_defaults(freeze_posterior=False)
-    parser.add_argument("--show", dest="show", action='store_true')
+    parser.add_argument("--show", dest="show", action="store_true")
     parser.set_defaults(show=False)
     parser.add_argument(
         "--seed",
         type=int,
-        default=0,
+        default=2147483647,
     )
     parser.add_argument(
         "--verbose",

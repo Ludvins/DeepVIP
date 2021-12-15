@@ -1,25 +1,35 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
-def build_plot_name(vip_layers, bnn_structure, activation_str, input_dim,
-                    output_dim, epochs, n_samples, dataset, name_flag, genf,
-                    fix_prior_noise, freeze_prior, freeze_posterior, **kwargs):
-    """ Generates the title and the path of the figure using the configuration
+def build_plot_name(
+    vip_layers,
+    bnn_structure,
+    activation_str,
+    epochs,
+    batch_size,
+    dataset,
+    name_flag,
+    genf,
+    fix_prior_noise,
+    freeze_prior,
+    freeze_posterior,
+    **kwargs
+):
+    """Generates the title and the path of the figure using the configuration
     of the experiment.
     """
-    # Create title name
-    dims = np.concatenate(
-        ([input_dim], np.ones(vip_layers, dtype=int) * [output_dim]))
 
-    dims_name = "-".join(map(str, dims))
+    dims_name = "-".join(map(str, vip_layers))
     model_name = genf
     if genf == "BNN":
-        model_name += " " + "-".join(map(str,
-                                         bnn_structure)) + " " + activation_str
+        model_name += (
+            " " + "-".join(map(str, bnn_structure)) + " " + activation_str
+        )
 
     path = "plots/{}_{}_layers={}_bnn={}_epochs={}_batchsize={}".format(
-        dataset, name_flag, dims_name, model_name, epochs, n_samples)
+        dataset, name_flag, dims_name, model_name, epochs, batch_size
+    )
     if fix_prior_noise:
         path = path + "_fixed_noise"
     if freeze_posterior:
@@ -30,30 +40,31 @@ def build_plot_name(vip_layers, bnn_structure, activation_str, input_dim,
     return title, path
 
 
-def plot_train_test(train_mixture_means,
-                    train_prediction_mean,
-                    train_prediction_sqrt,
-                    test_mixture_means,
-                    test_prediction_mean,
-                    test_prediction_sqrt,
-                    X_train,
-                    y_train,
-                    X_test,
-                    y_test=None,
-                    train_prior_samples=None,
-                    test_prior_samples=None,
-                    title=None,
-                    path=None,
-                    show=True):
-    """ 
+def plot_train_test(
+    train_mixture_means,
+    train_prediction_mean,
+    train_prediction_sqrt,
+    test_mixture_means,
+    test_prediction_mean,
+    test_prediction_sqrt,
+    X_train,
+    y_train,
+    X_test,
+    y_test=None,
+    train_prior_samples=None,
+    test_prior_samples=None,
+    title=None,
+    path=None,
+    show=True,
+):
+    """
     Generates a plot consisting in two subplots, one with the training
     results and one with the test results.
     """
 
-    _, ax = plt.subplots(2,
-                         2,
-                         gridspec_kw={"height_ratios": [3, 1]},
-                         figsize=(20, 10))
+    _, ax = plt.subplots(
+        2, 2, gridspec_kw={"height_ratios": [3, 1]}, figsize=(20, 10)
+    )
 
     plt.suptitle(title)
 
@@ -89,14 +100,16 @@ def plot_train_test(train_mixture_means,
     plt.close()
 
 
-def plot_results(X,
-                 means,
-                 predictive_mean,
-                 predictive_std,
-                 y=None,
-                 prior_samples=None,
-                 ax=None):
-    """ Makes a plot consisting in two subplots joined vertically.
+def plot_results(
+    X,
+    means,
+    predictive_mean,
+    predictive_std,
+    y=None,
+    prior_samples=None,
+    ax=None,
+):
+    """Makes a plot consisting in two subplots joined vertically.
     The upper one shows the points and the predictions and the lower one
     shows the standard deviation of the predictive distribution at each point.
     """
@@ -173,33 +186,25 @@ def plot_prediction(
     ax.plot(X, mean, color=mean_color, alpha=alpha, label=label)
     if std is not None:
         std = std[sort]
-        ax.fill_between(X,
-                        mean - 2 * std,
-                        mean + 2 * std,
-                        color=std_color,
-                        alpha=alpha / 2)
+        ax.fill_between(
+            X, mean - 2 * std, mean + 2 * std, color=std_color, alpha=alpha / 2
+        )
 
     return ax
 
 
-def plot_standard_deviation(X,
-                            std,
-                            color=None,
-                            alpha=1.0,
-                            label=None,
-                            ax=None):
+def plot_standard_deviation(
+    X, std, color=None, alpha=1.0, label=None, ax=None
+):
     if ax is None:
         fig, ax = plt.subplots()
 
     sort = np.argsort(X)
     X = X[sort]
     std = std[sort]
-    ax.fill_between(X,
-                    np.zeros_like(std),
-                    std,
-                    color=color,
-                    label=label,
-                    alpha=alpha)
+    ax.fill_between(
+        X, np.zeros_like(std), std, color=color, label=label, alpha=alpha
+    )
 
     return ax
 
@@ -216,8 +221,9 @@ def plot_prior_over_layers(X, prior_samples, n=2):
         _, ax = plt.subplots(n, n_layers // n, figsize=(5, 15))
 
         for i in range(n_layers):
-            plot_prior_samples(X.flatten(), prior_samples[i],
-                               ax[i // n][i % n])
+            plot_prior_samples(
+                X.flatten(), prior_samples[i], ax[i // n][i % n]
+            )
 
             ax[i // n][i % n].set_title("Layer {}".format(i + 1))
     plt.suptitle("Prior Samples")

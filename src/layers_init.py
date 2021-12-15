@@ -1,7 +1,8 @@
-from src.layers import VIPLayer
 import numpy as np
 import torch
-from src.generative_models import BayesianNN, GP
+
+from src.generative_functions import GP, BayesianNN
+from src.layers import VIPLayer
 
 
 class LinearProjection:
@@ -23,9 +24,9 @@ class LinearProjection:
         return torch.einsum("...a, ab -> ...b", inputs, self.P)
 
 
-def init_layers(X_train, output_dim, vip_layers, genf, regression_coeffs,
+def init_layers(X, output_dim, vip_layers, genf, regression_coeffs,
                 bnn_structure, activation, seed, device, dtype,
-                fix_prior_noise, **kwargs):
+                fix_prior_noise, dropout, **kwargs):
     """
     Creates the Variational Implicit Process layers using the given
     information. If the dimensionality is reducen between layers,
@@ -40,8 +41,8 @@ def init_layers(X_train, output_dim, vip_layers, genf, regression_coeffs,
     ----------
     X : tf.tensor of shape (num_data, data_dim)
         Contains the input features.
-    Y : tf.tensor of shape (num_data, output_dim)
-        Contains the input labels
+    output_dim : int
+                 Number of output dimensions of the model.
     vip_layers : integer or list of integers
                  Indicates the number of VIP layers to use. If
                  an integer is used, as many layers as its value
@@ -53,37 +54,43 @@ def init_layers(X_train, output_dim, vip_layers, genf, regression_coeffs,
                  layers; one that goes from data_dim features
                  to 10, another from 10 to 3, and lastly from
                  3 to output_dim.
+    genf : string
+           Indicates the generation function to use, can be, BNN or GP.
     regression_coeffs : integer
                         Number of regression coefficients to use.
-    structure : list of integers
-                Specifies the hidden dimensions of the Bayesian
-                Neural Networks in each VIP.
+    bnn_structure : list of integers
+                    Specifies the hidden dimensions of the Bayesian
+                    Neural Networks in each VIP.
     activation : callable
                  Non-linear function to apply at each inner
                  dimension of the Bayesian Network.
+    dtype : data-type
+                The dtype of the layer's computations and weights.
+    device : torch.device
+                 The device in which the computations are made.
     seed : int
-           Random seed
+               integer to use as seed for randomness.
     """
 
-    # Create VIP layers. If integer, replicate output dimension
-    if (len(vip_layers) == 1)\
-            and X_train.shape[1] == 1 and output_dim == 1:
-        dims = np.ones(vip_layers[0] + 1, dtype=int)
+    # Create VIP layers. If integer, replicate input dimension
+    if len(vip_layers) == 1:
+        vip_layers = [X.shape[1]] * (vip_layers[0] - 1)
     # Otherwise, append thedata dimensions to the array.
     else:
         if vip_layers[-1] != output_dim:
             raise RuntimeError(
                 "Last vip layer does not correspond with data label")
-        dims = [X_train.shape[1]] + vip_layers
+    dims = [X.shape[1]] + vip_layers + [output_dim]
 
     # Initialize layers array
     layers = []
     # We maintain a copy of X, where each projection is applied. That is,
     # if two data reductions are made, the matrix of the second is computed
     # using the projected (from the first projection) data.
-    X_running = np.copy(X_train)
+    X_running = np.copy(X)
     for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
-        # Las layer has no transformation
+
+        # Last layer has no transformation
         if i == len(dims) - 2:
             mf = None
 
@@ -100,35 +107,43 @@ def init_layers(X_train, output_dim, vip_layers, genf, regression_coeffs,
             X_running = X_running @ V[:dim_out].T
 
         else:
-            raise NotImplementedError("Dimensionality augmentation is not"
-                                      " handled currently.")
+            raise NotImplementedError(
+                "Dimensionality augmentation is not handled currently.")
 
         # Create the Generation function
         if genf == "BNN":
-            f = BayesianNN(input_dim=dim_in,
-                           structure=bnn_structure,
-                           activation=activation,
-                           output_dim=dim_out,
-                           fix_random_noise=fix_prior_noise,
-                           device=device,
-                           seed=seed,
-                           dtype=dtype)
+            f = BayesianNN(
+                input_dim=dim_in,
+                structure=bnn_structure,
+                activation=activation,
+                output_dim=dim_out,
+                dropout=dropout,
+                fix_random_noise=fix_prior_noise,
+                device=device,
+                seed=seed,
+                dtype=dtype,
+            )
         elif genf == "GP":
-            f = GP(input_dim=dim_in,
-                   output_dim=dim_out,
-                   seed=seed,
-                   fix_random_noise=fix_prior_noise,
-                   dtype=dtype,
-                   device=device)
+            f = GP(
+                input_dim=dim_in,
+                output_dim=dim_out,
+                seed=seed,
+                fix_random_noise=fix_prior_noise,
+                dtype=dtype,
+                device=device,
+            )
 
         # Create layer
         layers.append(
-            VIPLayer(f,
-                     num_regression_coeffs=regression_coeffs,
-                     input_dim=dim_in,
-                     output_dim=dim_out,
-                     mean_function=mf,
-                     seed=seed,
-                     dtype=dtype))
+            VIPLayer(
+                f,
+                num_regression_coeffs=regression_coeffs,
+                input_dim=dim_in,
+                output_dim=dim_out,
+                mean_function=mf,
+                seed=seed,
+                dtype=dtype,
+                device=device,
+            ))
 
     return layers

@@ -1,6 +1,7 @@
-import torch
-from .utils import reparameterize
 import numpy as np
+import torch
+
+from .utils import reparameterize
 
 
 class Layer(torch.nn.Module):
@@ -27,7 +28,7 @@ class Layer(torch.nn.Module):
         self.input_dim = input_dim
         self.freeze = False
 
-        self.generator = torch.Generator()
+        self.generator = torch.Generator(device)
         self.generator.manual_seed(seed)
 
     def conditional_ND(self):
@@ -91,6 +92,7 @@ class VIPLayer(Layer):
         mean_function=None,
         seed=0,
         dtype=torch.float64,
+        device=None,
     ):
         """
         A variational implicit process layer.
@@ -141,7 +143,9 @@ class VIPLayer(Layer):
         seed : int
                integer to use as seed for randomness.
         """
-        super().__init__(dtype=dtype, input_dim=input_dim, seed=seed)
+        super().__init__(
+            dtype=dtype, input_dim=input_dim, seed=seed, device=device
+        )
 
         self.num_coeffs = num_regression_coeffs
 
@@ -157,7 +161,9 @@ class VIPLayer(Layer):
         self.mean_function = mean_function
 
         # Verticality of the layer
-        self.output_dim = torch.tensor(output_dim, dtype=torch.int32)
+        self.output_dim = torch.tensor(
+            output_dim, dtype=torch.int32, device=device
+        )
 
         # Initialize generative function
         self.generative_function = generative_function
@@ -168,7 +174,8 @@ class VIPLayer(Layer):
                 np.ones(output_dim) * log_layer_noise,
                 dtype=self.dtype,
                 device=self.device,
-            ))
+            )
+        )
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
@@ -189,13 +196,13 @@ class VIPLayer(Layer):
         self.q_sqrt_tri = torch.nn.Parameter(self.q_sqrt_tri)
 
     def freeze_posterior(self):
-        """Sets the model parameters as non-trainable. """
+        """Sets the model parameters as non-trainable."""
         self.q_mu.requires_grad = False
         self.q_sqrt_tri.requires_grad = False
         self.log_layer_noise.requires_grad = False
 
     def freeze_prior(self):
-        """Sets the prior parameters of this layer as non trainable. """
+        """Sets the prior parameters of this layer as non trainable."""
         self.generative_function.freeze_parameters()
 
     def conditional_ND(self, X, full_cov=False):
@@ -250,17 +257,21 @@ class VIPLayer(Layer):
 
         # Compute regresion function, shape (S, ... , N, D)
         phi = (f - m) / torch.sqrt(
-            torch.tensor(self.num_coeffs).type(self.dtype))
+            torch.tensor(self.num_coeffs).type(self.dtype)
+        )
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, ... , N, D)
-        mean = m.squeeze(axis=0) + torch.einsum("s...nd,sd->...nd", phi,
-                                                self.q_mu)
+        mean = m.squeeze(axis=0) + torch.einsum(
+            "s...nd,sd->...nd", phi, self.q_mu
+        )
 
         # Shape (S, S, D)
-        q_sqrt = (torch.zeros(
-            (self.num_coeffs, self.num_coeffs,
-             self.output_dim)).to(self.dtype).to(self.device))
+        q_sqrt = (
+            torch.zeros((self.num_coeffs, self.num_coeffs, self.output_dim))
+            .to(self.dtype)
+            .to(self.device)
+        )
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
         # Shape (S, S, D)
@@ -312,13 +323,13 @@ class VIPLayer(Layer):
 
         # Log of determinant of covariance matrix.
         # Det(Sigma) = Det(q_sqrt q_sqrt^T) = Det(q_sqrt) Det(q_sqrt^T)
-        # = prod(diag_s_sqrt)^2
+        #            = prod(diag_s_sqrt)^2
         KL -= torch.sum(torch.log(torch.abs(diag)))
 
-        # Trace term.
+        # Trace term
         KL += 0.5 * torch.sum(torch.square(self.q_sqrt_tri))
 
         # Mean term
         KL += 0.5 * torch.sum(torch.square(self.q_mu))
 
-        return KL  #+ self.generative_function.KL()
+        return KL  # + self.generative_function.KL()
