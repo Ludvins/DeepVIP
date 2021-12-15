@@ -360,7 +360,10 @@ class BayesianNN(GenerativeFunction):
         self.activation = activation
         self.generator = torch.Generator()
         self.generator.manual_seed(self.seed)
-        self.dropout = torch.nn.Dropout(dropout)
+        if dropout > 0.0:
+            self.dropout = torch.nn.Dropout(dropout)
+        else:
+            self.dropout = lambda x: x
         # Create an array symbolizing the dimensionality of the data at
         # each inner layer.
         dims = [input_dim] + structure + [output_dim]

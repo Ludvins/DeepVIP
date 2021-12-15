@@ -63,7 +63,7 @@ dvip = DVIP_Base(
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 # opt = SAM(dvip.parameters(), torch.optim.Adam, lr = args.lr)
-# scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9995)
+scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9999)
 
 # Perform training
 train_hist, val_hist = fit(
@@ -71,7 +71,7 @@ train_hist, val_hist = fit(
     train_loader,
     opt,
     val_generator=val_loader,
-    # scheduler = scheduler,
+    scheduler=scheduler,
     epochs=args.epochs,
     device=args.device,
 )
@@ -92,14 +92,25 @@ fig = plt.figure(figsize=(20, 10))
 
 ax1 = fig.add_subplot(2, 2, 1)
 ax2 = fig.add_subplot(2, 2, 3)
-ax3 = fig.add_subplot(1, 2, 2)
+ax3 = fig.add_subplot(2, 2, 2)
+ax4 = fig.add_subplot(2, 2, 4)
 
-ax3.plot(df[["LOSS"]].to_numpy(), label="Training loss")
+loss = df[["LOSS"]].to_numpy().flatten()
+ax3.plot(loss, label="Training loss")
 ax3.legend()
+ax3.set_title("Loss evolution")
+ax4.plot(np.arange(loss.shape[0]//2, loss.shape[0]), loss[loss.shape[0]//2:], label="Training loss")
+ax4.legend()
+ax4.set_title("Loss evolution in last half of epochs")
+
+
 ax1.plot(df[["RMSE"]].to_numpy(), label="Training RMSE")
 ax1.plot(df_val[["RMSE"]].to_numpy(), label="Validation RMSE")
 ax1.legend()
+ax1.set_title("RMSE evolution")
 ax2.plot(df[["NLL"]].to_numpy(), label="Training NLL")
 ax2.plot(df_val[["NLL"]].to_numpy(), label="Validation NLL")
 ax2.legend()
-plt.show()
+ax2.set_title("NLL evolution")
+plt.savefig("plots/boston_energy_0.1_lr_0.1_scheduler.png", format = "png")
+# plt.show()

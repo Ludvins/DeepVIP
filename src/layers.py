@@ -332,4 +332,4 @@ class VIPLayer(Layer):
         # Mean term
         KL += 0.5 * torch.sum(torch.square(self.q_mu))
 
-        return KL  # + self.generative_function.KL()
+        return KL #+ self.generative_function.KL()

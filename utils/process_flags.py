@@ -84,9 +84,11 @@ def get_parser():
         "--genf",
         type=str,
         default="BNN",
-        help=("Generative function or model to use. Bayesian Neural Network"
-              " (BNN), Gaussian Process (GP) or Gaussian Process with "
-              " Inducing Points (GPI)"),
+        help=(
+            "Generative function or model to use. Bayesian Neural Network"
+            " (BNN), Gaussian Process (GP) or Gaussian Process with "
+            " Inducing Points (GPI)"
+        ),
     )
     parser.add_argument(
         "--dataset_name",
@@ -134,7 +136,7 @@ def get_parser():
     parser.add_argument(
         "--dropout",
         type=float,
-        default=0.05,
+        default=0.1,
         help="Dropout to use in the Bayesian NN",
     )
     parser.add_argument(
@@ -144,17 +146,17 @@ def get_parser():
         help="Training learning rate",
     )
     parser.add_argument("--warmup", type=int, default=0)
-    parser.add_argument("--no-fix_prior_noise",
-                        dest="fix_prior_noise",
-                        action="store_false")
+    parser.add_argument(
+        "--no-fix_prior_noise", dest="fix_prior_noise", action="store_false"
+    )
     parser.set_defaults(fix_prior_noise=True)
-    parser.add_argument("--freeze_prior",
-                        dest="freeze_prior",
-                        action="store_true")
+    parser.add_argument(
+        "--freeze_prior", dest="freeze_prior", action="store_true"
+    )
     parser.set_defaults(freeze_prior=False)
-    parser.add_argument("--freeze_posterior",
-                        dest="freeze_posterior",
-                        action="store_true")
+    parser.add_argument(
+        "--freeze_posterior", dest="freeze_posterior", action="store_true"
+    )
     parser.set_defaults(freeze_posterior=False)
     parser.add_argument("--show", dest="show", action="store_true")
     parser.set_defaults(show=False)

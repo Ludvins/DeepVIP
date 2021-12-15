@@ -1,4 +1,6 @@
+from datetime import datetime
 import torch
+import pandas as pd
 from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader
 import sys
@@ -24,7 +26,7 @@ torch.backends.cudnn.benchmark = True
 vars(args)["device"] = device
 
 n_splits = 10
-test_history = Metrics().get_dict()
+results = pd.DataFrame(columns = Metrics().get_dict().keys())
 kfold = KFold(n_splits, shuffle=True, random_state=2147483647)
 
 for train_indexes, test_indexes in kfold.split(args.dataset.inputs):
@@ -59,7 +61,6 @@ for train_indexes, test_indexes in kfold.split(args.dataset.inputs):
         dtype=args.dtype,
         device=args.device,
     )
-    # dvip.freeze_prior()
 
     # Define optimizer and compile model
     opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
@@ -77,68 +78,12 @@ for train_indexes, test_indexes in kfold.split(args.dataset.inputs):
     dvip.num_samples = args.num_samples_test
     test_metrics = score(dvip, val_loader, device=args.device)
 
-    test_history = {
-        key: test_history[key] + test_metrics[key]
-        for key in test_history.keys()
-    }
+    results = results.append(test_metrics, ignore_index = True)
     print("FOLD RESULTS: ")
     print("\t - NELBO: {}".format(test_metrics["LOSS"]))
     print("\t - NLL: {}".format(test_metrics["NLL"]))
     print("\t - RMSE: {}".format(test_metrics["RMSE"]))
 
+results.to_csv("results/{}_{}_{}_{}.csv".format(args.dataset_name, str(args.dropout), args.lr, datetime.now()))
 print("TEST RESULTS: ")
-print("\t - NELBO: {}".format(test_history["LOSS"] / n_splits))
-print("\t - NLL: {}".format(test_history["NLL"] / n_splits))
-print("\t - RMSE: {}".format(test_history["RMSE"] / n_splits))
-""" 
-    # Predict Train and Test
-    train_mean, train_var = predict(dvip, predict_loader)
-    train_prediction_mean, train_prediction_var = dvip.get_predictive_results(
-        train_mean, train_var)
-
-    # Change MC samples for test
-    dvip.num_samples = args.num_samples_test
-    test_mean, test_var = predict(dvip, test_loader)
-    test_prediction_mean, test_prediction_var = dvip.get_predictive_results(
-        test_mean, test_var)
-
-    print(args.X_train.shape)
-    print(train_mean.shape)
-    import matplotlib.pyplot as plt
-
-    # plot it
-    fig = plt.figure(figsize=(20, 10))
-    axs = []
-    axs.append(fig.add_subplot(3, 5, 1))
-    axs.append(fig.add_subplot(3, 5, 2))
-    axs.append(fig.add_subplot(3, 5, 3))
-    axs.append(fig.add_subplot(3, 5, 4))
-
-    axs.append(fig.add_subplot(3, 5, 6))
-    axs.append(fig.add_subplot(3, 5, 7))
-    axs.append(fig.add_subplot(3, 5, 8))
-    axs.append(fig.add_subplot(3, 5, 9))
-
-    axs.append(fig.add_subplot(3, 5, 11))
-    axs.append(fig.add_subplot(3, 5, 12))
-    axs.append(fig.add_subplot(3, 5, 13))
-    axs.append(fig.add_subplot(3, 5, 14))
-
-    axs.append(fig.add_subplot(1, 5, 5))
-
-    for i in range(args.X_train.shape[1]):
-        axs[i].scatter(args.X_train[:, i],
-                       args.y_train,
-                       color="teal",
-                       label="Original data",
-                       s=1.5)
-        axs[i].scatter(args.X_train[:, i],
-                       train_mean.flatten(),
-                       color="darkorange",
-                       label="Prediction",
-                       s=1.5)
-        axs[i].legend()
-    plt.savefig("2_layers1-1.svg", format="svg")
-    plt.savefig("2_layers1-1.png", format="png")
-    plt.show()
- """
+print(results.mean().to_string())

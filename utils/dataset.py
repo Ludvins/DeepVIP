@@ -112,7 +112,7 @@ class Energy_Dataset(DVIPDataset):
 
         url = "{}{}".format(uci_base, "00242/ENB2012_data.xlsx")
         data = pd.read_excel(url).values
-        data = data[:, :-1]
+        data = data[:, :9]
         self.split_data(data)
 
 
