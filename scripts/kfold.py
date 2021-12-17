@@ -1,7 +1,8 @@
 from datetime import datetime
+import numpy as np
 import torch
 import pandas as pd
-from sklearn.model_selection import KFold
+from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import sys
 
@@ -25,11 +26,17 @@ device = torch.device("cuda:0" if use_cuda else "cpu")
 torch.backends.cudnn.benchmark = True
 vars(args)["device"] = device
 
-n_splits = 10
-results = pd.DataFrame(columns = Metrics().get_dict().keys())
-kfold = KFold(n_splits, shuffle=True, random_state=2147483647)
+n_splits = 20
+results = pd.DataFrame(columns=Metrics().get_dict().keys())
 
-for train_indexes, test_indexes in kfold.split(args.dataset.inputs):
+for split in range(n_splits):
+    print("\rCurrent fold: ", split, "/", n_splits, end="")
+
+    train_indexes, test_indexes = train_test_split(
+        np.arange(len(args.dataset)),
+        test_size=0.1,
+        random_state=2147483647 + split)
+
     train_dataset = Training_Dataset(
         args.dataset.inputs[train_indexes],
         args.dataset.targets[train_indexes],
@@ -64,6 +71,7 @@ for train_indexes, test_indexes in kfold.split(args.dataset.inputs):
 
     # Define optimizer and compile model
     opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
+    #scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9999)
 
     # Perform training
     dvip.num_samples = args.num_samples_train
@@ -71,19 +79,19 @@ for train_indexes, test_indexes in kfold.split(args.dataset.inputs):
         dvip,
         train_loader,
         opt,
-        # val_generator=val_loader,
+        #scheduler=scheduler,
         epochs=args.epochs,
         verbose=0,
         device=args.device)
     dvip.num_samples = args.num_samples_test
+
     test_metrics = score(dvip, val_loader, device=args.device)
 
-    results = results.append(test_metrics, ignore_index = True)
-    print("FOLD RESULTS: ")
-    print("\t - NELBO: {}".format(test_metrics["LOSS"]))
-    print("\t - NLL: {}".format(test_metrics["NLL"]))
-    print("\t - RMSE: {}".format(test_metrics["RMSE"]))
+    results = results.append(test_metrics, ignore_index=True)
 
-results.to_csv("results/{}_{}_{}_{}.csv".format(args.dataset_name, str(args.dropout), args.lr, datetime.now()))
-print("TEST RESULTS: ")
-print(results.mean().to_string())
+results.to_csv(
+    path_or_buf=
+    "results/dataset={}_vip_layers={}_dropout={}_lr={}_structure={}.csv".
+    format(args.dataset_name, str(args.vip_layers[0]), str(args.dropout),
+           args.lr, "-".join(str(i) for i in args.bnn_structure)),
+    encoding='utf-8')

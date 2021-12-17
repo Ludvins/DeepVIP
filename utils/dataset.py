@@ -65,9 +65,8 @@ class DVIPDataset(Dataset):
         raise NotImplementedError
 
     def split_data(self, data):
-        generator = torch.Generator()
-        generator.manual_seed(2147483647)
-        perm = torch.randperm(data.shape[0], generator=generator)
+        rng = np.random.default_rng(seed=2147483647)
+        perm = rng.permutation(data.shape[0])
         self.inputs = data[perm, :-1]
         self.targets = data[perm, -1]
 
@@ -99,8 +98,6 @@ class Synthetic_Dataset(DVIPDataset):
 
 class Boston_Dataset(DVIPDataset):
     def __init__(self):
-        print("Loading boston....")
-
         data_url = "{}{}".format(uci_base, "housing/housing.data")
         raw_df = pd.read_fwf(data_url, header=None).to_numpy()
         self.split_data(raw_df)
@@ -108,8 +105,6 @@ class Boston_Dataset(DVIPDataset):
 
 class Energy_Dataset(DVIPDataset):
     def __init__(self):
-        print("Loading energy....")
-
         url = "{}{}".format(uci_base, "00242/ENB2012_data.xlsx")
         data = pd.read_excel(url).values
         data = data[:, :9]
@@ -118,8 +113,6 @@ class Energy_Dataset(DVIPDataset):
 
 class Concrete_Dataset(DVIPDataset):
     def __init__(self):
-        print("Loading concrete....")
-
         url = "{}{}".format(uci_base, "concrete/compressive/Concrete_Data.xls")
         data = pd.read_excel(url).values
         self.split_data(data)
@@ -127,8 +120,6 @@ class Concrete_Dataset(DVIPDataset):
 
 class Naval_Dataset(DVIPDataset):
     def __init__(self):
-        print("Loading naval....")
-
         url = "{}{}".format(uci_base, "00316/UCI%20CBM%20Dataset.zip")
         with urlopen(url) as zipresp:
             with ZipFile(BytesIO(zipresp.read())) as zfile:

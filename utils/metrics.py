@@ -56,7 +56,7 @@ class Metrics:
             scale = batch_size / self.num_data
         # Update light metrics
         self.loss += scale * loss
-        # The RMSE is computed using the mean prediction of the Gaussian 
+        # The RMSE is computed using the mean prediction of the Gaussian
         #  Mixture, that is, the mean of the mean predictions.
         self.rmse += scale * self.compute_rmse(y, mean_pred.mean(0))
         self.nll += scale * self.compute_nll(y, mean_pred, std_pred)
@@ -92,19 +92,15 @@ class Metrics:
 
         # Define the auxiliary function to help with the calculations
         def A(mu, sigma_2):
-            norm = torch.distributions.normal.Normal(
-                torch.zeros_like(mu), torch.ones_like(mu)
-            )
-            first_term = (
-                2
-                * torch.sqrt(sigma_2)
-                * torch.exp(norm.log_prob(mu / torch.sqrt(sigma_2)))
-            )
+            norm = torch.distributions.normal.Normal(torch.zeros_like(mu),
+                                                     torch.ones_like(mu))
+            first_term = (2 * torch.sqrt(sigma_2) *
+                          torch.exp(norm.log_prob(mu / torch.sqrt(sigma_2))))
             sec_term = mu * (2 * norm.cdf(mu / torch.sqrt(sigma_2)) - 1)
             return first_term + sec_term
 
         # Estimate the differences between means and variances for each sample, batch-wise
-        var_pred = std_pred ** 2
+        var_pred = std_pred**2
         n_mixtures = mean_pred.shape[0]
         batch_size = mean_pred.shape[1]
         crps_exact = 0.0
@@ -113,16 +109,12 @@ class Metrics:
             means_vec = mean_pred[i]
             vars_vec = var_pred[i]
 
-            means_diff = torch.zeros(
-                (batch_size, batch_size), 
-                dtype=torch.float64, 
-                device=self.device
-            )
-            vars_sum = torch.zeros(
-                (batch_size, batch_size), 
-                dtype=torch.float64, 
-                device=self.device
-            )
+            means_diff = torch.zeros((batch_size, batch_size),
+                                     dtype=torch.float64,
+                                     device=self.device)
+            vars_sum = torch.zeros((batch_size, batch_size),
+                                   dtype=torch.float64,
+                                   device=self.device)
             ru, cu = torch.triu_indices(batch_size, batch_size, 1)
             rl, cl = torch.tril_indices(batch_size, batch_size, 1)
 
