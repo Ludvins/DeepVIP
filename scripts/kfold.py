@@ -26,12 +26,14 @@ device = torch.device("cuda:0" if use_cuda else "cpu")
 torch.backends.cudnn.benchmark = True
 vars(args)["device"] = device
 
+# Total splits and pandas dataframe to store splits results
 n_splits = 20
 results = pd.DataFrame(columns=Metrics().get_dict().keys())
 
 for split in range(n_splits):
     print("\rCurrent fold: ", split, "/", n_splits, end="")
 
+    # Generate train/test partition using split number 
     train_indexes, test_indexes = train_test_split(
         np.arange(len(args.dataset)),
         test_size=0.1,
@@ -51,8 +53,9 @@ for split in range(n_splits):
     layers = init_layers(train_dataset.inputs, train_dataset.output_dim,
                          **vars(args))
 
+    # Initialize DataLoader
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
-    val_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
     # Instantiate Likelihood
     ll = Gaussian()
@@ -73,22 +76,27 @@ for split in range(n_splits):
     opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
     #scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9999)
 
-    # Perform training
+    # Set the number of training samples to generate
     dvip.num_samples = args.num_samples_train
-    train_hist = fit(
+    # Train the model
+    fit(
         dvip,
         train_loader,
         opt,
         #scheduler=scheduler,
         epochs=args.epochs,
-        verbose=0,
         device=args.device)
+    
+    # Set the number of test samples to generate
     dvip.num_samples = args.num_samples_test
 
-    test_metrics = score(dvip, val_loader, device=args.device)
+    # Test the model
+    test_metrics = score(dvip, test_loader, device=args.device)
 
+    # Store split test metrics
     results = results.append(test_metrics, ignore_index=True)
 
+# Store results in csv file
 results.to_csv(
     path_or_buf=
     "results/dataset={}_vip_layers={}_dropout={}_lr={}_structure={}.csv".

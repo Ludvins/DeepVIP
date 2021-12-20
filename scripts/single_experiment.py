@@ -14,11 +14,11 @@ from src.likelihood import Gaussian
 from utils.dataset import Test_Dataset, Training_Dataset
 from utils.metrics import Metrics
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit, score
+from utils.pytorch_learning import fit, fit_with_metrics, score
 
 args = manage_experiment_configuration()
 
-torch.manual_seed(2020)
+torch.manual_seed(2147483647)
 
 # CUDA for PyTorch
 use_cuda = torch.cuda.is_available()
@@ -28,7 +28,7 @@ vars(args)["device"] = device
 
 train_indexes, test_indexes = train_test_split(np.arange(len(args.dataset)),
                                                test_size=0.1,
-                                               random_state=42)
+                                               random_state=2147483647)
 
 train_dataset = Training_Dataset(args.dataset.inputs[train_indexes],
                                  args.dataset.targets[train_indexes])
@@ -63,15 +63,15 @@ dvip = DVIP_Base(
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 # opt = SAM(dvip.parameters(), torch.optim.Adam, lr = args.lr)
-scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9999)
+#scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9999)
 
 # Perform training
-train_hist, val_hist = fit(
+train_hist, val_hist = fit_with_metrics(
     dvip,
     train_loader,
     opt,
     val_generator=val_loader,
-    scheduler=scheduler,
+    #scheduler=scheduler,
     epochs=args.epochs,
     device=args.device,
 )

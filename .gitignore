@@ -8,7 +8,7 @@ tests.py
 *.svg
 .venv/*
 *.pyc
-Doubly-Stochastic-DGP-master/.venv_doubly
+Doubly-Stochastic-DGP-master/
 results/dropout001
 results/results1
 results/results2

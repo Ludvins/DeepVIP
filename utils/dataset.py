@@ -4,7 +4,6 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
-import torch
 from torch.utils.data import Dataset
 
 
@@ -146,7 +145,7 @@ class Protein_Dataset(DVIPDataset):
         url = "{}{}".format(uci_base, "00265/CASP.csv")
         data = pd.read_csv(url).values
         data = np.concatenate([data[:, 1:], data[:, 0, None]], 1)
-        self.split(data)
+        self.split_data(data)
 
 
 class Kin8nm_Dataset(DVIPDataset):

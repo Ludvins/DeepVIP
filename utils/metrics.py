@@ -25,7 +25,7 @@ class Metrics:
     def reset(self):
         """ Ressets all the metrics to zero. """
         self.loss = torch.tensor(0.0, device=self.device)
-        self.rmse = torch.tensor(0.0, device=self.device)
+        self.mse = torch.tensor(0.0, device=self.device)
         self.nll = torch.tensor(0.0, device=self.device)
         self.crps = torch.tensor(0.0, device=self.device)
 
@@ -58,16 +58,16 @@ class Metrics:
         self.loss += scale * loss
         # The RMSE is computed using the mean prediction of the Gaussian
         #  Mixture, that is, the mean of the mean predictions.
-        self.rmse += scale * self.compute_rmse(y, mean_pred.mean(0))
+        self.mse += scale * self.compute_mse(y, mean_pred.mean(0))
         self.nll += scale * self.compute_nll(y, mean_pred, std_pred)
 
         # Update heavy metrics
         if not light:
             self.crps += scale * self.compute_crps(y, mean_pred, std_pred)
 
-    def compute_rmse(self, y, prediction):
+    def compute_mse(self, y, prediction):
         """Computes the root mean squared error for the given predictions."""
-        return torch.nn.functional.mse_loss(y, prediction).sqrt()
+        return torch.nn.functional.mse_loss(y, prediction)
 
     def compute_nll(self, y, mean_pred, std_pred):
         """Computes the negative log likelihood for the given predictions.
@@ -77,6 +77,8 @@ class Metrics:
         # Compute the Gaussian likelihood of the data in each sample
         normal = torch.distributions.Normal(loc=mean_pred, scale=std_pred)
         logpdf = normal.log_prob(y)
+        # Sum label dimensionality 
+        logpdf = torch.sum(logpdf, -1)
         # Compute the Negative log-likelihood on the Gaussian mixture
         ll = torch.logsumexp(logpdf, 0) - np.log(S)
         return -ll.mean()
@@ -136,8 +138,8 @@ class Metrics:
 
     def get_dict(self):
         return {
-            "LOSS": self.loss.detach().cpu().numpy(),
-            "RMSE": self.rmse.detach().cpu().numpy(),
-            "NLL": self.nll.detach().cpu().numpy(),
-            "CRPS": self.crps.detach().cpu().numpy(),
+            "LOSS": float(self.loss.detach().cpu().numpy()),
+            "RMSE": np.sqrt(self.mse.detach().cpu().numpy()),
+            "NLL": float(self.nll.detach().cpu().numpy()),
+            "CRPS": float(self.crps.detach().cpu().numpy()),
         }

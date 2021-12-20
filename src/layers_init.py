@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from src.generative_functions import GP, BayesianNN
+from src.generative_functions import BayesianNN
 from src.layers import VIPLayer
 
 
@@ -75,12 +75,13 @@ def init_layers(X, output_dim, vip_layers, genf, regression_coeffs,
     # Create VIP layers. If integer, replicate input dimension
     if len(vip_layers) == 1:
         vip_layers = [X.shape[1]] * (vip_layers[0] - 1)
+        dims = [X.shape[1]] + vip_layers + [output_dim]
     # Otherwise, append thedata dimensions to the array.
     else:
         if vip_layers[-1] != output_dim:
             raise RuntimeError(
                 "Last vip layer does not correspond with data label")
-    dims = [X.shape[1]] + vip_layers + [output_dim]
+        dims = [X.shape[1]] + vip_layers
 
     # Initialize layers array
     layers = []

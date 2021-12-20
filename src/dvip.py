@@ -151,11 +151,11 @@ class DVIP_Base(torch.nn.Module):
 
         # Compute predictions
         with torch.no_grad():
-            mean_pred, var_pred = self(X)  # Forward pass
+            mean_pred, std_pred = self(X)  # Forward pass
             # Compute the loss
             loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
 
-        return loss, mean_pred, var_pred
+        return loss, mean_pred, std_pred
 
     def forward(self, predict_at, full_cov=False):
         """

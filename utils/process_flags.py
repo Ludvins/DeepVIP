@@ -13,7 +13,6 @@ def manage_experiment_configuration(args=None):
         args = parser.parse_args()
 
     FLAGS = vars(args)
-
     # Manage Dataset
     args.dataset = get_dataset(args.dataset_name)
 
@@ -122,7 +121,7 @@ def get_parser():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1000,
+        default=10000,
         help="Number of regression coefficients to use",
     )
     parser.add_argument(
@@ -173,5 +172,11 @@ def get_parser():
         type=str,
         default="float64",
     )
+    parser.add_argument(
+        "--split",
+        default = None,
+        type=int,
+    )
+
 
     return parser

@@ -8,6 +8,106 @@ def fit(
     model,
     training_generator,
     optimizer,
+    scheduler=None,
+    epochs=2000,
+    device=None,
+):
+    """ 
+    Trains the given model using the arguments provided.
+    
+    Arguments
+    ---------
+    model : torch.nn.Module
+            Torch model to train.
+    training_generator : iterable
+                         Must return batches of pairs corresponding to the 
+                         given inputs and target values.
+    optimizer : torch optimizer
+                The already initialized optimizer.
+    scheduler : torch scheduler
+                Learning rate scheduler.
+    epochs : int
+             Number of epochs to train de model.
+    device : torch device
+             Device in which to perform all computations.     
+    """
+    # Set model in training mode
+    model.train()
+    for _ in range(epochs):
+        # Mini-batch training
+        for inputs, target in training_generator:
+            inputs = inputs.to(device)
+            target = target.to(device)
+            model.train_step(optimizer, inputs, target)
+
+        # Update learning rate using scheduler if available
+        if scheduler is not None:
+            scheduler.step()
+
+
+def score(model, generator, device=None):
+    """ 
+    Evaluates the given model using the arguments provided.
+    
+    Arguments
+    ---------
+    model : torch.nn.Module
+            Torch model to train.
+    generator : iterable
+                Must return batches of pairs corresponding to the 
+                given inputs and target values.
+    device : torch device
+             Device in which to perform all computations.    
+             
+    Returns
+    -------
+    metrics : dictionary
+              Contains pairs of (metric, value) averaged over the number of
+              batches. 
+    """
+    # Set model in evaluation mode
+    model.eval()
+    # Initialize metrics
+    metrics = Metrics(len(generator.dataset), device=device)
+    with torch.no_grad():
+        # Batches evaluation
+        for data, target in generator:
+            data = data.to(device)
+            target = target.to(device)
+            loss, mean_pred, std_pred = model.test_step(
+                data, target
+            )
+            # Update mertics using this batch
+            metrics.update(target, loss, mean_pred, std_pred, light=False)
+    # Return metrics as a dictionary
+    return metrics.get_dict()
+
+
+def predict(model, generator, device=None):
+
+    with torch.no_grad():
+        # Generate variables and operar)
+        means, vars = [], []
+        for idx, data in enumerate(generator):
+            try:
+                batch_x, _ = data
+            except:
+                batch_x = data
+            batch_means, batch_vars = model(batch_x.to(device))
+            means.append(batch_means.detach().cpu().numpy())
+            vars.append(batch_vars.detach().cpu().numpy())
+
+        means = np.concatenate(means, axis=1)
+        vars = np.concatenate(vars, axis=1)
+
+    return means, vars
+
+
+
+def fit_with_metrics(
+    model,
+    training_generator,
+    optimizer,
     val_generator=None,
     scheduler=None,
     epochs=2000,
@@ -98,44 +198,6 @@ def fit(
         return history
     return history, history_val
 
-
-def score(model, generator, device=None):
-
-    model.eval()
-    metrics = Metrics(len(generator.dataset), device=device)
-    with torch.no_grad():
-        for data, target in generator:
-            data = data.to(device)
-            target = target.to(device)
-            loss, mean_pred, std_pred = model.test_step(
-                data, target
-            )
-
-            metrics.update(target, loss, mean_pred, std_pred, light=False)
-
-    return metrics.get_dict()
-
-
-def predict(model, generator, device=None):
-
-    with torch.no_grad():
-        # Generate variables and operar)
-        means, vars = [], []
-        for idx, data in enumerate(generator):
-            try:
-                batch_x, _ = data
-            except:
-                batch_x = data
-            batch_means, batch_vars = model(batch_x.to(device))
-            means.append(batch_means.detach().cpu().numpy())
-            vars.append(batch_vars.detach().cpu().numpy())
-
-        means = np.concatenate(means, axis=1)
-        vars = np.concatenate(vars, axis=1)
-
-    return means, vars
-
-
 def predict_prior_samples(model, generator, device=None):
 
     with torch.no_grad():
@@ -153,3 +215,4 @@ def predict_prior_samples(model, generator, device=None):
         prior = np.concatenate(prior, axis=2)
 
     return prior
+
