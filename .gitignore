@@ -4,7 +4,13 @@ src/__pycache__/*
 *.png
 __pycache__/*
 tests.py
-*.csv
+
 *.svg
 .venv/*
 *.pyc
+Doubly-Stochastic-DGP-master/.venv_doubly
+results/dropout001
+results/results1
+results/results2
+results/results3
+results/results4

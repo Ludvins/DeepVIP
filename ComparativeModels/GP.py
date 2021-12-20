@@ -74,7 +74,7 @@ class GP(torch.nn.Module):
     def predict(self, new_inputs):
         K_s = self.kernel(self.inputs, new_inputs)
         K_ss = self.kernel(new_inputs, new_inputs)
-
+        
         mu = K_s.T @ self.K_inv @ self.targets
         cov = K_ss - K_s.T @ self.K_inv @ K_s
 
@@ -128,45 +128,3 @@ results.to_csv(path_or_buf="results/dataset={}_exactGP.csv".format(
     args.dataset_name, str(args.vip_layers[0]), str(args.dropout), args.lr,
     "-".join(str(i) for i in args.bnn_structure)),
                encoding='utf-8')
-
-
-
-
-synthetic_dataset = Synthetic_Dataset()
-train_indexes, test_indexes = train_test_split(
-        np.arange(len(synthetic_dataset)),
-        test_size=0.1,
-        random_state=2147483647)
-
-train_dataset = Training_Dataset(
-        synthetic_dataset.inputs[train_indexes],
-        synthetic_dataset.targets[train_indexes],
-        verbose=False,
-    )
-
-gp = GP(torch.tensor(train_dataset.inputs),
-            torch.tensor(train_dataset.targets))
-mu, cov = gp.predict(torch.tensor(train_dataset.inputs))
-
-mu = mu * train_dataset.targets_std + train_dataset.targets_mean
-cov = torch.diagonal(cov).sqrt() * train_dataset.targets_std
-
-
-mu = mu.detach().cpu().numpy().flatten()
-cov = cov.detach().cpu().numpy().flatten()
-print(cov)
-import matplotlib.pyplot as plt
-
-plt.scatter(train_dataset.inputs.flatten(), 
-            train_dataset.targets.flatten() * train_dataset.targets_std + train_dataset.targets_mean , 
-            color = "blue", 
-            s = 2,
-            label = "Training Points"
-            )
-sort = np.argsort(train_dataset.inputs.flatten())
-plt.plot(train_dataset.inputs[sort], mu[sort], color = "black")
-plt.fill_between(train_dataset.inputs[sort].flatten(), 
-                 (mu[sort]-3*cov[sort]),
-                 (mu[sort]+3*cov[sort]), 
-                 color='b', alpha=.1)
-plt.show()
