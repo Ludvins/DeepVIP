@@ -66,8 +66,8 @@ class DVIPDataset(Dataset):
     def split_data(self, data):
         rng = np.random.default_rng(seed=2147483647)
         perm = rng.permutation(data.shape[0])
-        self.inputs = data[perm, :-1]
-        self.targets = data[perm, -1]
+        self.inputs = data[:, :-1]
+        self.targets = data[:, -1]
 
         if len(self.inputs.shape) == 1:
             self.inputs = self.inputs[..., np.newaxis]
