@@ -69,7 +69,17 @@ class Layer(torch.nn.Module):
                         Prior samples from conditional_ND applied to X.
         """
 
-        mean, var, prior_samples = self.conditional_ND(X, full_cov=full_cov)
+        S, N, D = X.shape
+        X_flat = torch.reshape(X, [S * N, D])
+        mean, var, prior_samples = self.conditional_ND(
+            X_flat, full_cov=full_cov
+        )
+        mean = torch.reshape(mean, [S, N, mean.shape[-1]])
+        var = torch.reshape(var, [S, N, var.shape[-1]])
+        prior_samples = torch.reshape(
+            prior_samples,
+            [prior_samples.shape[0], S, N, prior_samples.shape[-1]],
+        )
 
         z = torch.randn(
             mean.shape,
@@ -88,7 +98,10 @@ class VIPLayer(Layer):
         num_regression_coeffs,
         input_dim,
         output_dim,
-        log_layer_noise=-5,
+        add_prior_regularization=False,
+        log_layer_noise=None,
+        q_sqrt_initial_value=1,
+        q_mu_initial_value=0,
         mean_function=None,
         seed=0,
         dtype=torch.float64,
@@ -146,12 +159,13 @@ class VIPLayer(Layer):
         super().__init__(
             dtype=dtype, input_dim=input_dim, seed=seed, device=device
         )
+        self.add_prior_regularization = add_prior_regularization
 
         self.num_coeffs = num_regression_coeffs
 
         # Regression Coefficients prior mean
         self.q_mu = torch.tensor(
-            np.zeros((self.num_coeffs, output_dim)),
+            np.ones((self.num_coeffs, output_dim)) * q_mu_initial_value,
             dtype=self.dtype,
             device=self.device,
         )
@@ -169,18 +183,21 @@ class VIPLayer(Layer):
         self.generative_function = generative_function
 
         # Initialize the layer's noise
-        self.log_layer_noise = torch.nn.Parameter(
-            torch.tensor(
-                np.ones(output_dim) * log_layer_noise,
-                dtype=self.dtype,
-                device=self.device,
+        if log_layer_noise is not None:
+            self.log_layer_noise = torch.nn.Parameter(
+                torch.tensor(
+                    np.ones(output_dim) * log_layer_noise,
+                    dtype=self.dtype,
+                    device=self.device,
+                )
             )
-        )
+        else:
+            self.log_layer_noise = torch.tensor(0)
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
         # Shape (num_coeffs, num_coeffs)
-        q_sqrt = np.eye(self.num_coeffs)
+        q_sqrt = np.eye(self.num_coeffs) * q_sqrt_initial_value
         # Replicate it output_dim times
         # Shape (num_coeffs, num_coeffs, output_dim)
         q_sqrt = np.tile(q_sqrt[:, :, None], [1, 1, output_dim])
@@ -262,9 +279,7 @@ class VIPLayer(Layer):
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, ... , N, D)
-        mean = m.squeeze(axis=0) + torch.einsum(
-            "s...nd,sd->...nd", phi, self.q_mu
-        )
+        mean = m.squeeze(axis=0) + torch.einsum("snd,sd->nd", phi, self.q_mu)
 
         # Shape (S, S, D)
         q_sqrt = (
@@ -279,16 +294,16 @@ class VIPLayer(Layer):
 
         # Compute variance matrix in two steps
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
-        K = torch.einsum("s...nd,skd->k...nd", phi, Delta)
+        K = torch.einsum("snd,skd->knd", phi, Delta)
 
         if full_cov:
             # var shape (num_points, num_points, output_dim)
             # Multiply by phi again distinguishing data_points
-            K = torch.einsum("s...nd,s...md->...nmd", K, phi)
+            K = torch.einsum("snd,smd->nmd", K, phi)
         else:
             # var shape (num_points, output_dim)
             # Multiply by phi again, using the same points twice
-            K = torch.einsum("s...nd,s...nd->...nd", K, phi)
+            K = torch.einsum("snd,snd->nd", K, phi)
 
         # Add layer noise to variance
         var = K + torch.exp(self.log_layer_noise)
@@ -332,4 +347,7 @@ class VIPLayer(Layer):
         # Mean term
         KL += 0.5 * torch.sum(torch.square(self.q_mu))
 
-        return KL #+ self.generative_function.KL()
+        if self.add_prior_regularization:
+            KL += self.generative_function.KL()
+
+        return KL

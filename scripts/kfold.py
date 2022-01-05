@@ -33,25 +33,29 @@ results = pd.DataFrame(columns=Metrics().get_dict().keys())
 for split in range(n_splits):
     print("\rCurrent fold: ", split, "/", n_splits, end="")
 
-    # Generate train/test partition using split number 
+    # Generate train/test partition using split number
     train_indexes, test_indexes = train_test_split(
         np.arange(len(args.dataset)),
         test_size=0.1,
-        random_state=2147483647 + split)
+        random_state=2147483647 + split,
+    )
 
     train_dataset = Training_Dataset(
         args.dataset.inputs[train_indexes],
         args.dataset.targets[train_indexes],
         verbose=False,
     )
-    test_dataset = Test_Dataset(args.dataset.inputs[test_indexes],
-                                args.dataset.targets[test_indexes],
-                                train_dataset.inputs_mean,
-                                train_dataset.inputs_std)
+    test_dataset = Test_Dataset(
+        args.dataset.inputs[test_indexes],
+        args.dataset.targets[test_indexes],
+        train_dataset.inputs_mean,
+        train_dataset.inputs_std,
+    )
 
     # Get VIP layers
-    layers = init_layers(train_dataset.inputs, train_dataset.output_dim,
-                         **vars(args))
+    layers = init_layers(
+        train_dataset.inputs, train_dataset.output_dim, **vars(args)
+    )
 
     # Initialize DataLoader
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
@@ -74,7 +78,7 @@ for split in range(n_splits):
 
     # Define optimizer and compile model
     opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
-    #scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9999)
+    # scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9999)
 
     # Set the number of training samples to generate
     dvip.num_samples = args.num_samples_train
@@ -83,10 +87,11 @@ for split in range(n_splits):
         dvip,
         train_loader,
         opt,
-        #scheduler=scheduler,
+        # scheduler=scheduler,
         epochs=args.epochs,
-        device=args.device)
-    
+        device=args.device,
+    )
+
     # Set the number of test samples to generate
     dvip.num_samples = args.num_samples_test
 
@@ -98,8 +103,12 @@ for split in range(n_splits):
 
 # Store results in csv file
 results.to_csv(
-    path_or_buf=
-    "results/dataset={}_vip_layers={}_dropout={}_lr={}_structure={}.csv".
-    format(args.dataset_name, str(args.vip_layers[0]), str(args.dropout),
-           args.lr, "-".join(str(i) for i in args.bnn_structure)),
-    encoding='utf-8')
+    path_or_buf="results/dataset={}_vip_layers={}_dropout={}_lr={}_structure={}.csv".format(
+        args.dataset_name,
+        str(args.vip_layers[0]),
+        str(args.dropout),
+        args.lr,
+        "-".join(str(i) for i in args.bnn_structure),
+    ),
+    encoding="utf-8",
+)

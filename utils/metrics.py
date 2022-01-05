@@ -5,13 +5,13 @@ import torch
 
 class Metrics:
     def __init__(self, num_data=-1, device=None):
-        """ Defines a class that encapsulates all considered metrics.
-        
+        """Defines a class that encapsulates all considered metrics.
+
         Arguments
         ---------
         num_data : int
                    Number of data samples in the dataset used. This is used
-                   to scale the metrics from each batch by the proportion of 
+                   to scale the metrics from each batch by the proportion of
                    data they contain.
                    This scale is never greater than 1.
         device : torch device
@@ -30,21 +30,21 @@ class Metrics:
         self.crps = torch.tensor(0.0, device=self.device)
 
     def update(self, y, loss, mean_pred, std_pred, light=True):
-        """ Updates all the metrics given the results in the parameters.
-        
+        """Updates all the metrics given the results in the parameters.
+
         Arguments
         ---------
-        
+
         y : torch tensor of shape (batch_size, output_dim)
             Contains the true targets of the data.
         loss : torch tensor of shape ()
                Contains the loss value for the given batch.
         mean_pred : torch tensor of shape (S, batch_size, output_dim)
                     Contains the mean predictions for each sample
-                    in the batch.    
+                    in the batch.
         std_pred : torch tensor of shape (S, batch_size, output_dim)
                    Contains the std predictions for each sample
-                   in the batch.    
+                   in the batch.
         light : boolean
                 Wether to compute only the lighter (computationally) metrics.
         """
@@ -71,13 +71,13 @@ class Metrics:
 
     def compute_nll(self, y, mean_pred, std_pred):
         """Computes the negative log likelihood for the given predictions.
-        Assumes Gaussian likelihood. """
+        Assumes Gaussian likelihood."""
         # Get the number of posterior samples
         S = mean_pred.shape[0]
         # Compute the Gaussian likelihood of the data in each sample
         normal = torch.distributions.Normal(loc=mean_pred, scale=std_pred)
         logpdf = normal.log_prob(y)
-        # Sum label dimensionality 
+        # Sum label dimensionality
         logpdf = torch.sum(logpdf, -1)
         # Compute the Negative log-likelihood on the Gaussian mixture
         ll = torch.logsumexp(logpdf, 0) - np.log(S)
@@ -94,31 +94,39 @@ class Metrics:
 
         # Define the auxiliary function to help with the calculations
         def A(mu, sigma_2):
-            norm = torch.distributions.normal.Normal(torch.zeros_like(mu),
-                                                     torch.ones_like(mu))
-            first_term = (2 * torch.sqrt(sigma_2) *
-                          torch.exp(norm.log_prob(mu / torch.sqrt(sigma_2))))
+            norm = torch.distributions.normal.Normal(
+                torch.zeros_like(mu), torch.ones_like(mu)
+            )
+            first_term = (
+                2
+                * torch.sqrt(sigma_2)
+                * torch.exp(norm.log_prob(mu / torch.sqrt(sigma_2)))
+            )
             sec_term = mu * (2 * norm.cdf(mu / torch.sqrt(sigma_2)) - 1)
             return first_term + sec_term
 
         # Estimate the differences between means and variances for each sample, batch-wise
-        var_pred = std_pred**2
+        var_pred = std_pred ** 2
         n_mixtures = mean_pred.shape[0]
         batch_size = mean_pred.shape[1]
         crps_exact = 0.0
 
-        for i in range(n_mixtures):
-            means_vec = mean_pred[i]
-            vars_vec = var_pred[i]
+        for i in range(batch_size):
+            means_vec = mean_pred[:, i]
+            vars_vec = var_pred[:, i]
 
-            means_diff = torch.zeros((batch_size, batch_size),
-                                     dtype=torch.float64,
-                                     device=self.device)
-            vars_sum = torch.zeros((batch_size, batch_size),
-                                   dtype=torch.float64,
-                                   device=self.device)
-            ru, cu = torch.triu_indices(batch_size, batch_size, 1)
-            rl, cl = torch.tril_indices(batch_size, batch_size, 1)
+            means_diff = torch.zeros(
+                (n_mixtures, n_mixtures),
+                dtype=torch.float64,
+                device=self.device,
+            )
+            vars_sum = torch.zeros(
+                (n_mixtures, n_mixtures),
+                dtype=torch.float64,
+                device=self.device,
+            )
+            ru, cu = torch.triu_indices(n_mixtures, n_mixtures, 1)
+            rl, cl = torch.tril_indices(n_mixtures, n_mixtures, 1)
 
             means_diff[ru, cu] = means_vec[ru] - means_vec[cu]
             means_diff[rl, cl] = means_vec[rl] - means_vec[cl]
@@ -129,12 +137,12 @@ class Metrics:
             fixed_term = 1 / 2 * torch.mean(A(means_diff, vars_sum))
 
             # Term that depends on the real value of the data
-            dev_mean = y - means_vec
+            dev_mean = y[i] - means_vec
             data_term = torch.mean(A(dev_mean, vars_vec))
 
             crps_exact += data_term - fixed_term
 
-        return crps_exact / n_mixtures
+        return crps_exact / batch_size
 
     def get_dict(self):
         return {

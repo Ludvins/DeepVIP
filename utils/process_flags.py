@@ -83,9 +83,11 @@ def get_parser():
         "--genf",
         type=str,
         default="BNN",
-        help=("Generative function or model to use. Bayesian Neural Network"
-              " (BNN), Gaussian Process (GP) or Gaussian Process with "
-              " Inducing Points (GPI)"),
+        help=(
+            "Generative function or model to use. Bayesian Neural Network"
+            " (BNN), Gaussian Process (GP) or Gaussian Process with "
+            " Inducing Points (GPI)"
+        ),
     )
     parser.add_argument(
         "--dataset_name",
@@ -105,6 +107,42 @@ def get_parser():
         nargs="+",
         help="Variational implicit layers structure",
     )
+    parser.add_argument(
+        "--final_layer_mu",
+        type=float,
+        default=0,
+    )
+    parser.add_argument(
+        "--final_layer_sqrt",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--final_layer_noise",
+        type=float,
+        default=-5,
+    )
+    parser.add_argument(
+        "--inner_layers_mu",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--inner_layers_sqrt",
+        type=float,
+        default=1,
+    )
+    parser.add_argument(
+        "--inner_layers_noise",
+        type=float,
+        default=-5,
+    )
+    parser.add_argument(
+        "--bnn_inner_dim",
+        type=int,
+        default=10,
+    )
+
     parser.add_argument(
         "--bnn_structure",
         type=int,
@@ -143,17 +181,26 @@ def get_parser():
         help="Training learning rate",
     )
     parser.add_argument("--warmup", type=int, default=0)
-    parser.add_argument("--no-fix_prior_noise",
-                        dest="fix_prior_noise",
-                        action="store_false")
+    parser.add_argument(
+        "--no-fix_prior_noise", dest="fix_prior_noise", action="store_false"
+    )
     parser.set_defaults(fix_prior_noise=True)
-    parser.add_argument("--freeze_prior",
-                        dest="freeze_prior",
-                        action="store_true")
+
+    parser.add_argument("--prior_kl", dest="prior_kl", action="store_true")
+    parser.set_defaults(prior_kl=False)
+
+    parser.add_argument(
+        "--zero_mean_prior", dest="zero_mean_prior", action="store_true"
+    )
+    parser.set_defaults(zero_mean_prior=False)
+
+    parser.add_argument(
+        "--freeze_prior", dest="freeze_prior", action="store_true"
+    )
     parser.set_defaults(freeze_prior=False)
-    parser.add_argument("--freeze_posterior",
-                        dest="freeze_posterior",
-                        action="store_true")
+    parser.add_argument(
+        "--freeze_posterior", dest="freeze_posterior", action="store_true"
+    )
     parser.set_defaults(freeze_posterior=False)
     parser.add_argument("--show", dest="show", action="store_true")
     parser.set_defaults(show=False)
@@ -174,9 +221,9 @@ def get_parser():
     )
     parser.add_argument(
         "--split",
-        default = None,
+        default=None,
         type=int,
     )
-
+    parser.add_argument("--name_flag", default="", type=str)
 
     return parser

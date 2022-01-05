@@ -64,8 +64,6 @@ class DVIPDataset(Dataset):
         raise NotImplementedError
 
     def split_data(self, data):
-        rng = np.random.default_rng(seed=2147483647)
-        perm = rng.permutation(data.shape[0])
         self.inputs = data[:, :-1]
         self.targets = data[:, -1]
 
@@ -150,8 +148,10 @@ class Protein_Dataset(DVIPDataset):
 
 class Kin8nm_Dataset(DVIPDataset):
     def __init__(self):
-        url = 'http://mldata.org/repository/data/download/csv/uci-20070111-kin8nm'
-        data = pd.read_csv(url, header=None).values
+        url = (
+            "https://www.openml.org/data/get_csv/3626/dataset_2175_kin8nm.arff"
+        )
+        data = pd.read_csv(url, dtype=float).values
         self.split_data(data)
 
 

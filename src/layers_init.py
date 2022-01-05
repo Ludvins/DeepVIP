@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from src.generative_functions import BayesianNN
+from src.generative_functions import BayesianNN, BNN_GP
 from src.layers import VIPLayer
 
 
@@ -24,9 +24,30 @@ class LinearProjection:
         return torch.einsum("...a, ab -> ...b", inputs, self.P)
 
 
-def init_layers(X, output_dim, vip_layers, genf, regression_coeffs,
-                bnn_structure, activation, seed, device, dtype,
-                fix_prior_noise, dropout, **kwargs):
+def init_layers(
+    X,
+    output_dim,
+    vip_layers,
+    genf,
+    regression_coeffs,
+    bnn_structure,
+    bnn_inner_dim,
+    activation,
+    seed,
+    device,
+    dtype,
+    fix_prior_noise,
+    final_layer_mu,
+    final_layer_sqrt,
+    final_layer_noise,
+    inner_layers_sqrt,
+    inner_layers_noise,
+    inner_layers_mu,
+    dropout,
+    prior_kl,
+    zero_mean_prior,
+    **kwargs
+):
     """
     Creates the Variational Implicit Process layers using the given
     information. If the dimensionality is reducen between layers,
@@ -80,7 +101,8 @@ def init_layers(X, output_dim, vip_layers, genf, regression_coeffs,
     else:
         if vip_layers[-1] != output_dim:
             raise RuntimeError(
-                "Last vip layer does not correspond with data label")
+                "Last vip layer does not correspond with data label"
+            )
         dims = [X.shape[1]] + vip_layers
 
     # Initialize layers array
@@ -94,10 +116,16 @@ def init_layers(X, output_dim, vip_layers, genf, regression_coeffs,
         # Last layer has no transformation
         if i == len(dims) - 2:
             mf = None
+            q_mu_initial_value = final_layer_mu
+            q_sqrt_initial_value = final_layer_sqrt
+            log_layer_noise = final_layer_noise
 
         # No dimension change, identity matrix
         elif dim_in == dim_out:
             mf = LinearProjection(np.identity(n=dim_in), device=device)
+            q_mu_initial_value = inner_layers_mu
+            q_sqrt_initial_value = inner_layers_sqrt
+            log_layer_noise = inner_layers_noise
 
         # Dimensionality reduction, PCA using svd decomposition
         elif dim_in > dim_out:
@@ -109,7 +137,8 @@ def init_layers(X, output_dim, vip_layers, genf, regression_coeffs,
 
         else:
             raise NotImplementedError(
-                "Dimensionality augmentation is not handled currently.")
+                "Dimensionality augmentation is not handled currently."
+            )
 
         # Create the Generation function
         if genf == "BNN":
@@ -120,18 +149,21 @@ def init_layers(X, output_dim, vip_layers, genf, regression_coeffs,
                 output_dim=dim_out,
                 dropout=dropout,
                 fix_random_noise=fix_prior_noise,
+                zero_mean_prior=zero_mean_prior,
                 device=device,
                 seed=seed,
                 dtype=dtype,
             )
-        elif genf == "GP":
-            f = GP(
+        elif genf == "BNN-GP":
+            f = BNN_GP(
                 input_dim=dim_in,
                 output_dim=dim_out,
-                seed=seed,
+                inner_layer_dim=bnn_inner_dim,
+                dropout=dropout,
                 fix_random_noise=fix_prior_noise,
-                dtype=dtype,
                 device=device,
+                seed=seed,
+                dtype=dtype,
             )
 
         # Create layer
@@ -141,10 +173,15 @@ def init_layers(X, output_dim, vip_layers, genf, regression_coeffs,
                 num_regression_coeffs=regression_coeffs,
                 input_dim=dim_in,
                 output_dim=dim_out,
+                add_prior_regularization=prior_kl,
                 mean_function=mf,
+                q_mu_initial_value=q_mu_initial_value,
+                log_layer_noise=log_layer_noise,
+                q_sqrt_initial_value=q_sqrt_initial_value,
                 seed=seed,
                 dtype=dtype,
                 device=device,
-            ))
+            )
+        )
 
     return layers

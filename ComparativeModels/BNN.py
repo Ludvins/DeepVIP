@@ -15,6 +15,7 @@ from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit, predict, score
 from src.generative_functions import GaussianSampler
 
+
 class BayesLinear(torch.nn.Module):
     def __init__(
         self,
@@ -60,10 +61,9 @@ class BayesLinear(torch.nn.Module):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
-        
+
         self.gaussian_sampler = GaussianSampler(seed, device)
 
-        
         self.device = device
         # Create trainable parameters
         self.weight_mu = torch.nn.Parameter(w_mean)
@@ -76,7 +76,8 @@ class BayesLinear(torch.nn.Module):
         # Check the given input is valid
         if inputs.shape[-1] != self.input_dim:
             raise RuntimeError(
-                "Input shape does not match stored data dimension")
+                "Input shape does not match stored data dimension"
+            )
 
         z_w_shape = (self.input_dim, self.output_dim)
         z_b_shape = (1, self.output_dim)
@@ -164,7 +165,9 @@ class BayesianNN(torch.nn.Module):
                                 std=1.0,
                                 size=(_in, _out),
                                 generator=self.generator,
-                            ).to(device))),
+                            ).to(device)
+                        )
+                    ),
                     b_mean=torch.normal(
                         mean=0.0,
                         std=1.0,
@@ -178,10 +181,13 @@ class BayesianNN(torch.nn.Module):
                                 std=1.0,
                                 size=[_out],
                                 generator=self.generator,
-                            ).to(device))),
+                            ).to(device)
+                        )
+                    ),
                     device=device,
                     dtype=dtype,
-                ))
+                )
+            )
         self.layers = torch.nn.ModuleList(layers)
 
     def forward(self, inputs):
@@ -198,7 +204,6 @@ class BayesianNN(torch.nn.Module):
         print(x.shape)
         x = x.unsqueeze(0)
         return x
-    
 
     def train_step(self, optimizer, X, y):
 
@@ -221,7 +226,7 @@ class BayesianNN(torch.nn.Module):
         predictions = self(X)
         print(predictions.shape)
         print(y.shape)
-        loss = loss_function(predictions.squeeze(),  y.squeeze())
+        loss = loss_function(predictions.squeeze(), y.squeeze())
         # Create backpropagation graph
         loss.backward()
         # Make optimization step
@@ -247,37 +252,53 @@ for split in range(n_splits):
     train_indexes, test_indexes = train_test_split(
         np.arange(len(args.dataset)),
         test_size=0.1,
-        random_state=2147483647 + split)
+        random_state=2147483647 + split,
+    )
 
     train_dataset = Training_Dataset(
         args.dataset.inputs[train_indexes],
         args.dataset.targets[train_indexes],
         verbose=False,
     )
-    test_dataset = Test_Dataset(args.dataset.inputs[test_indexes],
-                                args.dataset.targets[test_indexes],
-                                train_dataset.inputs_mean,
-                                train_dataset.inputs_std)
+    test_dataset = Test_Dataset(
+        args.dataset.inputs[test_indexes],
+        args.dataset.targets[test_indexes],
+        train_dataset.inputs_mean,
+        train_dataset.inputs_std,
+    )
     # Initialize DataLoader
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-    BNN = BayesianNN(args.bnn_structure, args.activation,  train_dataset.input_dim,  train_dataset.output_dim, device = args.device)
+    BNN = BayesianNN(
+        args.bnn_structure,
+        args.activation,
+        train_dataset.input_dim,
+        train_dataset.output_dim,
+        device=args.device,
+    )
     opt = torch.optim.Adam(BNN.parameters(), lr=args.lr)
 
     fit(
         BNN,
         train_loader,
         opt,
-        #scheduler=scheduler,
+        # scheduler=scheduler,
         epochs=args.epochs,
-        device=args.device)
-    
+        device=args.device,
+    )
+
     test_metrics = score(BNN, test_loader, device=args.device)
 
     results = results.append(test_metrics.get_dict(), ignore_index=True)
 
-results.to_csv(path_or_buf="results/dataset={}_exactGP.csv".format(
-    args.dataset_name, str(args.vip_layers[0]), str(args.dropout), args.lr,
-    "-".join(str(i) for i in args.bnn_structure)),
-               encoding='utf-8')
+results.to_csv(
+    path_or_buf="results/dataset={}_exactGP.csv".format(
+        args.dataset_name,
+        str(args.vip_layers[0]),
+        str(args.dropout),
+        args.lr,
+        "-".join(str(i) for i in args.bnn_structure),
+    ),
+    encoding="utf-8",
+)

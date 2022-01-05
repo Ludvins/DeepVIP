@@ -33,9 +33,9 @@ def RBF(X1, X2, l=1):
     # Shape (..., 1, N, D)
     Y = X2.unsqueeze(-3)
     # X - Y has shape (..., N, N, D) due to broadcasting
-    K = ((X - Y)**2).sum(-1)
+    K = ((X - Y) ** 2).sum(-1)
 
-    return torch.exp(-K / l**2)
+    return torch.exp(-K / l ** 2)
 
 
 class GP(torch.nn.Module):
@@ -74,7 +74,7 @@ class GP(torch.nn.Module):
     def predict(self, new_inputs):
         K_s = self.kernel(self.inputs, new_inputs)
         K_ss = self.kernel(new_inputs, new_inputs)
-        
+
         mu = K_s.T @ self.K_inv @ self.targets
         cov = K_ss - K_s.T @ self.K_inv @ K_s
 
@@ -98,33 +98,47 @@ for split in range(n_splits):
     train_indexes, test_indexes = train_test_split(
         np.arange(len(args.dataset)),
         test_size=0.1,
-        random_state=2147483647 + split)
+        random_state=2147483647 + split,
+    )
 
     train_dataset = Training_Dataset(
         args.dataset.inputs[train_indexes],
         args.dataset.targets[train_indexes],
         verbose=False,
     )
-    test_dataset = Test_Dataset(args.dataset.inputs[test_indexes],
-                                args.dataset.targets[test_indexes],
-                                train_dataset.inputs_mean,
-                                train_dataset.inputs_std)
+    test_dataset = Test_Dataset(
+        args.dataset.inputs[test_indexes],
+        args.dataset.targets[test_indexes],
+        train_dataset.inputs_mean,
+        train_dataset.inputs_std,
+    )
 
-    gp = GP(torch.tensor(train_dataset.inputs),
-            torch.tensor(train_dataset.targets))
+    gp = GP(
+        torch.tensor(train_dataset.inputs), torch.tensor(train_dataset.targets)
+    )
     mu, cov = gp.predict(torch.tensor(test_dataset.inputs))
 
-    mu = mu.unsqueeze(
-        0) * train_dataset.targets_std + train_dataset.targets_mean
-    cov = torch.diagonal(cov).unsqueeze(0).unsqueeze(
-        -1).sqrt() * train_dataset.targets_std
+    mu = (
+        mu.unsqueeze(0) * train_dataset.targets_std
+        + train_dataset.targets_mean
+    )
+    cov = (
+        torch.diagonal(cov).unsqueeze(0).unsqueeze(-1).sqrt()
+        * train_dataset.targets_std
+    )
 
     test_metrics = Metrics(len(test_dataset))
     test_metrics.update(torch.tensor(test_dataset.targets), 0, mu, cov)
 
     results = results.append(test_metrics.get_dict(), ignore_index=True)
 
-results.to_csv(path_or_buf="results/dataset={}_exactGP.csv".format(
-    args.dataset_name, str(args.vip_layers[0]), str(args.dropout), args.lr,
-    "-".join(str(i) for i in args.bnn_structure)),
-               encoding='utf-8')
+results.to_csv(
+    path_or_buf="results/dataset={}_exactGP.csv".format(
+        args.dataset_name,
+        str(args.vip_layers[0]),
+        str(args.dropout),
+        args.lr,
+        "-".join(str(i) for i in args.bnn_structure),
+    ),
+    encoding="utf-8",
+)

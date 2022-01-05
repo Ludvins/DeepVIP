@@ -8,7 +8,7 @@ def build_plot_name(
     activation_str,
     epochs,
     batch_size,
-    dataset,
+    dataset_name,
     name_flag,
     genf,
     fix_prior_noise,
@@ -28,7 +28,7 @@ def build_plot_name(
         )
 
     path = "plots/{}_{}_layers={}_bnn={}_epochs={}_batchsize={}".format(
-        dataset, name_flag, dims_name, model_name, epochs, batch_size
+        dataset_name, name_flag, dims_name, model_name, epochs, batch_size
     )
     if fix_prior_noise:
         path = path + "_fixed_noise"
