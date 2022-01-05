@@ -53,7 +53,7 @@ class Layer(tf.keras.layers.Layer):
         raise NotImplementedError
 
     @tf.function
-    def conditional_NSD(self, X, full_cov=False):
+    def conditional_SND(self, X, full_cov=False):
         """"""
         f = lambda a: self.conditional_ND(a, full_cov=full_cov)
         mean, var = tf.map_fn(
@@ -105,9 +105,9 @@ class Layer(tf.keras.layers.Layer):
 
         # If no sample is given, generate it from a standardized Gaussian
         if z is None:
-            z = tf.random.normal(shape=tf.shape(mean),
-                                 seed=self.seed,
-                                 dtype=self.dtype)
+            z = tf.random.normal(
+                shape=tf.shape(mean), seed=self.seed, dtype=self.dtype
+            )
         # Apply re-parameterization trick to z
         samples = reparameterize(mean, var, z, full_cov=full_cov)
 
@@ -115,16 +115,18 @@ class Layer(tf.keras.layers.Layer):
 
 
 class VIPLayer(Layer):
-    def __init__(self,
-                 generative_function,
-                 num_regression_coeffs,
-                 num_outputs,
-                 input_dim,
-                 log_layer_noise=-5,
-                 mean_function=None,
-                 trainable=True,
-                 dtype=tf.float64,
-                 **kwargs):
+    def __init__(
+        self,
+        generative_function,
+        num_regression_coeffs,
+        num_outputs,
+        input_dim,
+        log_layer_noise=-5,
+        mean_function=None,
+        trainable=True,
+        dtype=tf.float64,
+        **kwargs
+    ):
         """
         A variational implicit process layer.
 
@@ -229,9 +231,9 @@ class VIPLayer(Layer):
         # Create tensor with triangular representation.
         # Shape (num_outputs, num_coeffs*(num_coeffs + 1)/2)
         q_sqrt_tri_prior = tfp.math.fill_triangular_inverse(q_var)
-        self.q_sqrt_tri = tf.Variable(q_sqrt_tri_prior,
-                                      trainable=trainable,
-                                      name="q_sqrt_tri")
+        self.q_sqrt_tri = tf.Variable(
+            q_sqrt_tri_prior, trainable=trainable, name="q_sqrt_tri"
+        )
 
     @tf.function
     def conditional_ND(self, X, full_cov=False):
@@ -301,8 +303,9 @@ class VIPLayer(Layer):
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, ..., N, D)
-        mean = tf.squeeze(m, axis=0) + tf.einsum("s...nd,sd->...nd", phi,
-                                                 self.q_mu)
+        mean = tf.squeeze(m, axis=0) + tf.einsum(
+            "s...nd,sd->...nd", phi, self.q_mu
+        )
         # Shape (D, S, S)
         q_sqrt = tfp.math.fill_triangular(self.q_sqrt_tri)
         # Shape (D, S, S)

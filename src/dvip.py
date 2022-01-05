@@ -2,16 +2,17 @@ import tensorflow as tf
 
 
 class DVIP_Base(tf.Module):
-    def __init__(self,
-                 likelihood,
-                 layers,
-                 num_data,
-                 num_samples=1,
-                 y_mean=0.0,
-                 y_std=1.0,
-                 warmup_iterations=1,
-                 dtype=tf.float64,
-                 **kwargs):
+    def __init__(
+        self,
+        likelihood,
+        layers,
+        num_data,
+        num_samples=1,
+        y_mean=0.0,
+        y_std=1.0,
+        dtype=tf.float64,
+        **kwargs
+    ):
         """
         Defines a Base class for Deep Variational Implicit Processes as a
         particular Keras model.
@@ -44,8 +45,6 @@ class DVIP_Base(tf.Module):
 
         self.likelihood = likelihood
         self.vip_layers = layers
-
-        self.warmup_iterations = warmup_iterations
 
         self.dtype = dtype
         # Metric trackers
@@ -124,8 +123,9 @@ class DVIP_Base(tf.Module):
         # First input corresponds to the original one
         F = tf.tile(tf.expand_dims(X, 0), [num_samples, 1, 1])
         for layer in self.vip_layers:
-            F, Fmean, Fvar = layer.sample_from_conditional(F,
-                                                           full_cov=full_cov)
+            F, Fmean, Fvar = layer.sample_from_conditional(
+                F, full_cov=full_cov
+            )
             # Store values
             Fs.append(F)
             Fmeans.append(Fmean)
@@ -178,9 +178,9 @@ class DVIP_Base(tf.Module):
         The predicted labels using the model's likelihood
         and the predicted mean and standard deviation.
         """
-        mean, var = self.predict_f(predict_at,
-                                   num_samples=num_samples,
-                                   full_cov=full_cov)
+        mean, var = self.predict_f(
+            predict_at, num_samples=num_samples, full_cov=full_cov
+        )
         return self.likelihood.predict_mean_and_var(mean, var)
 
     def predict_log_density(self, data):
@@ -208,9 +208,9 @@ class DVIP_Base(tf.Module):
                   Contains the variational expectation
 
         """
-        F_mean, F_var = self.predict_f(X,
-                                       num_samples=self.num_samples,
-                                       full_cov=False)
+        F_mean, F_var = self.predict_f(
+            X, num_samples=self.num_samples, full_cov=False
+        )
         # Shape [S, N,  D]
         var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
         # Shape [N, D]
@@ -241,12 +241,5 @@ class DVIP_Base(tf.Module):
         scale /= tf.cast(tf.shape(X)[0], self.dtype)
         # Compute KL term
         KL = tf.reduce_sum([layer.KL() for layer in self.vip_layers])
-        # if iteration is not None and self.warmup_iterations > 0:
-        #     beta = tf.minimum(
-        #         tf.cast(1.0, dtype=self.dtype),
-        #         iteration / self.warmup_iterations,
-        #     )
-        # else:
-        #     beta = 1.0
 
         return -scale * likelihood + KL

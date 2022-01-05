@@ -11,14 +11,6 @@ class Likelihood(tf.keras.layers.Layer):
         super().__init__(dtype=dtype)
         self.build(0)
 
-    @property
-    def metrics(self):
-        raise NotImplementedError
-
-    @tf.autograph.experimental.do_not_convert
-    def update_metrics(self, y, mean_pred, std_pred):
-        raise NotImplementedError
-
     def logdensity(self, x, mu, var):
         raise NotImplementedError
 
@@ -49,31 +41,7 @@ class Gaussian(Likelihood):
             initial_value=log_variance, dtype=dtype, name="lik_log_variance"
         )
 
-        self.rmse_metric = tf.keras.metrics.RootMeanSquaredError(name="rmse")
-
-        self.nll_metric = tf.keras.metrics.Mean(name="nll")
-
         super().__init__(dtype=dtype, **kwargs)
-
-    @property
-    def metrics(self):
-        return [self.rmse_metric, self.nll_metric]
-
-    @tf.autograph.experimental.do_not_convert
-    def update_metrics(self, y, mean_pred, std_pred):
-        if tf.shape(mean_pred).shape == 3:
-            predictions = tf.reduce_mean(mean_pred, 0)
-        else:
-            predictions = mean_pred
-        self.rmse_metric.update_state(y, predictions)
-
-        S = tf.cast(tf.shape(mean_pred)[0], dtype=self.dtype)
-        normal = tfp.distributions.Normal(loc=mean_pred, scale=std_pred)
-        logpdf = normal.log_prob(y)
-        nll = tf.math.reduce_logsumexp(logpdf, 0) - tf.math.log(S)
-        nll = -tf.reduce_mean(nll)
-
-        self.nll_metric.update_state(nll)
 
     def logdensity(self, x, mu, var):
         return -0.5 * (
