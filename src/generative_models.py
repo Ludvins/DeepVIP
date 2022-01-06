@@ -1,6 +1,5 @@
 import tensorflow as tf
 import numpy as np
-from numpy.random import default_rng
 
 
 class NoiseSampler:
@@ -37,6 +36,9 @@ class GaussianSampler(NoiseSampler):
         super().__init__(seed)
         self.rng = tf.random.Generator.from_seed(self.seed)
 
+    def reset_seed(self):
+        self.rng.reset_from_seed(self.seed)
+
     def __call__(self, size):
         """
         Returns sampled noise values os the given size or shape.
@@ -52,17 +54,49 @@ class GaussianSampler(NoiseSampler):
                   A sample from a Gaussian distribution N(0, I).
 
         """
-        return tf.random.normal(size, dtype=tf.float64)
+        return self.rng.normal(size, dtype=tf.float64)
+
+
+class UniformSampler(NoiseSampler):
+    def __init__(self, seed):
+        """
+        Generates noise samples from a Standar Gaussian distribution N(0, 1).
+
+        Parameters:
+        -----------
+        seed : int
+               Integer value used to generate reproducible results.
+
+        """
+        super().__init__(seed)
+        self.rng = tf.random.Generator.from_seed(self.seed)
+
+    def reset_seed(self):
+        self.rng.reset_from_seed(self.seed)
+
+    def __call__(self, size):
+        """
+        Returns sampled noise values os the given size or shape.
+
+        Parameters:
+        -----------
+        size : int or np.darray
+               Indicates the desired shape/size of the sample to generate.
+
+        Returns:
+        --------
+        samples : np.darray of shape (size)
+                  A sample from a Gaussian distribution N(0, I).
+
+        """
+        return self.rng.uniform(size, dtype=tf.float64)
 
 
 class GenerativeFunction(tf.Module):
     def __init__(
         self,
-        noise_sampler,
-        num_samples,
-        num_outputs,
         input_dim,
-        trainable,
+        output_dim,
         seed,
     ):
         """
@@ -95,12 +129,15 @@ class GenerativeFunction(tf.Module):
                Integer value used to generate reproducible results.
         """
         super(GenerativeFunction, self).__init__()
-        self.noise_sampler = noise_sampler
-        self.num_samples = num_samples
-        self.num_outputs = num_outputs
         self.input_dim = input_dim
+        self.output_dim = output_dim
         self.seed = seed
-        self.trainable = trainable
+
+    def train_mode(self):
+        self.training = True
+
+    def eval_mode(self):
+        self.training = False
 
     def __call__(self):
         """
@@ -109,167 +146,22 @@ class GenerativeFunction(tf.Module):
         raise NotImplementedError
 
 
-class Linear(GenerativeFunction):
-    def __init__(self,
-                 num_samples=10,
-                 num_outputs=1,
-                 input_dim=32,
-                 trainable=True,
-                 *args):
-        """
-        Generates samples from a linear deterministic function.
-
-        Parameters:
-        -----------
-
-        num_samples : int
-                      Amount of samples to generate in each call.
-
-        num_outputs : int
-                      Dimensionality of the function output.
-
-        input_dim : int or array
-                    Dimensionality of the input values `x`.
-
-        trainable : boolean
-                    Determines wether the variables are trainable or not.
-
-        """
-
-        # Initialize tf variables
-        self.w = tf.Variable(
-            initial_value=1.0 * np.ones((input_dim, num_outputs)),
-            trainable=trainable,
-            name="w",
-        )
-        self.b = tf.Variable(
-            initial_value=0.01 * np.ones((input_dim, num_outputs)),
-            trainable=trainable,
-            name="b",
-        )
-
-        super().__init__(None, num_samples, num_outputs, input_dim, None)
-
-    def __call__(self, inputs):
-        """
-        Generates the output of the Linear transformation as
-
-        y = w^T x + b
-
-        """
-        b = tf.expand_dims(self.b, 0)
-        w = tf.expand_dims(self.w, 0)
-        b = tf.tile(b, (self.num_samples, 1, 1))
-        w = tf.tile(w, (self.num_samples, 1, 1))
-        return inputs @ w + b
-
-
-class BayesianLinearNN(GenerativeFunction):
-    def __init__(
-        self,
-        noise_sampler,
-        num_samples,
-        num_outputs=1,
-        input_dim=32,
-        trainable=True,
-        seed=0,
-    ):
-        """
-        Defines a Bayesian Neural Network with 1 layer as a generative model.
-        The defined model is the following:
-
-        w ~ N(w_mean, exp(2*w_log_std))
-        b ~ N(b_mean, exp(2*b_log_std))
-
-        where given an input location x and two noise values z_w, z_b,
-        a function sample is computed as:
-
-        f(x, z) = (w_mean + z_w * exp(w_log_std)) x
-                + (b_mean + z_b * exp(b_log_std))
-
-        Parameters:
-        -----------
-        noise_sampler : NoiseSampler
-                        Instance of NoiseSampler used to generate the noise
-                        values.
-        num_samples : int
-                      Amount of samples to generate in each call.
-        num_outputs : int
-                      Dimensionality of the function output.
-        input_dim : int or array
-                    Dimensionality of the input values x.
-        seed : int
-               Integer value used to generate reproducible results.
-        """
-        initializer = tf.random_normal_initializer(mean=0,
-                                                   stddev=1.0,
-                                                   seed=seed)
-
-        # Initialize tf variables
-        self.w_mean = tf.Variable(
-            initial_value=0.01 *
-            initializer(shape=(input_dim, num_outputs), dtype="float64"),
-            trainable=trainable,
-            name="w_mean",
-        )
-        self.w_log_std = tf.Variable(
-            initial_value=-5 +
-            initializer(shape=(input_dim, num_outputs), dtype="float64"),
-            trainable=trainable,
-            name="w_log_std",
-        )
-        self.b_mean = tf.Variable(
-            initial_value=0.01 *
-            initializer(shape=[num_outputs], dtype="float64"),
-            trainable=trainable,
-            name="b_mean",
-        )
-        self.b_log_std = tf.Variable(
-            initial_value=-5 +
-            initializer(shape=[num_outputs], dtype="float64"),
-            trainable=trainable,
-            name="b_log_std",
-        )
-
-        super().__init__(noise_sampler, num_samples, num_outputs, input_dim,
-                         trainable, seed)
-
-    def __call__(self, inputs):
-        """
-        Generates the output of the stochastic function
-
-        f(x, z) = (w_mean + z_w * \exp(w_log_std)) x
-                + (b_mean + z_b * \exp(b_log_std)).
-        """
-
-        x = tf.expand_dims(inputs, 1)
-        x = tf.tile(x, (1, self.num_samples, 1))
-
-        z_w = self.noise_sampler(
-            (self.num_samples, self.input_dim, self.num_outputs))
-        z_b = self.noise_sampler((self.num_samples, self.num_outputs))
-
-        w = z_w * tf.math.exp(self.w_log_std) + self.w_mean
-        b = z_b * tf.math.exp(self.b_log_std) + self.b_mean
-
-        return tf.einsum("nsi,sio->nso", x, w) + b
-
-
 class BayesianNN(GenerativeFunction):
     def __init__(
         self,
-        noise_sampler,
-        num_samples,
         structure,
         activation,
-        num_outputs=1,
-        input_dim=1,
-        trainable=True,
+        output_dim,
+        input_dim,
+        seed,
+        fix_random_noise,
+        dropout,
+        zero_mean_prior,
+        dtype,
         w_mean_prior=0.0,
-        w_std_prior=-4.6,
-        b_mean_prior=0.01,
+        w_std_prior=0.0,
+        b_mean_prior=0.0,
         b_std_prior=0.0,
-        seed=0,
     ):
         """
         Defines a Bayesian Neural Network.
@@ -296,48 +188,46 @@ class BayesianNN(GenerativeFunction):
         seed : int
                Integer value used to generate reproducible results.
         """
-        self.initializer = tf.random_normal_initializer(mean=0,
-                                                        stddev=1.0,
-                                                        seed=seed)
-
+        self.initializer = tf.random_normal_initializer(
+            mean=0, stddev=1.0, seed=seed
+        )
+        self.fix_random_noise = fix_random_noise
         self.structure = structure
         self.w_mean_prior = w_mean_prior
         self.w_std_prior = w_std_prior
         self.b_mean_prior = b_mean_prior
         self.b_std_prior = b_std_prior
-        self.trainable = trainable
-        self.output_dim = num_outputs
+        self.output_dim = output_dim
+        self.seed = seed
+        self.dtype = dtype
+
+        self.dropout = dropout
+        self.dropout_layer = tf.keras.layers.Dropout(
+            dropout, seed=self.seed, dtype=self.dtype
+        )
+
+        self.noise_sampler = GaussianSampler(seed)
 
         self.activation = activation
-        super().__init__(noise_sampler, num_samples, num_outputs, input_dim,
-                         trainable, seed)
+        super().__init__(input_dim, output_dim, seed)
         dims = [input_dim] + self.structure + [self.output_dim]
-
         weights = []
 
         for _in, _out in zip(dims, dims[1:]):
             w_mean = tf.Variable(
-                initial_value=self.w_mean_prior +
-                0.01 * self.initializer(shape=(_in, _out), dtype="float64"),
-                trainable=self.trainable,
+                initial_value=self.initializer(shape=(_in, _out), dtype=dtype),
                 name="w_mean_" + str(_in) + "-" + str(_out),
             )
             w_log_std = tf.Variable(
-                initial_value=self.w_std_prior + 4.6 +
-                0.0 * self.initializer(shape=(_in, _out), dtype="float64"),
-                trainable=self.trainable,
+                initial_value=self.initializer(shape=(_in, _out), dtype=dtype),
                 name="w_log_std_" + str(_in) + "-" + str(_out),
             )
             b_mean = tf.Variable(
-                initial_value=self.b_mean_prior +
-                0.1 * self.initializer(shape=[_out], dtype="float64"),
-                trainable=self.trainable,
+                initial_value=self.initializer(shape=[_out], dtype=dtype),
                 name="b_mean_" + str(_in) + "-" + str(_out),
             )
             b_log_std = tf.Variable(
-                initial_value=self.b_std_prior +
-                0.1 * self.initializer(shape=[_out], dtype="float64"),
-                trainable=self.trainable,
+                initial_value=self.initializer(shape=[_out], dtype=dtype),
                 name="b_log_std_" + str(_in) + "-" + str(_out),
             )
 
@@ -347,41 +237,159 @@ class BayesianNN(GenerativeFunction):
         # the variables to the trainable_variables array
         self.vars = weights
 
-    def __call__(self, inputs):
+    def __call__(self, inputs, num_samples):
         """
         Computes the output of the Bayesian neural network given the input
         values.
         """
 
-        # inputs shape (S, M, N, D_in)
-        x = inputs
+        # inputs shape (N, D_in)
+        x = tf.tile(tf.expand_dims(inputs, 0), [num_samples, 1, 1])
+        if self.fix_random_noise:
+            self.noise_sampler.reset_seed()
+
         for (w_m, w_log_std, b_m, b_log_std) in self.vars[:-1]:
             # Get noise
 
             # (S, M, D_out, D_in)
             z_w = self.noise_sampler(
-                tf.concat(
-                    [tf.shape(x)[:-2], tf.shape(w_log_std)], 0))
+                tf.concat([[num_samples], tf.shape(w_log_std)], 0)
+            )
             # (S, M, 1, D_out)
             z_b = self.noise_sampler(
-                tf.concat([tf.shape(x)[:-2], [1],
-                           tf.shape(b_log_std)], 0))
+                tf.concat([[num_samples, 1], tf.shape(b_log_std)], 0)
+            )
 
             # Compute Gaussian samples
             w = z_w * tf.math.exp(w_log_std) + w_m
             b = z_b * tf.math.exp(b_log_std) + b_m
-            x = self.activation(tf.einsum("...ni,...io->...no", x, w) + b)
+            x = self.activation(tf.einsum("sni,sio->sno", x, w) + b)
+            if self.dropout > 0.0 and self.training is True:
+                x = self.dropout_layer(x, training=self.training)
 
         # Last layer has no activation function
         w_m, w_log_std, b_m, b_log_std = self.vars[-1]
-
-        # Get noise
         z_w = self.noise_sampler(
-            tf.concat([tf.shape(x)[:-2], tf.shape(w_log_std)], 0))
+            tf.concat([[num_samples], tf.shape(w_log_std)], 0)
+        )
+        # (S, M, 1, D_out)
         z_b = self.noise_sampler(
-            tf.concat([tf.shape(x)[:-2], [1],
-                       tf.shape(b_log_std)], 0))
+            tf.concat([[num_samples, 1], tf.shape(b_log_std)], 0)
+        )
 
         w = z_w * tf.math.exp(w_log_std) + w_m
         b = z_b * tf.math.exp(b_log_std) + b_m
-        return tf.einsum("...ni,...io->...no", x, w) + b
+        return tf.einsum("sni,sio->sno", x, w) + b
+
+
+class BNN_GP(GenerativeFunction):
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        inner_layer_dim,
+        dropout,
+        seed,
+        fix_random_noise,
+        dtype,
+    ):
+        super().__init__(
+            input_dim,
+            output_dim,
+            seed=seed,
+        )
+
+        self.fix_random_noise = fix_random_noise
+        self.dtype = dtype
+        self.inner_layer_dim = inner_layer_dim
+        self.gaussian_sampler = GaussianSampler(seed)
+        self.uniform_sampler = UniformSampler(seed=seed)
+        self.dropout = dropout
+        self.dropout_layer = tf.keras.layers.Dropout(
+            dropout, seed=self.seed, dtype=self.dtype
+        )
+
+        self.initializer = tf.random_normal_initializer(
+            mean=0, stddev=1.0, seed=seed
+        )
+
+        self.w_mean_1 = tf.Variable(
+            initial_value=self.initializer(
+                shape=(self.input_dim, self.inner_layer_dim), dtype=dtype
+            ),
+            name="w_mean_1",
+        )
+        self.w_log_std_1 = tf.Variable(
+            initial_value=self.initializer(
+                shape=(self.input_dim, self.inner_layer_dim), dtype=dtype
+            ),
+            name="w_log_std_1",
+        )
+
+        self.w_mean_2 = tf.Variable(
+            initial_value=self.initializer(
+                shape=(self.inner_layer_dim, self.output_dim), dtype=dtype
+            ),
+            name="w_mean_2",
+        )
+        self.w_log_std_2 = tf.Variable(
+            initial_value=self.initializer(
+                shape=(self.inner_layer_dim, self.output_dim), dtype=dtype
+            ),
+            name="w_log_std_2",
+        )
+
+        self.b_mean_2 = (
+            tf.Variable(
+                initial_value=self.initializer(
+                    shape=[self.output_dim], dtype=dtype
+                ),
+                name="b_mean_2",
+            ),
+        )
+        self.b_log_std_2 = tf.Variable(
+            self.initializer(shape=[self.output_dim], dtype=dtype),
+            name="b_log_std_2",
+        )
+
+        self.b_low = tf.Variable(
+            initial_value=0.0, name="b_low", dtype=self.dtype
+        )
+        self.b_high = tf.Variable(
+            initial_value=2 * np.pi, name="b_high", dtype=self.dtype
+        )
+
+    def __call__(self, inputs, num_samples):
+        x = tf.tile(
+            tf.expand_dims(inputs, 0),
+            (num_samples, 1, 1),
+        )
+        if self.dropout > 0.0 and self.training:
+            x = self.dropout_layer(x, training=self.training)
+
+        if self.fix_random_noise:
+            self.gaussian_sampler.reset_seed()
+            self.uniform_sampler.reset_seed()
+
+        z = self.gaussian_sampler(
+            (num_samples, self.input_dim, self.inner_layer_dim)
+        )
+        b = (self.b_high - self.b_low) * self.uniform_sampler(
+            (num_samples, 1, self.inner_layer_dim)
+        ) + self.b_low
+
+        w = self.w_mean_1 + z * tf.math.exp(self.w_log_std_1)
+        x = tf.cast(
+            tf.math.sqrt(2 / self.inner_layer_dim), dtype=self.dtype
+        ) * tf.math.cos(x @ w + b)
+        if self.dropout > 0.0 and self.training:
+            x = self.dropout_layer(x, training=self.training)
+
+        z_w = self.gaussian_sampler(
+            (num_samples, self.inner_layer_dim, self.output_dim)
+        )
+        z_b = self.gaussian_sampler((num_samples, 1, self.output_dim))
+        w = self.w_mean_2 + z_w * tf.math.exp(self.w_log_std_2)
+        b = self.b_mean_2 + z_b * tf.math.exp(self.b_log_std_2)
+
+        return x @ w + b

@@ -1,7 +1,7 @@
 from src.layers import VIPLayer
 import numpy as np
 import tensorflow as tf
-from src.generative_models import GaussianSampler, BayesianNN, BayesianLinearNN
+from src.generative_models import BayesianNN, BNN_GP
 
 
 class LinearProjection:
@@ -25,83 +25,78 @@ class LinearProjection:
 
 def init_layers(
     X,
-    Y,
-    inner_dims,
-    regression_coeffs=20,
-    structure=[10, 10],
-    activation=tf.keras.activations.tanh,
-    noise_sampler=None,
-    trainable_parameters=True,
-    trainable_prior=True,
-    seed=0,
+    output_dim,
+    vip_layers,
+    genf,
+    regression_coeffs,
+    bnn_structure,
+    bnn_inner_dim,
+    activation,
+    seed,
+    dtype,
+    fix_prior_noise,
+    final_layer_mu,
+    final_layer_sqrt,
+    final_layer_noise,
+    inner_layers_sqrt,
+    inner_layers_noise,
+    inner_layers_mu,
+    dropout,
+    prior_kl,
+    zero_mean_prior,
+    **kwargs
 ):
     """
     Creates the Variational Implicit Process layers using the given
     information. If the dimensionality is reducen between layers,
     these are created with a mean function that projects the data
     to their maximum variance projection (PCA).
-
     If several projections are made, the first is computed over the
     original data, and, the following are applied over the already
     projected data.
-
     Parameters
     ----------
     X : tf.tensor of shape (num_data, data_dim)
         Contains the input features.
-
-    Y : tf.tensor of shape (num_data, output_dim)
-        Contains the input labels
-
-    inner_dims : integer or list of integers
+    output_dim : int
+                 Number of output dimensions of the model.
+    vip_layers : integer or list of integers
                  Indicates the number of VIP layers to use. If
                  an integer is used, as many layers as its value
                  are created, with output dimension output_dim.
                  If a list is given, layers are created so that
                  the dimension of the data matches these values.
-
                  For example, inner_dims = [10, 3] creates 3
                  layers; one that goes from data_dim features
                  to 10, another from 10 to 3, and lastly from
                  3 to output_dim.
-
+    genf : string
+           Indicates the generation function to use, can be, BNN or GP.
     regression_coeffs : integer
                         Number of regression coefficients to use.
-
-    structure : list of integers
-                Specifies the hidden dimensions of the Bayesian
-                Neural Networks in each VIP.
-
+    bnn_structure : list of integers
+                    Specifies the hidden dimensions of the Bayesian
+                    Neural Networks in each VIP.
     activation : callable
                  Non-linear function to apply at each inner
                  dimension of the Bayesian Network.
-
-    noise_sampler : NoiseSampler
-                    Specifies the noise generationfunction
-
-    trainable_prior : boolean
-                      Determines whether the prior function parameters
-                      are trainable or not.
-
+    dtype : data-type
+                The dtype of the layer's computations and weights.
     seed : int
-           Random seed
-
-    Returns
-    -------
+               integer to use as seed for randomness.
     """
 
-    # Initialice noise sampler using the given seed.
-    if noise_sampler is None:
-        noise_sampler = GaussianSampler(seed)
-
-    # Create VIP layers. If integer, replicate output dimension
-    if isinstance(inner_dims, (int, np.integer)):
-        dims = np.concatenate(
-            ([X.shape[1]], np.ones(inner_dims, dtype=int) * Y.shape[1])
-        )
+    # Create VIP layers. If integer, replicate input dimension
+    if len(vip_layers) == 1:
+        vip_layers = [X.shape[1]] * (vip_layers[0] - 1)
+        dims = [X.shape[1]] + vip_layers + [output_dim]
     # Otherwise, append thedata dimensions to the array.
     else:
-        dims = [X.shape[1]] + inner_dims + [Y.shape[1]]
+        if vip_layers[-1] != output_dim:
+            raise RuntimeError(
+                "Last vip layer does not correspond with data label"
+            )
+        dims = [X.shape[1]] + vip_layers
 
     # Initialize layers array
     layers = []
@@ -110,49 +105,72 @@ def init_layers(
     # using the projected (from the first projection) data.
     X_running = np.copy(X)
     for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
-        # Las layer has no transformation
+
+        # Last layer has no transformation
         if i == len(dims) - 2:
             mf = None
+            q_mu_initial_value = final_layer_mu
+            q_sqrt_initial_value = final_layer_sqrt
+            log_layer_noise = final_layer_noise
 
         # No dimension change, identity matrix
         elif dim_in == dim_out:
-            mf = LinearProjection(np.identity(n=dim_in))
+            mf = lambda x: x
+            q_mu_initial_value = inner_layers_mu
+            q_sqrt_initial_value = inner_layers_sqrt
+            log_layer_noise = inner_layers_noise
 
         # Dimensionality reduction, PCA using svd decomposition
         elif dim_in > dim_out:
             _, _, V = np.linalg.svd(X_running, full_matrices=False)
 
-            mf = LinearProjection(V[:dim_out, :])
+            mf = LinearProjection(V[:dim_out, :].T)
             # Apply the projection to the running data,
-            X_running = mf(X_running)
+            X_running = X_running @ V[:dim_out].T
 
         else:
             raise NotImplementedError(
-                "Dimensionality augmentation is not" " handled currently."
+                "Dimensionality augmentation is not handled currently."
             )
 
-        # Create the Generation function, i.e, the Bayesian Neural Network
-        bayesian_network = BayesianNN(
-            noise_sampler=noise_sampler,
-            num_samples=regression_coeffs,
-            input_dim=dim_in,
-            structure=structure,
-            activation=activation,
-            num_outputs=dim_out,
-            trainable=trainable_prior,
-            seed=seed,
-        )
-        # bayesian_network = BayesianLinearNN(noise_sampler, regression_coeffs, dim_out, dim_in, seed = seed)
+        # Create the Generation function
+        if genf == "BNN":
+            f = BayesianNN(
+                input_dim=dim_in,
+                structure=bnn_structure,
+                activation=activation,
+                output_dim=dim_out,
+                dropout=dropout,
+                fix_random_noise=fix_prior_noise,
+                zero_mean_prior=zero_mean_prior,
+                seed=seed,
+                dtype=dtype,
+            )
+        elif genf == "BNN-GP":
+            f = BNN_GP(
+                input_dim=dim_in,
+                output_dim=dim_out,
+                inner_layer_dim=bnn_inner_dim,
+                dropout=dropout,
+                fix_random_noise=fix_prior_noise,
+                seed=seed,
+                dtype=dtype,
+            )
 
         # Create layer
         layers.append(
             VIPLayer(
-                bayesian_network,
+                f,
                 num_regression_coeffs=regression_coeffs,
-                num_outputs=dim_out,
                 input_dim=dim_in,
+                output_dim=dim_out,
+                add_prior_regularization=prior_kl,
                 mean_function=mf,
-                trainable=trainable_parameters,
+                q_mu_initial_value=q_mu_initial_value,
+                log_layer_noise=log_layer_noise,
+                q_sqrt_initial_value=q_sqrt_initial_value,
+                seed=seed,
+                dtype=dtype,
             )
         )
 

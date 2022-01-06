@@ -50,30 +50,15 @@ class DVIP_Base(tf.Module):
         # Metric trackers
         self.loss_tracker = tf.keras.metrics.Mean(name="nelbo")
 
-    @property
-    def metrics(self):
-        # We list our `Metric` objects here so that `reset_states()` can be
-        # called automatically at the start of each epoch
-        # or at the start of `evaluate()`.
-        # If you don't implement this property, you have to call
-        # `reset_states()` yourself at the time of your choosing.
-        metrics = [self.loss_tracker]
-        for metric in self.likelihood.metrics:
-            metrics.append(metric)
-        return {m.name: m.result() for m in metrics}
+    def train_mode(self):
+        self.training = True
+        for layer in self.vip_layers:
+            layer.train_mode()
 
-    def update_metrics(self, y, mean, std, loss, normalized_y=True):
-        if normalized_y:
-            labels = y * self.y_std + self.y_mean
-        else:
-            labels = y
-        self.loss_tracker.update_state(loss)
-        self.likelihood.update_metrics(labels, mean, std)
-
-    def reset_metrics(self):
-        self.loss_tracker.reset_states()
-        for metric in self.likelihood.metrics:
-            metric.reset_states()
+    def eval_mode(self):
+        self.training = False
+        for layer in self.vip_layers:
+            layer.eval_mode()
 
     def __call__(self, inputs):
         """
@@ -211,7 +196,7 @@ class DVIP_Base(tf.Module):
         F_mean, F_var = self.predict_f(
             X, num_samples=self.num_samples, full_cov=False
         )
-        # Shape [S, N,  D]
+        # Shape [S, N, D]
         var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
         # Shape [N, D]
         return tf.reduce_mean(var_exp, 0)
@@ -234,12 +219,11 @@ class DVIP_Base(tf.Module):
                 Negative evidence lower bound
         """
         X, Y = inputs, outputs
-
         likelihood = tf.reduce_sum(self.expected_data_log_likelihood(X, Y))
         # scale loss term corresponding to minibatch size
         scale = tf.cast(self.num_data, self.dtype)
         scale /= tf.cast(tf.shape(X)[0], self.dtype)
         # Compute KL term
+        #
         KL = tf.reduce_sum([layer.KL() for layer in self.vip_layers])
-
         return -scale * likelihood + KL

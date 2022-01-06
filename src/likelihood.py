@@ -73,4 +73,4 @@ class Gaussian(Likelihood):
             - 0.5 * self.log_variance
             - 0.5 * (tf.square(Fmu - Y) + Fvar) / variance
         )
-        return var_exp
+        return tf.reduce_sum(var_exp, -1)
