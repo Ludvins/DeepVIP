@@ -333,6 +333,13 @@ class BayesLinear(GenerativeFunction):
         w_Sigma = torch.flatten(torch.square(torch.exp(self.weight_log_sigma)))
         b_Sigma = torch.flatten(torch.square(torch.exp(self.bias_log_sigma)))
 
+        return (
+            torch.sum(w_m ** 2)
+            + torch.sum(b_m ** 2)
+            + torch.sum(self.weight_log_sigma ** 2)
+            + torch.sum(self.bias_log_sigma ** 2)
+        )
+
         # Compute the KL divergence of w
         KL = -w_m.size(dim=0)
         KL += torch.sum(w_Sigma)
@@ -564,13 +571,14 @@ class BNN_GP(GenerativeFunction):
 
         self.w_m = torch.nn.Parameter(w_m_1)
         self.w_log_std = torch.nn.Parameter(w_log_std_1)
+
+        self.b_low = torch.nn.Parameter(torch.tensor(0.0))
+        self.b_high = torch.nn.Parameter(torch.tensor(2 * np.pi))
+
         self.w_m_2 = torch.nn.Parameter(w_m_2)
         self.w_log_std_2 = torch.nn.Parameter(w_log_std_2)
         self.b_m_2 = torch.nn.Parameter(b_m_2)
         self.b_log_std_2 = torch.nn.Parameter(b_log_std_2)
-
-        self.b_low = torch.nn.Parameter(torch.tensor(0.0))
-        self.b_high = torch.nn.Parameter(torch.tensor(2 * np.pi))
 
     def forward(self, inputs, num_samples):
         x = torch.tile(

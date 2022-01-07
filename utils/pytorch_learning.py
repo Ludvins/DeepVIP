@@ -133,6 +133,7 @@ def fit_with_metrics(
     for epoch in tepoch:
         # Mini-batch training
         model.train()
+        model.num_samples = 1
         for data, target in training_generator:
             # Compute loss value
             data = data.to(device)
@@ -157,6 +158,7 @@ def fit_with_metrics(
         val_postfix = {}
         if val_generator is not None:
             model.eval()
+            model.num_samples = 20
             with torch.no_grad():
                 for data, target in val_generator:
                     data = data.to(device)

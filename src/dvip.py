@@ -121,6 +121,8 @@ class DVIP_Base(torch.nn.Module):
         loss = self.nelbo(X, y)
         # Create backpropagation graph
         loss.backward()
+        # torch.nn.utils.clip_grad_norm_(self.parameters(), 10)
+
         # Make optimization step
         optimizer.step()
 
@@ -331,6 +333,19 @@ class DVIP_Base(torch.nn.Module):
         )  # Shape [S, N, D]
         return torch.mean(var_exp, dim=0)  # Shape [N, D]
 
+    def log_expected_data_likelihood(self, X, Y, alpha=0.5):
+        """
+        Calculate the log expectation of the data likelihood under the variational distribution
+         with MC samples
+        """
+        F_mean, F_var = self.predict_f(X, num_samples=5, full_cov=False)
+
+        S = F_mean.shape[0]
+
+        logpdf = self.likelihood.predict_density(F_mean, F_var, Y)
+        pdf = torch.mean(torch.exp(logpdf) ** alpha, 0)
+        return torch.log(pdf) / alpha
+
     def nelbo(self, X, y):
         """
         Computes the evidence lower bound.
@@ -344,6 +359,9 @@ class DVIP_Base(torch.nn.Module):
 
         """
         likelihood = torch.sum(self.expected_data_log_likelihood(X, y))
+        # likelihood = torch.sum(
+        #     self.log_expected_data_likelihood(X, y, alpha=0.5)
+        # )
 
         # scale loss term corresponding to minibatch size
         scale = self.num_data

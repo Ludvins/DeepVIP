@@ -274,7 +274,7 @@ class VIPLayer(Layer):
 
         # Compute regresion function, shape (S, ... , N, D)
         phi = (f - m) / torch.sqrt(
-            torch.tensor(self.num_coeffs).type(self.dtype)
+            torch.tensor(self.num_coeffs - 1).type(self.dtype)
         )
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
