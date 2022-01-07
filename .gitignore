@@ -6,3 +6,6 @@ __pycache__/*
 tests.py
 *.csv
 *.svg
+.venv/*
+Doubly-Stochastic-DGP-master/
+*.pyc
