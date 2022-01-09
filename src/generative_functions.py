@@ -77,7 +77,7 @@ class GaussianSampler(NoiseSampler):
 class UniformSampler(NoiseSampler):
     def __init__(self, seed=2147483647, device="cpu", dtype=torch.float64):
         """
-        Generates noise samples from a Standar Gaussian distribution N(0, 1).
+        Generates noise samples from a continuous uniform distribution U[0,1].
 
         Parameters:
         -----------
@@ -112,8 +112,7 @@ class UniformSampler(NoiseSampler):
         Returns:
         --------
         samples : torch tensor of shape (size)
-                  A sample from a Gaussian distribution N(0, I).
-
+                  A sample from a Uniform distribution U(0, 1).
         """
 
         return torch.rand(
@@ -218,6 +217,10 @@ class BayesLinear(GenerativeFunction):
         fix_random_noise : boolean
                            Wether to reset the Random Generator's seed in each
                            iteration.
+        zero_mean_prior : boolean
+                          wether to consider 0 mean prior or not, i. e, to
+                          create variables for the mean values of the gaussian
+                          distributions or fix these to 0.
         seed : int
                Initial seed for the random number generator.
         dtype : data-type
@@ -238,7 +241,7 @@ class BayesLinear(GenerativeFunction):
 
         # Check prior values fit the given dimensionality
         if (
-            (w_mean.shape != (input_dim, output_dim))
+            (w_mean.shape != (input_ºdim, output_dim))
             or (w_log_std.shape != (input_dim, output_dim))
             or (b_mean.size(0) != output_dim)
             or (b_log_std.size(0) != output_dim)
@@ -247,7 +250,7 @@ class BayesLinear(GenerativeFunction):
                 "Provided prior values do not fit the given" " dimensionality."
             )
 
-        # Create trainable parameters
+        # Initialize parameters
         if zero_mean_prior:
             self.weight_mu = 0
             self.bias_mu = 0
@@ -265,7 +268,7 @@ class BayesLinear(GenerativeFunction):
         Arguments
         ---------
 
-        inputs : torch tensor of shape (..., N, D)
+        inputs : torch tensor of shape (S, N, D)
                  Input tensor where the last two dimensions are batch and
                  data dimensionality.
 
@@ -304,13 +307,12 @@ class BayesLinear(GenerativeFunction):
         z_w = self.gaussian_sampler(z_w_shape)
         z_b = self.gaussian_sampler(z_b_shape)
 
-        # Store it if necessary
         # Perform reparameterization trick
         w = z_w * torch.exp(self.weight_log_sigma) + self.weight_mu
         b = z_b * torch.exp(self.bias_log_sigma) + self.bias_mu
 
         # Apply linear transformation.
-        return torch.einsum("snd, sdo -> sno", inputs, w) + b
+        return inputs @ w + b
 
     def KL(self):
         """
@@ -377,11 +379,15 @@ class BayesianNN(GenerativeFunction):
                     Dimensionality of the input values `x`.
         output_dim : int
                      Dimensionality of the function output.
+        dropout : float between 0 and 1
+                  The degree of dropout used after each activation layer
         device : torch.device
                  The device in which the computations are made.
         fix_random_noise : boolean
                            Wether to reset the Random Generator's seed in each
                            iteration.
+        zero_mean_prior : boolean
+                          Wether to consider zero mean layers.
         seed : int
                Initial seed for the random number generator.
         dtype : data-type
@@ -473,6 +479,7 @@ class BayesianNN(GenerativeFunction):
 
         for layer in self.layers[:-1]:
             x = self.activation(layer(x))
+            # Only perform dropout if in training mode
             if self.dropout > 0.0 and self.training:
                 x = torch.nn.Dropout(self.dropout)(x)
 

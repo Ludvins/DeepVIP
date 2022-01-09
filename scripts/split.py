@@ -17,6 +17,7 @@ from utils.dataset import Test_Dataset, Training_Dataset
 from utils.metrics import Metrics
 from utils.process_flags import get_parser, manage_experiment_configuration
 from utils.pytorch_learning import fit, score
+from scripts.utils import create_file_name
 
 args = manage_experiment_configuration()
 
@@ -110,22 +111,6 @@ d = {
 
 df = pd.DataFrame.from_dict(d, orient="index").transpose()
 df.to_csv(
-    path_or_buf="results/dataset={}_vip_layers={}_epochs={}_dropout={}_lr={}_genf={}_n_coeffs={}_alpha={}_prior_kl={}_zero_mean_prior={}_prior_fixed_noise={}_split={}{}.csv".format(
-        args.dataset_name,
-        "-".join(str(i) for i in args.vip_layers),
-        str(args.epochs),
-        str(args.dropout),
-        args.lr,
-        "BNN_bnn-structure=" + "-".join(str(i) for i in args.bnn_structure)
-        if args.genf == "BNN"
-        else "BNN-GP_inner-dim=" + str(args.bnn_inner_dim),
-        str(args.regression_coeffs),
-        str(args.bb_alpha),
-        "True" if args.prior_kl else "False",
-        "True" if args.zero_mean_prior else "False",
-        "True" if args.fix_prior_noise else "False",
-        str(args.split),
-        args.name_flag,
-    ),
+    path_or_buf="results/" + create_file_name(args) + ".csv",
     encoding="utf-8",
 )

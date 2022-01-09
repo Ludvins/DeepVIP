@@ -36,11 +36,7 @@ class Likelihood(torch.nn.Module):
 class Gaussian(Likelihood):
     def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None):
         """Gaussian Likelihood. Encapsulates the likelihood noise
-        as a parameter and the following metrics:
-        - RMSE
-        - Negative log-likelihood
-        - CRPS
-
+        as a parameter.
         Arguments
         ---------
         log_variance : float of type self.dtype
@@ -59,18 +55,31 @@ class Gaussian(Likelihood):
         self.log_variance = torch.nn.Parameter(self.log_variance)
 
     def logdensity(self, x, mu, var):
+        """ Computes the log density of a one dimensional
+        Gaussian distribution of mean mu and variance var, evaluated
+        on x
+        """
         return -0.5 * (np.log(2 * np.pi) + var.log() + (mu - x).square() / var)
 
     def logp(self, F, Y):
+        """Computes the log likelihood of the targets Y under the predictions F,
+        using the likelihoo variance."""
         return self.logdensity(Y, F, self.log_variance.exp())
 
     def predict_mean_and_var(self, Fmu, Fvar):
+        """Returns the predictive mean and variance using the likelihood distribution.
+        In this case, it results in accumulating the variances."""
         return Fmu, Fvar + self.log_variance.exp()
 
     def predict_density(self, Fmu, Fvar, Y):
+        """Computes the predictive density of the targets given the means (Fmu) and
+        vairances (Fvar)"""
         return self.logdensity(Y, Fmu, Fvar + self.log_variance.exp())
 
     def variational_expectations(self, Fmu, Fvar, Y):
+        """Computes the variational expectation, i.e, the expectation under
+        Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f). As both distributions
+        are Gaussian this can be computed in closed form."""
         return (
                 -0.5 * np.log(2 * np.pi)
                 - 0.5 * self.log_variance

@@ -43,7 +43,7 @@ class Layer(torch.nn.Module):
         """
         raise NotImplementedError
 
-    def sample_from_conditional(self, X, full_cov=False):
+    def sample_from_conditional(self, X):
         """
         Calculates self.conditional and also draws a sample.
         Adds input propagation if necessary.
@@ -69,11 +69,16 @@ class Layer(torch.nn.Module):
                         Prior samples from conditional_ND applied to X.
         """
 
+        # Get input shape, S = MC resamples, N = num data, D 0 data dim
         S, N, D = X.shape
+        # Given that no full cov is used, flatten the MC resamples
         X_flat = torch.reshape(X, [S * N, D])
+
+        # Create mean and var predictions from layer
         mean, var, prior_samples = self.conditional_ND(
             X_flat, full_cov=full_cov
         )
+        # Reshape predictions to the original shape
         mean = torch.reshape(mean, [S, N, mean.shape[-1]])
         var = torch.reshape(var, [S, N, var.shape[-1]])
         prior_samples = torch.reshape(
@@ -81,6 +86,7 @@ class Layer(torch.nn.Module):
             [prior_samples.shape[0], S, N, prior_samples.shape[-1]],
         )
 
+        # Use Gaussian re-parameterization trick to create samples.
         z = torch.randn(
             mean.shape,
             generator=self.generator,
@@ -144,9 +150,16 @@ class VIPLayer(Layer):
         output_dim : int
                       The number of independent VIP in this layer.
                       More precisely, q_mu has shape (S, output_dim)
+        add_prior_regularization : bool
+                                   Wether to add the prior regularization term
+                                   to the layer KL.
         log_layer_noise : float or tf.tensor of shape (output_dim)
                           Contains the noise of each VIP contained in this
                           layer, i.e, epsilon ~ N(0, exp(log_layer_noise))
+        q_sqrt_initial_value : float
+                               Initial value for the layer initial q_sqrt.
+        q_mu_initial_value : float
+                             Initial value for the layers initial q_mu.
         mean_function : callable
                         Mean function added to the model. If no mean function
                         is specified, no value is added.
@@ -160,7 +173,6 @@ class VIPLayer(Layer):
             dtype=dtype, input_dim=input_dim, seed=seed, device=device
         )
         self.add_prior_regularization = add_prior_regularization
-
         self.num_coeffs = num_regression_coeffs
 
         # Regression Coefficients prior mean
@@ -222,7 +234,7 @@ class VIPLayer(Layer):
         """Sets the prior parameters of this layer as non trainable."""
         self.generative_function.freeze_parameters()
 
-    def conditional_ND(self, X, full_cov=False):
+    def conditional_ND(self, X):
         """
         Computes Q*(y|x, a) using the linear regression approximation.
         Given that this distribution is Gaussian and Q(a) is also Gaussian
@@ -252,9 +264,7 @@ class VIPLayer(Layer):
         -----------
         X : torch tensor of shape (..., N, D)
             Contains the input locations.
-        full_cov : boolean
-                   Wether to use full covariance matrix or not.
-                   Determines the shape of the variance output.
+
         Returns:
         --------
         mean : torch tensor of shape (..., N, self.output_dim)

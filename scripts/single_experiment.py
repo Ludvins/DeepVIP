@@ -15,7 +15,7 @@ from utils.dataset import Test_Dataset, Training_Dataset
 from utils.metrics import Metrics
 from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit, fit_with_metrics, score
-
+from scripts.utils import create_file_name
 args = manage_experiment_configuration()
 
 torch.manual_seed(2147483647)
@@ -130,25 +130,9 @@ ax2.vlines(np.argmin(df[["NLL"]].to_numpy()), np.min(df[["NLL"]].to_numpy()) - 0
 ax2.vlines(np.argmin(df_val[["NLL"]].to_numpy()), np.min(df[["NLL"]].to_numpy()) - 0.1, np.min(df_val[["NLL"]].to_numpy()) + 0.1, color = "black")
 ax2.legend()
 ax2.set_title("NLL evolution")
-filename = "dataset={}_vip_layers={}_epochs={}_dropout={}_lr={}_genf={}_n_coeffs={}_alpha={}_prior_kl={}_zero_mean_prior={}_prior_fixed_noise={}_split={}{}".format(
-    args.dataset_name,
-    "-".join(str(i) for i in args.vip_layers),
-    str(args.epochs),
-    str(args.dropout),
-    args.lr,
-    "BNN_bnn-structure=" + "-".join(str(i) for i in args.bnn_structure)
-    if args.genf == "BNN"
-    else "BNN-GP_inner-dim=" + str(args.bnn_inner_dim),
-    str(args.regression_coeffs),
-    str(args.bb_alpha),
-    "True" if args.prior_kl else "False",
-    "True" if args.zero_mean_prior else "False",
-    "True" if args.fix_prior_noise else "False",
-    str(args.split),
-    args.name_flag,
-)
 
-plt.savefig("plots/" + filename + ".png")
+
+plt.savefig("plots/" + create_file_name(args) + ".png")
 # open file for writing
 f = open("plots/" + filename + ".txt", "w")
 
