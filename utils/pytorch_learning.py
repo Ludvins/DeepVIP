@@ -83,6 +83,7 @@ def score(model, generator, device=None):
 
 def predict(model, generator, device=None):
 
+    model.eval()
     with torch.no_grad():
         # Generate variables and operar)
         means, vars = [], []

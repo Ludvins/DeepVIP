@@ -33,7 +33,7 @@ vars(args)["device"] = device
 train_indexes, test_indexes = train_test_split(
     np.arange(len(args.dataset)),
     test_size=0.1,
-    random_state=2147483647,
+    random_state=2147483647 + args.split,
 )
 
 train_dataset = Training_Dataset(
@@ -56,7 +56,7 @@ test_dataset = Test_Dataset(
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
-test_loader = DataLoader(test_dataset, batch_size=len(test_dataset))
+test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 # Get VIP layers
 layers = init_layers(
@@ -71,6 +71,7 @@ dvip = DVIP_Base(
     ll,
     layers,
     len(train_dataset),
+    bb_alpha = args.bb_alpha,
     num_samples=args.num_samples_train,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
@@ -84,8 +85,6 @@ dvip.print_variables()
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
 
-# Set the number of training samples to generate
-dvip.num_samples = args.num_samples_train
 # Train the model
 fit(
     dvip,
@@ -95,9 +94,6 @@ fit(
     epochs=args.epochs,
     device=args.device,
 )
-
-# Set the number of test samples to generate
-dvip.num_samples = args.num_samples_test
 
 dvip.print_variables()
 
@@ -125,7 +121,9 @@ test_prediction_mean, test_prediction_var = get_predictive_results(
 )
 
 dvip.num_samples = args.num_samples_train
+dvip.train()
 train_prior_samples = predict_prior_samples(dvip, train_test_loader)
+dvip.eval()
 test_prior_samples = predict_prior_samples(dvip, test_loader)
 
 # Create plot title and path

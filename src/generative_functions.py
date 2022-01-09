@@ -333,13 +333,6 @@ class BayesLinear(GenerativeFunction):
         w_Sigma = torch.flatten(torch.square(torch.exp(self.weight_log_sigma)))
         b_Sigma = torch.flatten(torch.square(torch.exp(self.bias_log_sigma)))
 
-        return (
-            torch.sum(w_m ** 2)
-            + torch.sum(b_m ** 2)
-            + torch.sum(self.weight_log_sigma ** 2)
-            + torch.sum(self.bias_log_sigma ** 2)
-        )
-
         # Compute the KL divergence of w
         KL = -w_m.size(dim=0)
         KL += torch.sum(w_Sigma)
@@ -418,7 +411,7 @@ class BayesianNN(GenerativeFunction):
         for _in, _out in zip(dims, dims[1:]):
             w_mean = torch.normal(
                 mean=0.0,
-                std=1.00,
+                std=0.1,
                 size=(_in, _out),
                 generator=self.generator,
             )
@@ -426,7 +419,7 @@ class BayesianNN(GenerativeFunction):
                 torch.abs(
                     torch.normal(
                         mean=0.0,
-                        std=1.0,
+                        std=1.1,
                         size=(_in, _out),
                         generator=self.generator,
                     ).to(device)
@@ -434,7 +427,7 @@ class BayesianNN(GenerativeFunction):
             )
             b_mean = torch.normal(
                 mean=0.0,
-                std=1.0,
+                std=0.1,
                 size=[_out],
                 generator=self.generator,
             )
@@ -442,7 +435,7 @@ class BayesianNN(GenerativeFunction):
                 torch.abs(
                     torch.normal(
                         mean=0.0,
-                        std=1.0,
+                        std=1.1,
                         size=[_out],
                         generator=self.generator,
                     ).to(device)
@@ -477,12 +470,10 @@ class BayesianNN(GenerativeFunction):
             inputs.unsqueeze(0),
             (num_samples, *np.ones(inputs.ndim, dtype=int)),
         )
-        if self.dropout > 0.0:
-            x = torch.nn.Dropout(self.dropout / 2)(x)
 
         for layer in self.layers[:-1]:
             x = self.activation(layer(x))
-            if self.dropout > 0.0:
+            if self.dropout > 0.0 and self.training:
                 x = torch.nn.Dropout(self.dropout)(x)
 
         return self.layers[-1](x)
@@ -500,6 +491,8 @@ class BNN_GP(GenerativeFunction):
         input_dim=1,
         output_dim=1,
         inner_layer_dim=10,
+        log_kernel_amp = 0.,
+        log_kernel_length = 0.,
         dropout=0.0,
         seed=2147483647,
         fix_random_noise=False,
@@ -520,74 +513,17 @@ class BNN_GP(GenerativeFunction):
         self.gaussian_sampler = GaussianSampler(seed, device)
         self.uniform_sampler = UniformSampler(seed=seed, device=device)
         self.dropout = dropout
-        w_m_1 = torch.normal(
-            mean=0.0,
-            std=1.00,
-            size=(self.input_dim, self.inner_layer_dim),
-            generator=self.generator,
-        )
-        w_log_std_1 = torch.log(
-            torch.abs(
-                torch.normal(
-                    mean=0.0,
-                    std=1.00,
-                    size=(self.input_dim, self.inner_layer_dim),
-                    generator=self.generator,
-                )
-            )
-        )
-        w_m_2 = torch.normal(
-            mean=0.0,
-            std=1.00,
-            size=(self.inner_layer_dim, self.output_dim),
-            generator=self.generator,
-        )
-        w_log_std_2 = torch.log(
-            torch.abs(
-                torch.normal(
-                    mean=0.0,
-                    std=1.00,
-                    size=(self.inner_layer_dim, self.output_dim),
-                    generator=self.generator,
-                )
-            )
-        )
-        b_m_2 = torch.normal(
-            mean=0.0,
-            std=1.00,
-            size=[self.output_dim],
-            generator=self.generator,
-        )
-        b_log_std_2 = torch.log(
-            torch.abs(
-                torch.normal(
-                    mean=0.0,
-                    std=1.00,
-                    size=[self.output_dim],
-                    generator=self.generator,
-                )
-            )
-        )
 
-        self.w_m = torch.nn.Parameter(w_m_1)
-        self.w_log_std = torch.nn.Parameter(w_log_std_1)
 
-        self.b_low = torch.nn.Parameter(torch.tensor(0.0))
-        self.b_high = torch.nn.Parameter(torch.tensor(2 * np.pi))
-
-        self.w_m_2 = torch.nn.Parameter(w_m_2)
-        self.w_log_std_2 = torch.nn.Parameter(w_log_std_2)
-        self.b_m_2 = torch.nn.Parameter(b_m_2)
-        self.b_log_std_2 = torch.nn.Parameter(b_log_std_2)
+        self.log_kernel_amp = torch.nn.Parameter(torch.tensor(log_kernel_amp, dtype = self.dtype))
+        self.log_kernel_length = torch.nn.Parameter(torch.tensor(log_kernel_length, dtype = self.dtype))
 
     def forward(self, inputs, num_samples):
         x = torch.tile(
             inputs.unsqueeze(0),
             (num_samples, *np.ones(inputs.ndim, dtype=int)),
         )
-        if self.dropout > 0.0:
-            x = torch.nn.Dropout(0.1)(x)
-
+        
         if self.fix_random_noise:
             self.gaussian_sampler.reset_seed()
             self.uniform_sampler.reset_seed()
@@ -595,65 +531,26 @@ class BNN_GP(GenerativeFunction):
         z = self.gaussian_sampler(
             (num_samples, self.input_dim, self.inner_layer_dim)
         )
-        b = (self.b_high - self.b_low) * self.uniform_sampler(
+        b = 2*np.pi * self.uniform_sampler(
             (num_samples, 1, self.inner_layer_dim)
-        ) + self.b_low
-
-        w = self.w_m + z * torch.exp(self.w_log_std)
-        x = torch.sqrt(torch.tensor(2 / self.inner_layer_dim)) * torch.cos(
-            x @ w + b
         )
-        if self.dropout > 0.0:
+
+        w = z / torch.exp(self.log_kernel_length)
+        scale_factor = torch.sqrt(2 * torch.exp(self.log_kernel_amp) / self.inner_layer_dim)
+        x =  scale_factor * torch.cos(x @ w + b)
+        
+        #from sklearn.gaussian_process.kernels import RBF
+        #kernel = RBF(1.)
+        #a = inputs.detach().numpy()
+        #print( (np.linalg.norm(kernel(a) - (x[0] @ x[0].T).detach().numpy()))/np.linalg.norm(kernel(a)) )
+        #input()
+        
+        if self.dropout > 0.0 and self.training:
             x = torch.nn.Dropout(self.dropout)(x)
 
-        z_w = self.gaussian_sampler(
+        w = self.gaussian_sampler(
             (num_samples, self.inner_layer_dim, self.output_dim)
         )
-        z_b = self.gaussian_sampler((num_samples, 1, self.output_dim))
-        w = self.w_m_2 + z_w * torch.exp(self.w_log_std_2)
-        b = self.b_m_2 + z_b * torch.exp(self.b_log_std_2)
 
-        return x @ w + b
+        return x @ w 
 
-    def KL(self):
-        """
-        Computes the KL divergence of w and b to their prior distribution,
-        a standard Gaussian N(0, I).
-
-        Returns
-        -------
-        KL : int
-             The addition of the 2 KL terms computed
-        """
-        # Compute w's flattened mean and covariance diagonal matrix
-        w_m = torch.flatten(self.w_m_2)
-        w_m_2 = torch.flatten(self.w_m_2)
-        b_m_2 = torch.flatten(self.w_m_2)
-
-        w_Sigma = torch.flatten(torch.square(torch.exp(self.w_log_std)))
-        w_Sigma_2 = torch.flatten(torch.square(torch.exp(self.w_log_std_2)))
-        b_Sigma_2 = torch.flatten(torch.square(torch.exp(self.b_log_std_2)))
-
-        # Compute the KL divergence of w
-        KL = -w_m.size(dim=0)
-        KL += torch.sum(w_Sigma)
-        KL += torch.sum(w_m ** 2)
-        KL -= 2 * torch.sum(self.w_log_std)
-        # Compute the KL divergence of b
-        KL -= w_m_2.size(dim=0)
-        KL += torch.sum(w_Sigma_2)
-        KL += torch.sum(w_m_2 ** 2)
-        KL -= 2 * torch.sum(self.w_log_std_2)
-
-        KL -= b_m_2.size(dim=0)
-        KL += torch.sum(b_Sigma_2)
-        KL += torch.sum(b_m_2 ** 2)
-        KL -= 2 * torch.sum(self.b_log_std_2)
-
-        KL = KL / 2
-
-        KL += torch.log(self.b_high - self.b_low)
-        minimum = torch.minimum(self.b_high, torch.tensor(2 * np.pi))
-        maximum = torch.maximum(self.b_low, torch.tensor(0))
-        KL -= 1 / (2 * np.pi) * np.log(2 * np.pi) * (minimum - maximum)
-        return KL

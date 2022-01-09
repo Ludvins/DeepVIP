@@ -23,11 +23,12 @@ torch.manual_seed(2147483647)
 # CUDA for PyTorch
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda:0" if use_cuda else "cpu")
+device = "cpu"
 torch.backends.cudnn.benchmark = True
 vars(args)["device"] = device
 
 train_indexes, test_indexes = train_test_split(
-    np.arange(len(args.dataset)), test_size=0.1, random_state=2147483647
+    np.arange(len(args.dataset)), test_size=0.1, random_state=2147483647 + args.split
 )
 
 train_dataset = Training_Dataset(
@@ -56,6 +57,7 @@ dvip = DVIP_Base(
     ll,
     layers,
     len(train_dataset),
+    bb_alpha = args.bb_alpha,
     num_samples=args.num_samples_train,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
@@ -68,7 +70,7 @@ dvip.print_variables()
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
-# opt = SAM(dvip.parameters(), torch.optim.Adam, lr = args.lr)
+
 
 # Perform training
 train_hist, val_hist = fit_with_metrics(
@@ -116,14 +118,19 @@ ax4.set_title("Loss evolution in last half of epochs")
 
 
 ax1.plot(df[["RMSE"]].to_numpy(), label="Training RMSE")
+ax1.vlines(np.argmin(df[["RMSE"]].to_numpy()), np.min(df[["RMSE"]].to_numpy()) - 0.1, np.min(df[["RMSE"]].to_numpy()) + 0.1, color = "black")
 ax1.plot(df_val[["RMSE"]].to_numpy(), label="Validation RMSE")
+ax1.vlines(np.argmin(df_val[["RMSE"]].to_numpy()), np.min(df_val[["RMSE"]].to_numpy()) - 0.1, np.min(df_val[["RMSE"]].to_numpy()) + 0.1, color = "black")
 ax1.legend()
-ax1.set_title("RMSE evolution")
+
+ax2.set_title("RMSE evolution")
 ax2.plot(df[["NLL"]].to_numpy(), label="Training NLL")
 ax2.plot(df_val[["NLL"]].to_numpy(), label="Validation NLL")
+ax2.vlines(np.argmin(df[["NLL"]].to_numpy()), np.min(df[["NLL"]].to_numpy()) - 0.1, np.min(df[["NLL"]].to_numpy()) + 0.1, color = "black")
+ax2.vlines(np.argmin(df_val[["NLL"]].to_numpy()), np.min(df[["NLL"]].to_numpy()) - 0.1, np.min(df_val[["NLL"]].to_numpy()) + 0.1, color = "black")
 ax2.legend()
 ax2.set_title("NLL evolution")
-filename = "dataset={}_vip_layers={}_epochs={}_dropout={}_lr={}_genf={}_n_coeffs={}_prior_kl={}_zero_mean_prior={}_prior_fixed_noise={}_split={}{}".format(
+filename = "dataset={}_vip_layers={}_epochs={}_dropout={}_lr={}_genf={}_n_coeffs={}_alpha={}_prior_kl={}_zero_mean_prior={}_prior_fixed_noise={}_split={}{}".format(
     args.dataset_name,
     "-".join(str(i) for i in args.vip_layers),
     str(args.epochs),
@@ -133,6 +140,7 @@ filename = "dataset={}_vip_layers={}_epochs={}_dropout={}_lr={}_genf={}_n_coeffs
     if args.genf == "BNN"
     else "BNN-GP_inner-dim=" + str(args.bnn_inner_dim),
     str(args.regression_coeffs),
+    str(args.bb_alpha),
     "True" if args.prior_kl else "False",
     "True" if args.zero_mean_prior else "False",
     "True" if args.fix_prior_noise else "False",
@@ -150,4 +158,5 @@ f.write(str(test_metrics))
 # close file
 f.close()
 
-# plt.show()
+if args.show:   
+    plt.show()

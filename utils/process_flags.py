@@ -108,6 +108,11 @@ def get_parser():
         help="Variational implicit layers structure",
     )
     parser.add_argument(
+        "--bb_alpha",
+        type=float,
+        default=0,
+    )
+    parser.add_argument(
         "--final_layer_mu",
         type=float,
         default=0,

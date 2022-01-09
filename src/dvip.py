@@ -11,6 +11,7 @@ class DVIP_Base(torch.nn.Module):
         layers,
         num_data,
         num_samples=1,
+        bb_alpha = 0,
         y_mean=0.0,
         y_std=1.0,
         device=None,
@@ -55,6 +56,7 @@ class DVIP_Base(torch.nn.Module):
         super().__init__()
         # Store data information
         self.num_data = num_data
+        self.bb_alpha = bb_alpha
         self.y_mean = torch.tensor(y_mean, device=device)
         self.y_std = torch.tensor(y_std, device=device)
 
@@ -333,18 +335,45 @@ class DVIP_Base(torch.nn.Module):
         )  # Shape [S, N, D]
         return torch.mean(var_exp, dim=0)  # Shape [N, D]
 
-    def log_expected_data_likelihood(self, X, Y, alpha=0.5):
+    def bb_alpha_energy(self, X, Y, alpha=0.5):
         """
         Calculate the log expectation of the data likelihood under the variational distribution
          with MC samples
         """
-        F_mean, F_var = self.predict_f(X, num_samples=5, full_cov=False)
+        if alpha == 0:
+            return self.expected_data_log_likelihood(X, Y)
+        
+        F_mean, F_var = self.predict_f(X, 
+                                       num_samples=self.num_samples, 
+                                       full_cov=False)
+        n_mixtures = F_mean.shape[0]
+        MC_samples = 100
+        if MC_samples < n_mixtures:
+            MC_samples = n_mixtures
+        
+        # Set random generator
+        generator = torch.Generator(self.device)
+        generator.manual_seed(2147483647)
+        
+        # Given that all distributions in the predictive mixture are equally
+        # probable, generate the same number of samples of each one.
+        z = torch.randn(
+            [MC_samples // n_mixtures, *F_mean.shape],
+            generator=generator,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        samples = F_mean + z * torch.sqrt(F_var)
+        # Flatten the mixture dimension
+        samples = samples.reshape([MC_samples, *samples.shape[-2:]])
+        # Compute log pdf of the targets 
+        log_pdf = self.likelihood.logp(samples, Y)
 
-        S = F_mean.shape[0]
+        # Compute alpha energy
+        log_expected = torch.logsumexp(alpha * log_pdf, 0) \
+            - torch.tensor(MC_samples, dtype = self.dtype)
 
-        logpdf = self.likelihood.predict_density(F_mean, F_var, Y)
-        pdf = torch.mean(torch.exp(logpdf) ** alpha, 0)
-        return torch.log(pdf) / alpha
+        return log_expected / alpha
 
     def nelbo(self, X, y):
         """
@@ -358,10 +387,9 @@ class DVIP_Base(torch.nn.Module):
             Targets of the given input, must be standardized.
 
         """
-        likelihood = torch.sum(self.expected_data_log_likelihood(X, y))
-        # likelihood = torch.sum(
-        #     self.log_expected_data_likelihood(X, y, alpha=0.5)
-        # )
+        likelihood = torch.sum(self.bb_alpha_energy(X, 
+                                                    y, 
+                                                    alpha = self.bb_alpha))
 
         # scale loss term corresponding to minibatch size
         scale = self.num_data

@@ -72,7 +72,7 @@ class Gaussian(Likelihood):
 
     def variational_expectations(self, Fmu, Fvar, Y):
         return (
-            -0.5 * np.log(2 * np.pi)
-            - 0.5 * self.log_variance
-            - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
-        )
+                -0.5 * np.log(2 * np.pi)
+                - 0.5 * self.log_variance
+                - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
+            )
