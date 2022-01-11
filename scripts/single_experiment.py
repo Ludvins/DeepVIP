@@ -15,7 +15,7 @@ from utils.dataset import Test_Dataset, Training_Dataset
 from utils.metrics import Metrics
 from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit, fit_with_metrics, score
-from scripts.utils import create_file_name
+from scripts.filename import create_file_name
 args = manage_experiment_configuration()
 
 torch.manual_seed(2147483647)
@@ -134,7 +134,7 @@ ax2.set_title("NLL evolution")
 
 plt.savefig("plots/" + create_file_name(args) + ".png")
 # open file for writing
-f = open("plots/" + filename + ".txt", "w")
+f = open("plots/" + create_file_name(args) + ".txt", "w")
 
 # write file
 f.write(str(test_metrics))

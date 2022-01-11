@@ -17,7 +17,7 @@ from utils.dataset import Test_Dataset, Training_Dataset
 from utils.metrics import Metrics
 from utils.process_flags import get_parser, manage_experiment_configuration
 from utils.pytorch_learning import fit, score
-from scripts.utils import create_file_name
+from scripts.filename import create_file_name
 
 args = manage_experiment_configuration()
 
