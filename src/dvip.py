@@ -91,10 +91,10 @@ class DVIP_Base(torch.nn.Module):
 
     def train_step(self, optimizer, X, y):
         """
-        Defines the training step for the DVIP model. Using a simple optimizer.
+        Defines the training step for the DVIP model using a simple optimizer.
         This method illustrates a standard training step. If more complex
-        operations are needed, such as optimizers with double steps.
-        Create your own training step, calling this one is not compulsory.
+        operations are needed, such as optimizers with double steps,
+        create your own training step, calling this one is not compulsory.
 
         Parameters
         ----------
@@ -213,7 +213,8 @@ class DVIP_Base(torch.nn.Module):
                       Number of MonteCarlo resamples to use
         full_cov : boolean
                    Whether to use the full covariance matrix or just
-                   the diagonal values.
+                   the diagonal values. Full covariances is not
+                   supported by now.
 
         Returns
         -------
@@ -289,6 +290,11 @@ class DVIP_Base(torch.nn.Module):
                      Contains the input features.
         num_samples : int
                       Number of MonteCarlo resamples to use
+        full_cov : boolean
+                   Whether to use the full covariance matrix or just
+                   the diagonal values.
+
+
         Returns
         -------
         Fmeans : torch tensor of shape (num_layers, batch_size, output_dim)
@@ -406,7 +412,11 @@ class DVIP_Base(torch.nn.Module):
 
     def nelbo(self, X, y):
         """
-        Computes the evidence lower bound.
+        Computes the objective minimization function. When alpha is 0
+        this function equals the variational evidence lower bound.
+        Othewise, Black-Box alpha inference is used, estimating the
+        objective with MonteCarlo samples from the predictive mixture
+        distribution.
 
         Parameters
         ----------

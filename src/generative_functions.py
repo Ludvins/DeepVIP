@@ -413,38 +413,20 @@ class BayesianNN(GenerativeFunction):
         dims = [input_dim] + structure + [output_dim]
         layers = []
 
+        gaussian_sampler = GaussianSampler(seed, device)
+
         # Loop over the input and output dimension of each sub-layer.
         for _in, _out in zip(dims, dims[1:]):
-            w_mean = torch.normal(
-                mean=0.0,
-                std=0.1,
-                size=(_in, _out),
-                generator=self.generator,
-            )
+            w_mean = gaussian_sampler((_in, _out))
             w_log_std = torch.log(
                 torch.abs(
-                    torch.normal(
-                        mean=0.0,
-                        std=1.1,
-                        size=(_in, _out),
-                        generator=self.generator,
-                    ).to(device)
+                    gaussian_sampler((_in, _out))
                 )
             )
-            b_mean = torch.normal(
-                mean=0.0,
-                std=0.1,
-                size=[_out],
-                generator=self.generator,
-            )
+            b_mean = gaussian_sampler([_out])
             b_log_std = torch.log(
                 torch.abs(
-                    torch.normal(
-                        mean=0.0,
-                        std=1.1,
-                        size=[_out],
-                        generator=self.generator,
-                    ).to(device)
+                  gaussian_sampler([_out])
                 )
             )
 
@@ -505,6 +487,56 @@ class BNN_GP(GenerativeFunction):
         device=None,
         dtype=torch.float64,
     ):
+        """ Generates samples from a Bayesian Neural Network that
+        approximates a GP with 0 mean and RBF kernel. More precisely,
+        the RBF kernel is approximated by
+
+        RBF(x1, x2) = E_w,b [(cos wx_1 + b)cos(wx_2 + b)]
+
+        where w ~ N(0, 1) and b ~ U(0, 2pi). This implies that
+
+        phi(x) = cos(wx + b)
+
+        can be used as kernel function to aproximate the kernel
+
+        RBF(x1, x2) ~ phi(x1) phi(x2)
+
+        Samples from the process can be generated using the
+        reparameterization trick, samples = phi * N(0, 1).
+
+        Using this information, a network with two layers is used,
+        the inner one computes phi and the last one the samples.
+
+        Source: Random Features for Large-Scale Kernel Machines
+                by Ali Rahimi and Ben Recht
+        https://people.eecs.berkeley.edu/~brecht/papers/07.rah.rec.nips.pdf
+
+        Parameters
+        ----------
+
+        input_dim : int
+                    Dimensionality of the input data.
+        output_dim : int
+                     Dimensionality of the output targets.
+        inner_layer_dim : int
+                          Dimensionality of the hidden layer, i.e,
+                          number of samples of w and b to aproximate
+                          the expectation.
+        kernel_amp : float
+                     Amplitude of the RBF kernel that is being
+                     approximated.
+        kernel_length : float
+                        Length of the RBF kernel that is being
+                        approximated.
+        seed : int
+               Random number seed.
+        fix_random_noise : Wether to fix the generated noise to be
+                           the same on each call.
+        device : torch device
+                 Device in which computations are made.
+        dtype : data dtype
+                Data type to use (precision).
+        """
         super().__init__(
             input_dim,
             output_dim,
@@ -514,11 +546,14 @@ class BNN_GP(GenerativeFunction):
             dtype=dtype,
         )
 
+        # Initialize variables and noise generators
         self.inner_layer_dim = inner_layer_dim
         self.generator = torch.Generator()
         self.gaussian_sampler = GaussianSampler(seed, device)
         self.uniform_sampler = UniformSampler(seed=seed, device=device)
 
+        # Initialize parameters, logarithms are used in order to avoid
+        #  constraining to positive values.
         self.log_kernel_amp = torch.nn.Parameter(torch.log(torch.tensor(kernel_amp, dtype = self.dtype)))
         self.log_kernel_length = torch.nn.Parameter(torch.log(torch.tensor(kernel_length, dtype = self.dtype)))
         
@@ -529,7 +564,8 @@ class BNN_GP(GenerativeFunction):
             self.gaussian_sampler.reset_seed()
             self.uniform_sampler.reset_seed()
 
-        # Sample noise values
+        # Sample noise values from Gaussian and uniform in order to
+        # approximate the kernel
         z = self.gaussian_sampler(
             (self.input_dim, self.inner_layer_dim)
         )
@@ -537,13 +573,15 @@ class BNN_GP(GenerativeFunction):
             (1, self.inner_layer_dim)
         )
 
-        # Compute kernel approximation
+        # Compute kernel function, start by scaling the Gaussian noise by the kernel length
         w = z / torch.exp(self.log_kernel_length)
+        # Compute the normalizing factor
         scale_factor = torch.sqrt(2 * torch.exp(self.log_kernel_amp) / self.inner_layer_dim)
-        # Shape [S, inner_dim]
+        # Compute phi, shape [S, inner_dim]
         phi =  scale_factor * torch.cos(inputs @ w + b)
 
-        
+        # Once the kernel is approximated, generate the desired number
+        # of samples from the appriximate GP.
         w = self.gaussian_sampler(
             (num_samples, self.inner_layer_dim, self.output_dim)
         )

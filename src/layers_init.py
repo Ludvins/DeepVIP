@@ -21,7 +21,7 @@ class LinearProjection:
         """
         Applies the linear transformation to the given input.
         """
-        return torch.einsum("...a, ab -> ...b", inputs, self.P)
+        return inputs @ self.P
 
 
 def init_layers(
@@ -76,28 +76,68 @@ def init_layers(
                  to 10, another from 10 to 3, and lastly from
                  3 to output_dim.
     genf : string
-           Indicates the generation function to use, can be, BNN or GP.
+           Indicates the generation function to use.
     regression_coeffs : integer
                         Number of regression coefficients to use.
     bnn_structure : list of integers
                     Specifies the hidden dimensions of the Bayesian
                     Neural Networks in each VIP.
+    bnn_inner_dims : int
+                     Number of inner dimensions for the BNN-GP model.
+                     Number of samples to approximate the RBF kernel.
     activation : callable
                  Non-linear function to apply at each inner
                  dimension of the Bayesian Network.
-    dtype : data-type
-                The dtype of the layer's computations and weights.
-    device : torch.device
-                 The device in which the computations are made.
     seed : int
-               integer to use as seed for randomness.
+           Random numbers seed.
+    dtype : data-type
+            The dtype of the layer's computations and weights.
+    device : torch.device
+             The device in which the computations are made.
+    fix_prior_noise : Boolean
+                      Wether to fix the random noise of the prior
+                      samples, that is, to generate the same prior
+                      samples in all the optimization steps.
+    final_layer_mu : float
+                     Initial value for the parameter representing
+                     the mean of the linear coefficients of the
+                     last layer.
+    final_layer_sqrt : float
+                       Initial value for the parameter representing
+                       the std of the linear coefficients of the
+                       last layer.
+    final_layer_noise : float
+                        Initial value for the parameter representing
+                        noise of the final layer.
+    inner_layer_mu : float
+                     Initial value for the parameter representing
+                     the mean of the linear coefficients of the
+                     inner layers.
+    inner_layer_sqrt : float
+                       Initial value for the parameter representing
+                       the std of the linear coefficients of the
+                       inner layers.
+    inner_layer_noise : float
+                        Initial value for the parameter representing
+                        noise of the inner layers.
+    dropout : float between 0 and 1
+              Determines the amount of dropout to use after each
+              activation layer of the BNN model.
+    prior_kl : boolean
+               Wether to regularize the prior parameters using its
+               KL.
+    zero_mean_prior : boolean
+                      Wether to restraint the prior to have zero mean.
     """
 
-    # Create VIP layers. If integer, replicate input dimension
+    # Create VIP layers. If integer, replicate input dimension. For example,
+    # for a data of shape (N, D), vip_layers = 4 would generate layers with
+    # dimensions D-D-D-output_dim
     if len(vip_layers) == 1:
         vip_layers = [X.shape[1]] * (vip_layers[0] - 1)
         dims = [X.shape[1]] + vip_layers + [output_dim]
-    # Otherwise, append thedata dimensions to the array.
+    # If not an integer, an array is accepted where the last position must
+    # be the output dimension.
     else:
         if vip_layers[-1] != output_dim:
             raise RuntimeError(
