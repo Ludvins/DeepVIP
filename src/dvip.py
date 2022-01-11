@@ -238,9 +238,8 @@ class DVIP_Base(torch.nn.Module):
         # The first input values are the original ones
         F = sX
         for layer in self.vip_layers:
-            F, Fmean, Fvar, Fprior = layer.sample_from_conditional(
-                F, full_cov=full_cov
-            )
+            F, Fmean, Fvar, Fprior = layer.sample_from_conditional(F)
+
             Fs.append(F)
             Fmeans.append(Fmean)
             Fvars.append(Fvar)
@@ -427,7 +426,7 @@ class DVIP_Base(torch.nn.Module):
         scale /= X.shape[0]
         # Compute KL term
         KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
-        return -scale * likelihood + KL
+        return -scale * bb_alpha + KL
 
     def freeze_posterior(self):
         """Sets the posterior parameters of every layer as non-trainable."""

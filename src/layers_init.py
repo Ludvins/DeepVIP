@@ -159,7 +159,6 @@ def init_layers(
                 input_dim=dim_in,
                 output_dim=dim_out,
                 inner_layer_dim=bnn_inner_dim,
-                dropout=dropout,
                 fix_random_noise=fix_prior_noise,
                 device=device,
                 seed=seed,

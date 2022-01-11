@@ -241,7 +241,7 @@ class BayesLinear(GenerativeFunction):
 
         # Check prior values fit the given dimensionality
         if (
-            (w_mean.shape != (input_ºdim, output_dim))
+            (w_mean.shape != (input_dim, output_dim))
             or (w_log_std.shape != (input_dim, output_dim))
             or (b_mean.size(0) != output_dim)
             or (b_log_std.size(0) != output_dim)
@@ -498,9 +498,8 @@ class BNN_GP(GenerativeFunction):
         input_dim=1,
         output_dim=1,
         inner_layer_dim=10,
-        log_kernel_amp = 0.,
-        log_kernel_length = 0.,
-        dropout=0.0,
+        kernel_amp = 1.,
+        kernel_length = 1.,
         seed=2147483647,
         fix_random_noise=False,
         device=None,
@@ -519,45 +518,35 @@ class BNN_GP(GenerativeFunction):
         self.generator = torch.Generator()
         self.gaussian_sampler = GaussianSampler(seed, device)
         self.uniform_sampler = UniformSampler(seed=seed, device=device)
-        self.dropout = dropout
 
-
-        self.log_kernel_amp = torch.nn.Parameter(torch.tensor(log_kernel_amp, dtype = self.dtype))
-        self.log_kernel_length = torch.nn.Parameter(torch.tensor(log_kernel_length, dtype = self.dtype))
-
-    def forward(self, inputs, num_samples):
-        x = torch.tile(
-            inputs.unsqueeze(0),
-            (num_samples, *np.ones(inputs.ndim, dtype=int)),
-        )
+        self.log_kernel_amp = torch.nn.Parameter(torch.log(torch.tensor(kernel_amp, dtype = self.dtype)))
+        self.log_kernel_length = torch.nn.Parameter(torch.log(torch.tensor(kernel_length, dtype = self.dtype)))
         
+    def forward(self, inputs, num_samples):
+        
+        # Fix noise samples, i.e, fix prior samples
         if self.fix_random_noise:
             self.gaussian_sampler.reset_seed()
             self.uniform_sampler.reset_seed()
 
+        # Sample noise values
         z = self.gaussian_sampler(
-            (num_samples, self.input_dim, self.inner_layer_dim)
+            (self.input_dim, self.inner_layer_dim)
         )
         b = 2*np.pi * self.uniform_sampler(
-            (num_samples, 1, self.inner_layer_dim)
+            (1, self.inner_layer_dim)
         )
 
+        # Compute kernel approximation
         w = z / torch.exp(self.log_kernel_length)
         scale_factor = torch.sqrt(2 * torch.exp(self.log_kernel_amp) / self.inner_layer_dim)
-        x =  scale_factor * torch.cos(x @ w + b)
-        
-        #from sklearn.gaussian_process.kernels import RBF
-        #kernel = RBF(1.)
-        #a = inputs.detach().numpy()
-        #print( (np.linalg.norm(kernel(a) - (x[0] @ x[0].T).detach().numpy()))/np.linalg.norm(kernel(a)) )
-        #input()
-        
-        if self.dropout > 0.0 and self.training:
-            x = torch.nn.Dropout(self.dropout)(x)
+        # Shape [S, inner_dim]
+        phi =  scale_factor * torch.cos(inputs @ w + b)
 
+        
         w = self.gaussian_sampler(
             (num_samples, self.inner_layer_dim, self.output_dim)
         )
-
-        return x @ w 
+        
+        return phi @ w
 

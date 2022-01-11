@@ -135,7 +135,7 @@ def get_parser():
     parser.add_argument(
         "--inner_layers_sqrt",
         type=float,
-        default=1,
+        default=1e-5,
     )
     parser.add_argument(
         "--inner_layers_noise",

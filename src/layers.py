@@ -75,9 +75,7 @@ class Layer(torch.nn.Module):
         X_flat = torch.reshape(X, [S * N, D])
 
         # Create mean and var predictions from layer
-        mean, var, prior_samples = self.conditional_ND(
-            X_flat, full_cov=full_cov
-        )
+        mean, var, prior_samples = self.conditional_ND(X_flat)
         # Reshape predictions to the original shape
         mean = torch.reshape(mean, [S, N, mean.shape[-1]])
         var = torch.reshape(var, [S, N, var.shape[-1]])
@@ -93,7 +91,7 @@ class Layer(torch.nn.Module):
             dtype=self.dtype,
             device=self.device,
         )
-        samples = reparameterize(mean, var, z, full_cov=full_cov)
+        samples = reparameterize(mean, var, z)
         return samples, mean, var, prior_samples
 
 
@@ -306,14 +304,9 @@ class VIPLayer(Layer):
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
         K = torch.einsum("snd,skd->knd", phi, Delta)
 
-        if full_cov:
-            # var shape (num_points, num_points, output_dim)
-            # Multiply by phi again distinguishing data_points
-            K = torch.einsum("snd,smd->nmd", K, phi)
-        else:
-            # var shape (num_points, output_dim)
-            # Multiply by phi again, using the same points twice
-            K = torch.einsum("snd,snd->nd", K, phi)
+        # var shape (num_points, output_dim)
+        # Multiply by phi again, using the same points twice
+        K = torch.einsum("snd,snd->nd", K, phi)
 
         # Add layer noise to variance
         var = K + torch.exp(self.log_layer_noise)
