@@ -23,9 +23,7 @@ def build_plot_name(
     dims_name = "-".join(map(str, vip_layers))
     model_name = genf
     if genf == "BNN":
-        model_name += (
-            " " + "-".join(map(str, bnn_structure)) + " " + activation_str
-        )
+        model_name += " " + "-".join(map(str, bnn_structure)) + " " + activation_str
 
     path = "plots/{}_{}_layers={}_bnn={}_epochs={}_batchsize={}".format(
         dataset_name, name_flag, dims_name, model_name, epochs, batch_size
@@ -62,9 +60,7 @@ def plot_train_test(
     results and one with the test results.
     """
 
-    _, ax = plt.subplots(
-        2, 2, gridspec_kw={"height_ratios": [3, 1]}, figsize=(20, 10)
-    )
+    _, ax = plt.subplots(2, 2, gridspec_kw={"height_ratios": [3, 1]}, figsize=(20, 10))
 
     plt.suptitle(title)
 
@@ -193,18 +189,14 @@ def plot_prediction(
     return ax
 
 
-def plot_standard_deviation(
-    X, std, color=None, alpha=1.0, label=None, ax=None
-):
+def plot_standard_deviation(X, std, color=None, alpha=1.0, label=None, ax=None):
     if ax is None:
         fig, ax = plt.subplots()
 
     sort = np.argsort(X)
     X = X[sort]
     std = std[sort]
-    ax.fill_between(
-        X, np.zeros_like(std), std, color=color, label=label, alpha=alpha
-    )
+    ax.fill_between(X, np.zeros_like(std), std, color=color, label=label, alpha=alpha)
 
     return ax
 
@@ -221,9 +213,7 @@ def plot_prior_over_layers(X, prior_samples, n=2):
         _, ax = plt.subplots(n, n_layers // n, figsize=(5, 15))
 
         for i in range(n_layers):
-            plot_prior_samples(
-                X.flatten(), prior_samples[i], ax[i // n][i % n]
-            )
+            plot_prior_samples(X.flatten(), prior_samples[i], ax[i // n][i % n])
 
             ax[i // n][i % n].set_title("Layer {}".format(i + 1))
     plt.suptitle("Prior Samples")

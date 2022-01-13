@@ -140,9 +140,7 @@ def init_layers(
     # be the output dimension.
     else:
         if vip_layers[-1] != output_dim:
-            raise RuntimeError(
-                "Last vip layer does not correspond with data label"
-            )
+            raise RuntimeError("Last vip layer does not correspond with data label")
         dims = [X.shape[1]] + vip_layers
 
     # Initialize layers array

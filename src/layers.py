@@ -167,9 +167,7 @@ class VIPLayer(Layer):
         seed : int
                integer to use as seed for randomness.
         """
-        super().__init__(
-            dtype=dtype, input_dim=input_dim, seed=seed, device=device
-        )
+        super().__init__(dtype=dtype, input_dim=input_dim, seed=seed, device=device)
         self.add_prior_regularization = add_prior_regularization
         self.num_coeffs = num_regression_coeffs
 
@@ -185,9 +183,7 @@ class VIPLayer(Layer):
         self.mean_function = mean_function
 
         # Verticality of the layer
-        self.output_dim = torch.tensor(
-            output_dim, dtype=torch.int32, device=device
-        )
+        self.output_dim = torch.tensor(output_dim, dtype=torch.int32, device=device)
 
         # Initialize generative function
         self.generative_function = generative_function
@@ -281,9 +277,7 @@ class VIPLayer(Layer):
         m = torch.mean(f, dim=0, keepdims=True)
 
         # Compute regresion function, shape (S, ... , N, D)
-        phi = (f - m) / torch.sqrt(
-            torch.tensor(self.num_coeffs - 1).type(self.dtype)
-        )
+        phi = (f - m) / torch.sqrt(torch.tensor(self.num_coeffs - 1).type(self.dtype))
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, ... , N, D)

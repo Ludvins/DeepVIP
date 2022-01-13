@@ -59,9 +59,7 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 # Get VIP layers
-layers = init_layers(
-    train_dataset.inputs, train_dataset.output_dim, **vars(args)
-)
+layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args))
 
 
 # Instantiate Likelihood
@@ -71,7 +69,7 @@ dvip = DVIP_Base(
     ll,
     layers,
     len(train_dataset),
-    bb_alpha = args.bb_alpha,
+    bb_alpha=args.bb_alpha,
     num_samples=args.num_samples_train,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
@@ -116,9 +114,7 @@ train_prediction_mean, train_prediction_var = get_predictive_results(
 # Change MC samples for test
 dvip.num_samples = args.num_samples_test
 test_mean, test_var = predict(dvip, test_loader, device=args.device)
-test_prediction_mean, test_prediction_var = get_predictive_results(
-    test_mean, test_var
-)
+test_prediction_mean, test_prediction_var = get_predictive_results(test_mean, test_var)
 
 dvip.num_samples = args.num_samples_train
 dvip.train()

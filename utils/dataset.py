@@ -148,9 +148,7 @@ class Protein_Dataset(DVIPDataset):
 
 class Kin8nm_Dataset(DVIPDataset):
     def __init__(self):
-        url = (
-            "https://www.openml.org/data/get_csv/3626/dataset_2175_kin8nm.arff"
-        )
+        url = "https://www.openml.org/data/get_csv/3626/dataset_2175_kin8nm.arff"
         data = pd.read_csv(url, dtype=float).values
         self.split_data(data)
 

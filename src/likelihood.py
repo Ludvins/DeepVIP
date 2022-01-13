@@ -49,13 +49,11 @@ class Gaussian(Likelihood):
         """
         super().__init__(dtype, device)
         # initialize parameter
-        self.log_variance = torch.tensor(
-            log_variance, dtype=dtype, device=self.device
-        )
+        self.log_variance = torch.tensor(log_variance, dtype=dtype, device=self.device)
         self.log_variance = torch.nn.Parameter(self.log_variance)
 
     def logdensity(self, x, mu, var):
-        """ Computes the log density of a one dimensional
+        """Computes the log density of a one dimensional
         Gaussian distribution of mean mu and variance var, evaluated
         on x
         """
@@ -81,7 +79,7 @@ class Gaussian(Likelihood):
         Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f). As both distributions
         are Gaussian this can be computed in closed form."""
         return (
-                -0.5 * np.log(2 * np.pi)
-                - 0.5 * self.log_variance
-                - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
-            )
+            -0.5 * np.log(2 * np.pi)
+            - 0.5 * self.log_variance
+            - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
+        )

@@ -56,9 +56,7 @@ test_dataset = Test_Dataset(
 )
 
 # Get VIP layers
-layers = init_layers(
-    train_dataset.inputs, train_dataset.output_dim, **vars(args)
-)
+layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args))
 
 # Initialize DataLoader
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
@@ -72,8 +70,8 @@ ll = Gaussian()
 dvip = DVIP_Base(
     ll,
     layers,
-    len(train_dataset),    
-    bb_alpha = args.bb_alpha,
+    len(train_dataset),
+    bb_alpha=args.bb_alpha,
     num_samples=args.num_samples_train,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,

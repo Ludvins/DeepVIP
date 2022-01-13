@@ -16,6 +16,7 @@ from utils.metrics import Metrics
 from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit, fit_with_metrics, score
 from scripts.filename import create_file_name
+
 args = manage_experiment_configuration()
 
 torch.manual_seed(2147483647)
@@ -42,9 +43,7 @@ test_dataset = Test_Dataset(
 )
 
 # Get VIP layers
-layers = init_layers(
-    train_dataset.inputs, train_dataset.output_dim, **vars(args)
-)
+layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args))
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
 val_loader = DataLoader(test_dataset, batch_size=args.batch_size)
@@ -57,7 +56,7 @@ dvip = DVIP_Base(
     ll,
     layers,
     len(train_dataset),
-    bb_alpha = args.bb_alpha,
+    bb_alpha=args.bb_alpha,
     num_samples=args.num_samples_train,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
@@ -118,16 +117,36 @@ ax4.set_title("Loss evolution in last half of epochs")
 
 
 ax1.plot(df[["RMSE"]].to_numpy(), label="Training RMSE")
-ax1.vlines(np.argmin(df[["RMSE"]].to_numpy()), np.min(df[["RMSE"]].to_numpy()) - 0.1, np.min(df[["RMSE"]].to_numpy()) + 0.1, color = "black")
+ax1.vlines(
+    np.argmin(df[["RMSE"]].to_numpy()),
+    np.min(df[["RMSE"]].to_numpy()) - 0.1,
+    np.min(df[["RMSE"]].to_numpy()) + 0.1,
+    color="black",
+)
 ax1.plot(df_val[["RMSE"]].to_numpy(), label="Validation RMSE")
-ax1.vlines(np.argmin(df_val[["RMSE"]].to_numpy()), np.min(df_val[["RMSE"]].to_numpy()) - 0.1, np.min(df_val[["RMSE"]].to_numpy()) + 0.1, color = "black")
+ax1.vlines(
+    np.argmin(df_val[["RMSE"]].to_numpy()),
+    np.min(df_val[["RMSE"]].to_numpy()) - 0.1,
+    np.min(df_val[["RMSE"]].to_numpy()) + 0.1,
+    color="black",
+)
 ax1.legend()
 
 ax2.set_title("RMSE evolution")
 ax2.plot(df[["NLL"]].to_numpy(), label="Training NLL")
 ax2.plot(df_val[["NLL"]].to_numpy(), label="Validation NLL")
-ax2.vlines(np.argmin(df[["NLL"]].to_numpy()), np.min(df[["NLL"]].to_numpy()) - 0.1, np.min(df[["NLL"]].to_numpy()) + 0.1, color = "black")
-ax2.vlines(np.argmin(df_val[["NLL"]].to_numpy()), np.min(df[["NLL"]].to_numpy()) - 0.1, np.min(df_val[["NLL"]].to_numpy()) + 0.1, color = "black")
+ax2.vlines(
+    np.argmin(df[["NLL"]].to_numpy()),
+    np.min(df[["NLL"]].to_numpy()) - 0.1,
+    np.min(df[["NLL"]].to_numpy()) + 0.1,
+    color="black",
+)
+ax2.vlines(
+    np.argmin(df_val[["NLL"]].to_numpy()),
+    np.min(df[["NLL"]].to_numpy()) - 0.1,
+    np.min(df_val[["NLL"]].to_numpy()) + 0.1,
+    color="black",
+)
 ax2.legend()
 ax2.set_title("NLL evolution")
 
@@ -142,5 +161,5 @@ f.write(str(test_metrics))
 # close file
 f.close()
 
-if args.show:   
+if args.show:
     plt.show()

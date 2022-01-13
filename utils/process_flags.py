@@ -69,8 +69,7 @@ def get_parser():
         "--num_samples_train",
         type=int,
         default=1,
-        help="Number of Monte Carlo samples of the posterior to "
-        "use during training",
+        help="Number of Monte Carlo samples of the posterior to " "use during training",
     )
     parser.add_argument(
         "--num_samples_test",
@@ -199,9 +198,7 @@ def get_parser():
     )
     parser.set_defaults(zero_mean_prior=False)
 
-    parser.add_argument(
-        "--freeze_prior", dest="freeze_prior", action="store_true"
-    )
+    parser.add_argument("--freeze_prior", dest="freeze_prior", action="store_true")
     parser.set_defaults(freeze_prior=False)
     parser.add_argument(
         "--freeze_posterior", dest="freeze_posterior", action="store_true"

@@ -11,7 +11,7 @@ class DVIP_Base(torch.nn.Module):
         layers,
         num_data,
         num_samples=1,
-        bb_alpha = 0,
+        bb_alpha=0,
         y_mean=0.0,
         y_std=1.0,
         device=None,
@@ -194,9 +194,7 @@ class DVIP_Base(torch.nn.Module):
         and the predicted mean and standard deviation.
         """
 
-        mean, var = self.predict_y(
-            predict_at, self.num_samples, full_cov=full_cov
-        )
+        mean, var = self.predict_y(predict_at, self.num_samples, full_cov=full_cov)
         # Return predictions scaled to the original scale.
         return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
 
@@ -350,13 +348,9 @@ class DVIP_Base(torch.nn.Module):
 
         """
         # Compute model predictions, shape [S, N, D]
-        F_mean, F_var = self.predict_f(
-            X, num_samples=self.num_samples, full_cov=False
-        )
+        F_mean, F_var = self.predict_f(X, num_samples=self.num_samples, full_cov=False)
         # Compute variational expectation. Shape [S, N, D]
-        var_exp = self.likelihood.variational_expectations(
-            F_mean, F_var, Y
-        )
+        var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
         # As the mixture in the predictive distribution gives
         # equal probability to each mixture, averaging is
         # perfirmed using a mean.
@@ -376,20 +370,18 @@ class DVIP_Base(torch.nn.Module):
             return self.expected_data_log_likelihood(X, Y)
 
         # Compute predictive mixtures.
-        F_mean, F_var = self.predict_f(X, 
-                                       num_samples=self.num_samples, 
-                                       full_cov=False)
+        F_mean, F_var = self.predict_f(X, num_samples=self.num_samples, full_cov=False)
         # Create MonteCarlo samples equally distributed between
         # the mixture components.
         n_mixtures = F_mean.shape[0]
         MC_samples = 100
         if MC_samples < n_mixtures:
             MC_samples = n_mixtures
-        
+
         # Set random generator
         generator = torch.Generator(self.device)
         generator.manual_seed(2147483647)
-        
+
         # Given that all distributions in the predictive mixture are equally
         # probable, generate the same number of samples of each one.
         z = torch.randn(
@@ -405,8 +397,9 @@ class DVIP_Base(torch.nn.Module):
         log_pdf = self.likelihood.logp(samples, Y)
 
         # Compute alpha energy
-        log_expected = torch.logsumexp(alpha * log_pdf, 0) \
-            - torch.tensor(MC_samples, dtype = self.dtype)
+        log_expected = torch.logsumexp(alpha * log_pdf, 0) - torch.tensor(
+            MC_samples, dtype=self.dtype
+        )
 
         return log_expected / alpha
 
@@ -427,7 +420,7 @@ class DVIP_Base(torch.nn.Module):
 
         """
         # Compute loss
-        bb_alpha = self.bb_alpha_energy(X, y, alpha = self.bb_alpha)
+        bb_alpha = self.bb_alpha_energy(X, y, alpha=self.bb_alpha)
         # Agregate on data dimension
         bb_alpha = torch.sum(bb_alpha)
 
@@ -470,9 +463,7 @@ class DVIP_Base(torch.nn.Module):
             padding = "\t" * (len(name) - 1)
             print(
                 padding,
-                "{}: {}".format(
-                    name[-1], param.data.detach().cpu().numpy().flatten()
-                ),
+                "{}: {}".format(name[-1], param.data.detach().cpu().numpy().flatten()),
             )
 
         print("\n---------------------------\n\n")

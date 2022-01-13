@@ -23,7 +23,7 @@ class Metrics:
         self.reset()
 
     def reset(self):
-        """ Ressets all the metrics to zero. """
+        """Ressets all the metrics to zero."""
         self.loss = torch.tensor(0.0, device=self.device)
         self.mse = torch.tensor(0.0, device=self.device)
         self.nll = torch.tensor(0.0, device=self.device)
