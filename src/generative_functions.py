@@ -1,6 +1,7 @@
 import numpy as np
 import torch
-from noise_samplers import GaussianSampler, UniformSampler
+from .noise_samplers import GaussianSampler, UniformSampler
+
 
 class GenerativeFunction(torch.nn.Module):
     def __init__(
@@ -113,7 +114,7 @@ class BayesLinear(GenerativeFunction):
 
         self.zero_mean_prior = zero_mean_prior
         # Instantiate Standard Gaussian sampler
-        self.gaussian_sampler = GaussianSampler(seed, device)
+        self.gaussian_sampler = GaussianSampler(seed)
 
         # Check prior values fit the given dimensionality
         if (
@@ -440,9 +441,8 @@ class BNN_GP(GenerativeFunction):
 
         # Initialize variables and noise generators
         self.inner_layer_dim = inner_layer_dim
-        self.generator = torch.Generator()
-        self.gaussian_sampler = GaussianSampler(seed, device)
-        self.uniform_sampler = UniformSampler(seed=seed, device=device)
+        self.gaussian_sampler = GaussianSampler(seed)
+        self.uniform_sampler = UniformSampler(seed)
 
         # Initialize parameters, logarithms are used in order to avoid
         #  constraining to positive values.
@@ -454,7 +454,7 @@ class BNN_GP(GenerativeFunction):
         )
 
     def forward(self, inputs, num_samples):
-        """ Computes aproximated samples of a Gaussian process prior
+        """Computes aproximated samples of a Gaussian process prior
         with kernel RBF and mean 0.
 
         Parameters
@@ -474,7 +474,6 @@ class BNN_GP(GenerativeFunction):
                   All the samples from the apprixmated GP prior.
         """
 
-
         # Fix noise samples, i.e, fix prior samples
         if self.fix_random_noise:
             self.gaussian_sampler.reset_seed()
@@ -485,14 +484,14 @@ class BNN_GP(GenerativeFunction):
         z = self.gaussian_sampler((self.input_dim, self.inner_layer_dim))
         b = 2 * np.pi * self.uniform_sampler((1, self.inner_layer_dim))
 
-        # Compute kernel function, start by scaling the Gaussian noise by the kernel length
-        w = z / torch.exp(self.log_kernel_length)
+        # Compute kernel function, start by scaling the inputs by the kernel length
+        x = inputs / torch.exp(self.log_kernel_length)
         # Compute the normalizing factor
         scale_factor = torch.sqrt(
-            2 * torch.exp(self.log_kernel_amp) / self.inner_layer_dim
+            2.0 * torch.exp(self.log_kernel_amp) / self.inner_layer_dim
         )
-        # Compute phi, shape [S, inner_dim]
-        phi = scale_factor * torch.cos(inputs @ w + b)
+        # Compute phi, shape [N, inner_dim]
+        phi = scale_factor * torch.cos(x @ z + b)
 
         # Once the kernel is approximated, generate the desired number
         # of samples from the appriximate GP.

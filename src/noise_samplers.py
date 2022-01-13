@@ -1,7 +1,9 @@
+import torch
+import numpy as np
 
 
 class NoiseSampler:
-    def __init__(self, seed, dtype=torch.float64):
+    def __init__(self, seed):
         """
         Generates noise samples.
 
@@ -13,7 +15,14 @@ class NoiseSampler:
                 The dtype of the layer's computations and weights.
         """
         self.seed = seed
-        self.dtype = dtype
+        self.rng = np.random.default_rng(self.seed)
+
+    def reset_seed(self):
+        """
+        Sets the random seed so that the same random samples can be
+        generated if desired.
+        """
+        self.rng = np.random.default_rng(self.seed)
 
     def call(self):
         """
@@ -23,31 +32,6 @@ class NoiseSampler:
 
 
 class GaussianSampler(NoiseSampler):
-    def __init__(self, seed=2147483647, device="cpu", dtype=torch.float64):
-        """
-        Generates noise samples from a Standar Gaussian distribution N(0, 1).
-
-        Parameters:
-        -----------
-        seed : int
-               Integer value used to generate reproducible results.
-        device : torch.device
-                 The device in which the computations are made.
-        dtype : data-type
-                The dtype of the layer's computations and weights.
-        """
-        super().__init__(seed, dtype)
-        self.device = device
-        self.generator = torch.Generator(device)
-        self.generator.manual_seed(seed)
-
-    def reset_seed(self):
-        """
-        Sets the random seed so that the same random samples can be
-        generated if desired.
-        """
-        self.generator.manual_seed(self.seed)
-
     def __call__(self, size):
         """
         Returns sampled noise values os the given size or shape.
@@ -64,40 +48,10 @@ class GaussianSampler(NoiseSampler):
 
         """
 
-        return torch.randn(
-            size=size,
-            generator=self.generator,
-            dtype=self.dtype,
-            device=self.device,
-        )
+        return torch.tensor(self.rng.standard_normal(size=size))
 
 
 class UniformSampler(NoiseSampler):
-    def __init__(self, seed=2147483647, device="cpu", dtype=torch.float64):
-        """
-        Generates noise samples from a continuous uniform distribution U[0,1].
-
-        Parameters:
-        -----------
-        seed : int
-               Integer value used to generate reproducible results.
-        device : torch.device
-                 The device in which the computations are made.
-        dtype : data-type
-                The dtype of the layer's computations and weights.
-        """
-        super().__init__(seed, dtype)
-        self.device = device
-        self.generator = torch.Generator(device)
-        self.generator.manual_seed(seed)
-
-    def reset_seed(self):
-        """
-        Sets the random seed so that the same random samples can be
-        generated if desired.
-        """
-        self.generator.manual_seed(self.seed)
-
     def __call__(self, size):
         """
         Returns sampled noise values os the given size or shape.
@@ -113,9 +67,4 @@ class UniformSampler(NoiseSampler):
                   A sample from a Uniform distribution U(0, 1).
         """
 
-        return torch.rand(
-            size=size,
-            generator=self.generator,
-            dtype=self.dtype,
-            device=self.device,
-        )
+        return torch.tensor(self.rng.uniform(size=size))
