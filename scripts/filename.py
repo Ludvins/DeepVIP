@@ -11,6 +11,7 @@ def create_file_name(args):
         if args.genf == "BNN"
         else "BNN-GP_inner-dim=" + str(args.bnn_inner_dim) + "_"
     )
+    filename += "regression_coeffs=" + str(args.regression_coeffs) + "_"
     filename += "alpha=" + str(args.bb_alpha) + "_"
     filename += "prior_kl_" if args.prior_kl else ""
     filename += "zero_mean_prior_" if args.zero_mean_prior else ""

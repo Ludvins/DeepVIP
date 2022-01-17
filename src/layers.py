@@ -32,15 +32,9 @@ class Layer(torch.nn.Module):
         self.generator.manual_seed(seed)
 
     def conditional_ND(self):
-        """
-        Computes the conditional probability Q*(y | x, theta).
-        """
         raise NotImplementedError
 
     def KL(self):
-        """
-        The KL divergence from the variational distribution to the prior.
-        """
         raise NotImplementedError
 
     def sample_from_conditional(self, X):
@@ -256,31 +250,31 @@ class VIPLayer(Layer):
 
         Parameters:
         -----------
-        X : torch tensor of shape (..., N, D)
+        X : torch tensor of shape (N, D)
             Contains the input locations.
 
         Returns:
         --------
-        mean : torch tensor of shape (..., N, self.output_dim)
+        mean : torch tensor of shape (N, self.output_dim)
                Mean values from conditional_ND applied to X.
-        var : torch tensor of shape (..., N , self.output_dim)
+        var : torch tensor of shape (N , self.output_dim)
               Variance values from conditional_ND applied to X.
-        prior_samples : torch tensor of shape (self.num_coeffs, ...,
+        prior_samples : torch tensor of shape (self.num_coeffs,
                         N, self.output_dim)
                         Prior samples from conditional_ND applied to X.
         """
 
         # Let S = num_coeffs, D = output_dim and N = num_samples
-        # Shape (S, ... , N, D)
+        # Shape (S, N, D)
         f = self.generative_function(X, self.num_coeffs)
-        # Compute mean value, shape (1, ... , N, D)
+        # Compute mean value, shape (1 , N, D)
         m = torch.mean(f, dim=0, keepdims=True)
 
-        # Compute regresion function, shape (S, ... , N, D)
+        # Compute regresion function, shape (S , N, D)
         phi = (f - m) / torch.sqrt(torch.tensor(self.num_coeffs - 1).type(self.dtype))
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
-        # phi has shape (S, ... , N, D)
+        # phi has shape (S, N, D)
         mean = m.squeeze(axis=0) + torch.einsum("snd,sd->nd", phi, self.q_mu)
 
         # Shape (S, S, D)
@@ -291,14 +285,14 @@ class VIPLayer(Layer):
         )
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
+
+        # Compute covariance matrix of regression coefficients
         # Shape (S, S, D)
         Delta = torch.einsum("ijd, kjd -> ikd", q_sqrt, q_sqrt)
 
-        # Compute variance matrix in two steps
+        # Compute variance in two steps
         # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
         K = torch.einsum("snd,skd->knd", phi, Delta)
-
-        # var shape (num_points, output_dim)
         # Multiply by phi again, using the same points twice
         K = torch.einsum("snd,snd->nd", K, phi)
 

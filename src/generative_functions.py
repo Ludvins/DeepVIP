@@ -453,6 +453,11 @@ class BNN_GP(GenerativeFunction):
             torch.log(torch.tensor(kernel_length, dtype=self.dtype))
         )
 
+        # Sample noise values from Gaussian and uniform in order to
+        # approximate the kernel
+        self.z = self.gaussian_sampler((self.input_dim, self.inner_layer_dim))
+        self.b = 2 * np.pi * self.uniform_sampler((1, self.inner_layer_dim))
+
     def forward(self, inputs, num_samples):
         """Computes aproximated samples of a Gaussian process prior
         with kernel RBF and mean 0.
@@ -474,16 +479,6 @@ class BNN_GP(GenerativeFunction):
                   All the samples from the apprixmated GP prior.
         """
 
-        # Fix noise samples, i.e, fix prior samples
-        if self.fix_random_noise:
-            self.gaussian_sampler.reset_seed()
-            self.uniform_sampler.reset_seed()
-
-        # Sample noise values from Gaussian and uniform in order to
-        # approximate the kernel
-        z = self.gaussian_sampler((self.input_dim, self.inner_layer_dim))
-        b = 2 * np.pi * self.uniform_sampler((1, self.inner_layer_dim))
-
         # Compute kernel function, start by scaling the inputs by the kernel length
         x = inputs / torch.exp(self.log_kernel_length)
         # Compute the normalizing factor
@@ -491,7 +486,11 @@ class BNN_GP(GenerativeFunction):
             2.0 * torch.exp(self.log_kernel_amp) / self.inner_layer_dim
         )
         # Compute phi, shape [N, inner_dim]
-        phi = scale_factor * torch.cos(x @ z + b)
+        phi = scale_factor * torch.cos(x @ self.z + self.b)
+
+        # Fix noise samples, i.e, fix prior samples
+        if self.fix_random_noise:
+            self.gaussian_sampler.reset_seed()
 
         # Once the kernel is approximated, generate the desired number
         # of samples from the appriximate GP.
