@@ -192,7 +192,7 @@ class VIPLayer(Layer):
                 )
             )
         else:
-            self.log_layer_noise = torch.tensor(0)
+            self.log_layer_noise = log_layer_noise
 
         # Define Regression coefficients deviation using tiled triangular
         # identity matrix
@@ -297,13 +297,13 @@ class VIPLayer(Layer):
         K = torch.einsum("snd,snd->nd", K, phi)
 
         # Add layer noise to variance
-        var = K + torch.exp(self.log_layer_noise)
+        if self.log_layer_noise is not None:
+            K = K + torch.exp(self.log_layer_noise)
 
         # Add mean function
         if self.mean_function is not None:
             mean = mean + self.mean_function(X)
-
-        return mean, var, f
+        return mean, K, f
 
     def KL(self):
         """

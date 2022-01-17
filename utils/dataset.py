@@ -23,8 +23,7 @@ class Training_Dataset(Dataset):
         self.inputs_std = np.std(self.inputs, axis=0, keepdims=True)
         self.inputs_mean = np.mean(self.inputs, axis=0, keepdims=True)
 
-        self.inputs_std[self.inputs_std == 0] = 1
-        self.inputs = (self.inputs - self.inputs_mean) / self.inputs_std
+        self.inputs = (self.inputs - self.inputs_mean) / (self.inputs_std + 1e-6)
         if verbose:
             print("Number of samples: ", self.n_samples)
             print("Input dimension: ", self.input_dim)

@@ -289,7 +289,7 @@ class BayesianNN(GenerativeFunction):
         dims = [input_dim] + structure + [output_dim]
         layers = []
 
-        gaussian_sampler = GaussianSampler(seed, device)
+        gaussian_sampler = GaussianSampler(seed)
 
         # Loop over the input and output dimension of each sub-layer.
         for _in, _out in zip(dims, dims[1:]):
@@ -488,6 +488,8 @@ class BNN_GP(GenerativeFunction):
         # Compute phi, shape [N, inner_dim]
         phi = scale_factor * torch.cos(x @ self.z + self.b)
 
+        # print(phi @ phi.T)
+        # input()
         # Fix noise samples, i.e, fix prior samples
         if self.fix_random_noise:
             self.gaussian_sampler.reset_seed()

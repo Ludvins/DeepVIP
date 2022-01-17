@@ -111,7 +111,7 @@ def predict(model, generator, device=None):
     # Speed-up predictions telling torch not to compute gradients.
     with torch.no_grad():
         # Create containers
-        means, vars = [], []
+        means, sqrts = [], []
 
         # Look over batches of data.
         for idx, data in enumerate(generator):
@@ -124,14 +124,14 @@ def predict(model, generator, device=None):
             batch_means, batch_vars = model(batch_x.to(device))
             # Apped to the arrays
             means.append(batch_means.detach().cpu().numpy())
-            vars.append(batch_vars.detach().cpu().numpy())
+            sqrts.append(batch_vars.detach().cpu().numpy())
 
         # Concatenate batches on second dimension, the first
         # corresponds to the mixture.
         means = np.concatenate(means, axis=1)
-        vars = np.concatenate(vars, axis=1)
+        sqrts = np.concatenate(sqrts, axis=1)
 
-    return means, vars
+    return means, sqrts
 
 
 def fit_with_metrics(
