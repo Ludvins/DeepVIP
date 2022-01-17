@@ -1,21 +1,28 @@
 def create_file_name(args):
     filename = ""
 
-    filename += "dataset=" + args.dataset_name + "_"
-    filename += "vip_layers=" + "-".join(str(i) for i in args.vip_layers) + "_"
-    filename += "epochs=" + str(args.epochs) + "_"
-    filename += "dropout=" + str(args.dropout) + "_"
-    filename += "lr=" + str(args.lr) + "_"
-    filename += (
-        "genf=" + "BNN_bnn-structure=" + "-".join(str(i) for i in args.bnn_structure)
-        if args.genf == "BNN"
-        else "BNN-GP_inner-dim=" + str(args.bnn_inner_dim) + "_"
-    )
-    filename += "regression_coeffs=" + str(args.regression_coeffs) + "_"
-    filename += "alpha=" + str(args.bb_alpha) + "_"
-    filename += "prior_kl_" if args.prior_kl else ""
-    filename += "zero_mean_prior_" if args.zero_mean_prior else ""
-    filename += "prior_fixed_noise_" if args.fix_prior_noise else ""
-    filename += "split=" + str(args.split)
+    filename += "dataset=" + args.dataset_name
+    filename += "_vip_layers=" + "-".join(str(i) for i in args.vip_layers)
+    filename += "_epochs=" + str(args.epochs)
+    filename += "_dropout=" + str(args.dropout)
+    filename += "_lr=" + str(args.lr)
+
+    if args.genf == "BNN":
+        dims = "-".join(str(i) for i in args.bnn_structure)
+        filename += "_genf=BNN_bnn-structure=" + dims
+    else:
+        filename += "_genf=BNN-GP_inner-dim=" + str(args.bnn_inner_dim)
+
+    filename += "_regression_coeffs=" + str(args.regression_coeffs)
+    filename += "_alpha=" + str(args.bb_alpha)
+
+    if args.prior_kl:
+        filename += "_prior_kl"
+    if args.zero_mean_prior:
+        filename += "_zero_mean_prior"
+    if args.fix_prior_noise:
+        filename += "_prior_fixed_noise"
+
+    filename += "_split=" + str(args.split)
 
     return filename
