@@ -1,3 +1,4 @@
+from re import M
 import numpy as np
 import torch
 
@@ -266,7 +267,7 @@ class VIPLayer(Layer):
 
         # Let S = num_coeffs, D = output_dim and N = num_samples
         # Shape (S, N, D)
-        f = self.generative_function(X, self.num_coeffs)
+        f = self.generative_function(X)
         # Compute mean value, shape (1 , N, D)
         m = torch.mean(f, dim=0, keepdims=True)
 
@@ -304,7 +305,8 @@ class VIPLayer(Layer):
         if self.mean_function is not None:
             mean = mean + self.mean_function(X)
         return mean, K, f
-
+    
+    
     def KL(self):
         """
         Computes the KL divergence from the variational distribution of

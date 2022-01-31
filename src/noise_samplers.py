@@ -24,10 +24,7 @@ class NoiseSampler:
         """
         self.rng = np.random.default_rng(self.seed)
 
-    def call(self):
-        """
-        Returns sampled noise values.
-        """
+    def __call__(self):
         raise NotImplementedError
 
 

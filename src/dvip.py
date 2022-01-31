@@ -420,7 +420,7 @@ class DVIP_Base(torch.nn.Module):
 
         """
         # Compute loss
-        bb_alpha = self.bb_alpha_energy(X, y, alpha=self.bb_alpha)
+        bb_alpha = self.expected_data_log_likelihood(X, y)
         # Agregate on data dimension
         bb_alpha = torch.sum(bb_alpha)
 

@@ -49,7 +49,7 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
 val_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 # Instantiate Likelihood
-ll = Gaussian()
+ll = Gaussian(device = args.device, trainable = not args.freeze_ll)
 
 # Create DVIP object
 dvip = DVIP_Base(

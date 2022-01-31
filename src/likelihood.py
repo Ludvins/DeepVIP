@@ -34,7 +34,7 @@ class Likelihood(torch.nn.Module):
 
 
 class Gaussian(Likelihood):
-    def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None):
+    def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None, trainable = False):
         """Gaussian Likelihood. Encapsulates the likelihood noise
         as a parameter.
         Arguments
@@ -50,7 +50,8 @@ class Gaussian(Likelihood):
         super().__init__(dtype, device)
         # initialize parameter
         self.log_variance = torch.tensor(log_variance, dtype=dtype, device=self.device)
-        self.log_variance = torch.nn.Parameter(self.log_variance)
+        if trainable:
+            self.log_variance = torch.nn.Parameter(self.log_variance)
 
     def logdensity(self, x, mu, var):
         """Computes the log density of a one dimensional

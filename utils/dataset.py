@@ -20,10 +20,10 @@ class Training_Dataset(Dataset):
         self.output_dim = targets.shape[1]
 
         # Normalize inputs
-        self.inputs_std = np.std(self.inputs, axis=0, keepdims=True)
+        self.inputs_std = np.std(self.inputs, axis=0, keepdims=True) + 1e-6
         self.inputs_mean = np.mean(self.inputs, axis=0, keepdims=True)
-
-        self.inputs = (self.inputs - self.inputs_mean) / (self.inputs_std + 1e-6)
+        
+        self.inputs = (self.inputs - self.inputs_mean) / self.inputs_std
         if verbose:
             print("Number of samples: ", self.n_samples)
             print("Input dimension: ", self.input_dim)
@@ -44,7 +44,8 @@ class Test_Dataset(Dataset):
         self.targets = targets
         self.n_samples = inputs.shape[0]
         self.input_dim = inputs.shape[1]
-        self.output_dim = targets.shape[1]
+        if self.targets is not None:
+            self.output_dim = targets.shape[1]
 
     def __getitem__(self, index):
         if self.targets is None:
@@ -76,6 +77,21 @@ class DVIPDataset(Dataset):
 
     def __len__(self):
         return len(self.inputs)
+    
+class SPGP_Dataset(DVIPDataset):
+    def __init__(self):
+        rng = np.random.default_rng(seed=0)
+
+        def f(x):
+            return np.cos(5 * x) / (np.abs(x) + 1)
+
+        #inputs = rng.standard_normal(300)
+        inputs = np.loadtxt("data/SPGP_dist/train_inputs")
+        targets = np.loadtxt("data/SPGP_dist/train_outputs")
+
+        self.inputs = inputs[..., np.newaxis]
+        self.targets = targets[..., np.newaxis]
+
 
 
 class Synthetic_Dataset(DVIPDataset):
@@ -85,7 +101,8 @@ class Synthetic_Dataset(DVIPDataset):
         def f(x):
             return np.cos(5 * x) / (np.abs(x) + 1)
 
-        inputs = rng.standard_normal(300)
+        #inputs = rng.standard_normal(300)
+        inputs = np.linspace(-1., 1., 300)
         targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.1
 
         self.inputs = inputs[..., np.newaxis]
@@ -116,24 +133,30 @@ class Concrete_Dataset(DVIPDataset):
 
 class Naval_Dataset(DVIPDataset):
     def __init__(self):
-        url = "{}{}".format(uci_base, "00316/UCI%20CBM%20Dataset.zip")
-        with urlopen(url) as zipresp:
-            with ZipFile(BytesIO(zipresp.read())) as zfile:
-                zfile.extractall("/tmp/")
+        try:
+            data = pd.read_fwf("/tmp/UCI CBM Dataset/data.txt", header=None).values
+        except:
+            url = "{}{}".format(uci_base, "00316/UCI%20CBM%20Dataset.zip")
+            with urlopen(url) as zipresp:
+                with ZipFile(BytesIO(zipresp.read())) as zfile:
+                    zfile.extractall("/tmp/")
 
-        data = pd.read_fwf("/tmp/UCI CBM Dataset/data.txt", header=None).values
+            data = pd.read_fwf("/tmp/UCI CBM Dataset/data.txt", header=None).values
         data = data[:, :-1]
         self.split_data(data)
 
 
 class Power_Dataset(DVIPDataset):
     def __init__(self):
-        url = "{}{}".format(uci_base, "00294/CCPP.zip")
-        with urlopen(url) as zipresp:
-            with ZipFile(BytesIO(zipresp.read())) as zfile:
-                zfile.extractall("/tmp/")
+        try:
+            data = pd.read_excel("/tmp/CCPP//Folds5x2_pp.xlsx").values
+        except:
+            url = "{}{}".format(uci_base, "00294/CCPP.zip")
+            with urlopen(url) as zipresp:
+                with ZipFile(BytesIO(zipresp.read())) as zfile:
+                    zfile.extractall("/tmp/")
 
-        data = pd.read_excel("/tmp/CCPP//Folds5x2_pp.xlsx").values
+            data = pd.read_excel("/tmp/CCPP//Folds5x2_pp.xlsx").values
         self.split_data(data)
 
 
@@ -196,5 +219,7 @@ def get_dataset(dataset_name):
         return WineWhite_Dataset()
     elif dataset_name == "synthetic":
         return Synthetic_Dataset()
+    elif dataset_name == "SPGP":
+        return SPGP_Dataset()
     else:
         raise RuntimeError("No available dataset selected.")

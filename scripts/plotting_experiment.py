@@ -63,7 +63,7 @@ layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args
 
 
 # Instantiate Likelihood
-ll = Gaussian()
+ll = Gaussian(device = args.device, trainable = not args.freeze_ll)
 
 dvip = DVIP_Base(
     ll,
@@ -136,8 +136,8 @@ plot_train_test(
     y_train=train_test_dataset.targets.flatten(),
     X_test=test_dataset.inputs.flatten(),
     y_test=test_dataset.targets.flatten(),
-    train_prior_samples=train_prior_samples[-1],
-    test_prior_samples=test_prior_samples[-1],
+    train_prior_samples=train_prior_samples[-1][:10],
+    test_prior_samples=test_prior_samples[-1][:10],
     title=fig_title,
     path=path,
     show=args.show,

@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from src.generative_functions import BayesianNN, BNN_GP
+from src.generative_functions import GP, BayesianNN, CosFunctions
 from src.layers import VIPLayer
 
 
@@ -181,6 +181,7 @@ def init_layers(
         # Create the Generation function
         if genf == "BNN":
             f = BayesianNN(
+                num_samples=regression_coeffs,
                 input_dim=dim_in,
                 structure=bnn_structure,
                 activation=activation,
@@ -192,11 +193,22 @@ def init_layers(
                 seed=seed,
                 dtype=dtype,
             )
-        elif genf == "BNN-GP":
-            f = BNN_GP(
+        elif genf == "GP":
+            f = GP(
+                num_samples=regression_coeffs,
                 input_dim=dim_in,
                 output_dim=dim_out,
                 inner_layer_dim=bnn_inner_dim,
+                fix_random_noise=fix_prior_noise,
+                device=device,
+                seed=seed,
+                dtype=dtype,
+            )
+        elif genf == "cos":
+            f = CosFunctions(
+                num_samples=regression_coeffs,
+                input_dim=dim_in,
+                output_dim=dim_out,
                 fix_random_noise=fix_prior_noise,
                 device=device,
                 seed=seed,

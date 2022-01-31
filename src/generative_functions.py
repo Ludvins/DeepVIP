@@ -6,6 +6,7 @@ from .noise_samplers import GaussianSampler, UniformSampler
 class GenerativeFunction(torch.nn.Module):
     def __init__(
         self,
+        num_samples,
         input_dim,
         output_dim,
         device=None,
@@ -19,6 +20,8 @@ class GenerativeFunction(torch.nn.Module):
 
         Parameters
         ----------
+        num_samples : int
+                      Number of samples to generate.
         input_dim : int
                     Dimensionality of the input values `x`.
         output_dim : int
@@ -34,6 +37,7 @@ class GenerativeFunction(torch.nn.Module):
                 The dtype of the layer's computations and weights.
         """
         super(GenerativeFunction, self).__init__()
+        self.num_samples = num_samples
         self.output_dim = output_dim
         self.input_dim = input_dim
         self.fix_random_noise = fix_random_noise
@@ -58,6 +62,7 @@ class GenerativeFunction(torch.nn.Module):
 class BayesLinear(GenerativeFunction):
     def __init__(
         self,
+        num_samples,
         input_dim,
         output_dim,
         w_mean,
@@ -77,6 +82,8 @@ class BayesLinear(GenerativeFunction):
 
         Parameters:
         -----------
+        num_samples : int
+                      Number of samples to generate.
         input_dim : int
                     Dimensionality of the input values `x`.
         output_dim : int
@@ -104,6 +111,7 @@ class BayesLinear(GenerativeFunction):
                 The dtype of the layer's computations and weights.
         """
         super(BayesLinear, self).__init__(
+            num_samples,
             input_dim,
             output_dim,
             device=device,
@@ -138,8 +146,28 @@ class BayesLinear(GenerativeFunction):
 
         self.weight_log_sigma = torch.nn.Parameter(w_log_std)
         self.bias_log_sigma = torch.nn.Parameter(b_log_std)
+        
+        # Reset the generator's seed if fixed noise.
+        if self.fix_random_noise:
+            self.noise = self.get_noise(first_call=True)
+            
 
-    def forward(self, inputs, num_samples=None):
+    def get_noise(self, first_call = False):
+        if self.fix_random_noise and not first_call:
+            return self.noise
+        else:
+            self.gaussian_sampler.reset_seed()
+            # Compute the shape of the noise to generate
+            z_w_shape = (self.num_samples, self.input_dim, self.output_dim)
+            z_b_shape = (self.num_samples, 1, self.output_dim)
+
+            # Generate Gaussian values
+            z_w = self.gaussian_sampler(z_w_shape)
+            z_b = self.gaussian_sampler(z_b_shape)
+            
+            return (z_w, z_b)
+            
+    def forward(self, inputs):
         """Forwards the given input through the Bayesian Neural Network.
         Generates as many samples of the stochastic output as indicated.
 
@@ -149,39 +177,14 @@ class BayesLinear(GenerativeFunction):
         inputs : torch tensor of shape (S, N, D)
                  Input tensor where the last two dimensions are batch and
                  data dimensionality.
-
-        num_samples : int
-                      Number of samples to generate from the stochastic
-                      function. If not specified, if inputs has at least
-                      three dimensions, the first one will be used to
-                      store the different samples. Otherwise, only one sample
-                      is generated.
-
         """
 
         # Check the given input is valid
         if inputs.shape[-1] != self.input_dim:
             raise RuntimeError("Input shape does not match stored data dimension")
 
-        if num_samples is None:
-            # The number of samples corresponds to the first dimension
-            if inputs.ndim >= 3:
-                num_samples = inputs.size(0)
-            else:
-                num_samples = 1
-                inputs = inputs.unsqueeze(0)
-
-        # Reset the generator's seed if fixed noise.
-        if self.fix_random_noise:
-            self.gaussian_sampler.reset_seed()
-
-        # Compute the shape of the noise to generate
-        z_w_shape = (num_samples, self.input_dim, self.output_dim)
-        z_b_shape = (num_samples, 1, self.output_dim)
-
         # Generate Gaussian values
-        z_w = self.gaussian_sampler(z_w_shape)
-        z_b = self.gaussian_sampler(z_b_shape)
+        z_w, z_b = self.get_noise()
 
         # Perform reparameterization trick
         w = z_w * torch.exp(self.weight_log_sigma) + self.weight_mu
@@ -231,6 +234,7 @@ class BayesianNN(GenerativeFunction):
         self,
         structure,
         activation,
+        num_samples,
         input_dim=1,
         output_dim=1,
         dropout=0.0,
@@ -271,6 +275,7 @@ class BayesianNN(GenerativeFunction):
 
         """
         super().__init__(
+            num_samples,
             input_dim,
             output_dim,
             device=device,
@@ -302,6 +307,7 @@ class BayesianNN(GenerativeFunction):
             # Append the Bayesian linear layer to the array of layers
             layers.append(
                 BayesLinear(
+                    self.num_samples,
                     _in,
                     _out,
                     w_mean=w_mean.to(device),
@@ -319,7 +325,7 @@ class BayesianNN(GenerativeFunction):
         # training/evaluation modes and parameters.
         self.layers = torch.nn.ModuleList(layers)
 
-    def forward(self, inputs, num_samples):
+    def forward(self, inputs):
         """Forward pass over each inner layer, activation is applied on every
         but the last level.
 
@@ -327,12 +333,6 @@ class BayesianNN(GenerativeFunction):
         ----------
         inputs : torch tensor of shape (N, D)
                  Contains the minibatch of N points with dimensionality D.
-
-        num_samples: int
-                     Number of samples to generate from the BNN.
-                     Equivalently, inputs is propagated through the BNN
-                     as many times as indicated by this variable. All
-                     results are returned.
 
         Returns
         -------
@@ -345,7 +345,7 @@ class BayesianNN(GenerativeFunction):
         #  desired samples.
         x = torch.tile(
             inputs.unsqueeze(0),
-            (num_samples, *np.ones(inputs.ndim, dtype=int)),
+            (self.num_samples, *np.ones(inputs.ndim, dtype=int)),
         )
 
         for layer in self.layers[:-1]:
@@ -367,9 +367,10 @@ class BayesianNN(GenerativeFunction):
         return torch.stack([layer.KL() for layer in self.layers]).sum()
 
 
-class BNN_GP(GenerativeFunction):
+class GP(GenerativeFunction):
     def __init__(
         self,
+        num_samples,
         input_dim=1,
         output_dim=1,
         inner_layer_dim=10,
@@ -431,6 +432,7 @@ class BNN_GP(GenerativeFunction):
                 Data type to use (precision).
         """
         super().__init__(
+            num_samples,
             input_dim,
             output_dim,
             device=device,
@@ -441,6 +443,7 @@ class BNN_GP(GenerativeFunction):
 
         # Initialize variables and noise generators
         self.inner_layer_dim = inner_layer_dim
+        self.inner_layer_dim_inv = 1 / self.inner_layer_dim
         self.gaussian_sampler = GaussianSampler(seed)
         self.uniform_sampler = UniformSampler(seed)
 
@@ -457,8 +460,24 @@ class BNN_GP(GenerativeFunction):
         # approximate the kernel
         self.z = self.gaussian_sampler((self.input_dim, self.inner_layer_dim))
         self.b = 2 * np.pi * self.uniform_sampler((1, self.inner_layer_dim))
+        
+        if self.fix_random_noise:
+            self.noise = self.get_noise(first_call=True)
+            
 
-    def forward(self, inputs, num_samples):
+    def get_noise(self, first_call = False):
+        if self.fix_random_noise and not first_call:
+            return self.noise
+        else:
+            self.gaussian_sampler.reset_seed()
+            # Compute the shape of the noise to generate
+            w = self.gaussian_sampler((self.num_samples, 
+                                       self.inner_layer_dim, 
+                                       self.output_dim))
+            
+            return w
+
+    def forward(self, inputs):
         """Computes aproximated samples of a Gaussian process prior
         with kernel RBF and mean 0.
 
@@ -476,26 +495,116 @@ class BNN_GP(GenerativeFunction):
         Returns
         -------
         samples : torch tensor of shape (num_samples, N, D)
-                  All the samples from the apprixmated GP prior.
+                  All the samples from the approximated GP prior.
         """
 
         # Compute kernel function, start by scaling the inputs by the kernel length
         x = inputs / torch.exp(self.log_kernel_length)
         # Compute the normalizing factor
         scale_factor = torch.sqrt(
-            2.0 * torch.exp(self.log_kernel_amp) / self.inner_layer_dim
+            2.0 * torch.exp(self.log_kernel_amp) * self.inner_layer_dim_inv
         )
         # Compute phi, shape [N, inner_dim]
         phi = scale_factor * torch.cos(x @ self.z + self.b)
-
-        # print(phi @ phi.T)
-        # input()
-        # Fix noise samples, i.e, fix prior samples
-        if self.fix_random_noise:
-            self.gaussian_sampler.reset_seed()
+        
 
         # Once the kernel is approximated, generate the desired number
-        # of samples from the appriximate GP.
-        w = self.gaussian_sampler((num_samples, self.inner_layer_dim, self.output_dim))
+        # of samples from the approximate GP.
+        w = self.get_noise()
 
         return phi @ w
+
+
+
+class CosFunctions(GenerativeFunction):
+    def __init__(
+        self,
+        num_samples,
+        input_dim=1,
+        output_dim=1,
+        kernel_amp=1.0,
+        kernel_length=1.0,
+        seed=2147483647,
+        fix_random_noise=False,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__(
+            num_samples,
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
+
+        # Initialize variables and noise generators
+        self.gaussian_sampler = GaussianSampler(seed)
+        self.uniform_sampler = UniformSampler(seed)
+
+        # Initialize parameters, logarithms are used in order to avoid
+        #  constraining to positive values.
+        self.log_kernel_amp = torch.nn.Parameter(
+            torch.log(torch.tensor(kernel_amp, dtype=self.dtype))
+        )
+        self.log_kernel_length = torch.nn.Parameter(
+            torch.log(torch.tensor(kernel_length, dtype=self.dtype))
+        )
+
+        if self.fix_random_noise:
+            self.noise = self.get_noise(first_call=True)
+            
+
+    def get_noise(self, first_call = False):
+        if self.fix_random_noise and not first_call:
+            return self.noise
+        else:
+            self.gaussian_sampler.reset_seed()
+            # Sample noise values from Gaussian and uniform in order to
+            # approximate the kernel
+            z = self.gaussian_sampler((self.num_samples, self.input_dim, self.output_dim))
+            b = 2 * np.pi * self.uniform_sampler((self.num_samples, 1, self.output_dim))
+        
+            return (z, b)
+
+    def forward(self, inputs):
+        """Computes aproximated samples of a Gaussian process prior
+        with kernel RBF and mean 0.
+
+        Parameters
+        ----------
+        inputs : torch tensor of shape (N, D)
+                 Contains the minibatch of N points with dimensionality D.
+
+        num_samples: int
+                     Number of samples to generate from the BNN.
+                     Equivalently, inputs is propagated through the BNN
+                     as many times as indicated by this variable. All
+                     results are returned.
+
+        Returns
+        -------
+        samples : torch tensor of shape (num_samples, N, D)
+                  All the samples from the approximated GP prior.
+        """
+
+        # Compute kernel function, start by scaling the inputs by the kernel length
+        x = inputs / torch.exp(self.log_kernel_length)
+        
+        # Compute the normalizing factor
+        scale_factor = torch.sqrt(
+            2.0 * torch.exp(self.log_kernel_amp) / self.output_dim
+        )
+        
+        # Get noise values:
+        # w comes from a standard Gaussian with shape
+        #   (num_samples, input_dim, output_dim)
+        # b comes from a uniform (0, 2pi) with shape 
+        #   (num_samples, 1, output_dim)
+        w, b = self.get_noise()
+        
+        # Compute phi, shape (num_samples, batch_size, output_dim)
+        phi = scale_factor * torch.cos(x @ w + b)
+
+        return phi

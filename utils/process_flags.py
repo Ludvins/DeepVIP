@@ -124,7 +124,7 @@ def get_parser():
     parser.add_argument(
         "--final_layer_noise",
         type=float,
-        default=-5,
+        default=None,
     )
     parser.add_argument(
         "--inner_layers_mu",
@@ -200,10 +200,17 @@ def get_parser():
 
     parser.add_argument("--freeze_prior", dest="freeze_prior", action="store_true")
     parser.set_defaults(freeze_prior=False)
+    
     parser.add_argument(
         "--freeze_posterior", dest="freeze_posterior", action="store_true"
     )
     parser.set_defaults(freeze_posterior=False)
+    
+    parser.add_argument(
+        "--freeze_ll", dest="freeze_ll", action="store_true"
+    )
+    parser.set_defaults(freeze_ll=False)
+    
     parser.add_argument("--show", dest="show", action="store_true")
     parser.set_defaults(show=False)
     parser.add_argument(
