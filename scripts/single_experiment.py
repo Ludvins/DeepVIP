@@ -64,7 +64,6 @@ dvip = DVIP_Base(
     device=args.device,
 )
 
-
 dvip.print_variables()
 
 # Define optimizer and compile model

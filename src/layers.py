@@ -266,17 +266,19 @@ class VIPLayer(Layer):
         """
 
         # Let S = num_coeffs, D = output_dim and N = num_samples
-        # Shape (S, N, D)
+        # Shape (S, N, 1)
         f = self.generative_function(X)
-        # Compute mean value, shape (1 , N, D)
+        # Compute mean value, shape (1 , N, 1)
         m = torch.mean(f, dim=0, keepdims=True)
 
-        # Compute regresion function, shape (S , N, D)
+        # Compute regresion function, shape (S , N, 1)
         phi = (f - m) / torch.sqrt(torch.tensor(self.num_coeffs - 1).type(self.dtype))
+
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
-        # phi has shape (S, N, D)
+        # phi has shape (S, N, 1)
         mean = m.squeeze(axis=0) + torch.einsum("snd,sd->nd", phi, self.q_mu)
+
 
         # Shape (S, S, D)
         q_sqrt = (
@@ -287,15 +289,8 @@ class VIPLayer(Layer):
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
 
-        # Compute covariance matrix of regression coefficients
-        # Shape (S, S, D)
-        Delta = torch.einsum("ijd, kjd -> ikd", q_sqrt, q_sqrt)
-
-        # Compute variance in two steps
-        # Compute phi^T Delta = phi^T s_qrt q_sqrt^T
-        K = torch.einsum("snd,skd->knd", phi, Delta)
-        # Multiply by phi again, using the same points twice
-        K = torch.einsum("snd,snd->nd", K, phi)
+        K = torch.einsum("ind, sid -> snd", phi, q_sqrt)
+        K = torch.sum(K * K, dim = 0)
 
         # Add layer noise to variance
         if self.log_layer_noise is not None:
