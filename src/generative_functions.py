@@ -3,6 +3,7 @@ import torch
 from .noise_samplers import GaussianSampler, UniformSampler
 from .noise_samplers import GaussianSamplerSobol, UniformSamplerSobol
 
+
 class GenerativeFunction(torch.nn.Module):
     def __init__(
         self,
@@ -114,23 +115,24 @@ class BayesLinear(GenerativeFunction):
 
         # If the BNN has zero mean, no parameters are considered for the
         # mean values the weights and bias variable
-        #if zero_mean_prior:
-        #    self.weight_mu = 0
-        #    self.bias_mu = 0
-        #else:
-        self.weight_mu = torch.nn.Parameter(torch.tensor(0.0))
-        self.bias_mu = torch.nn.Parameter(torch.tensor(0.0))
+        if zero_mean_prior:
+            self.weight_mu = 0
+            self.bias_mu = 0
+        else:
+            self.weight_mu = torch.nn.Parameter(
+                torch.tensor(np.zeros((self.input_dim, 1)))
+            )
+            self.bias_mu = torch.nn.Parameter(torch.tensor(0.0))
 
         self.weight_log_sigma = torch.nn.Parameter(torch.tensor(0.0))
         self.bias_log_sigma = torch.nn.Parameter(torch.tensor(0.0))
-        
+
         # Reset the generator's seed if fixed noise.
         self.gaussian_sampler.reset_seed()
         if self.fix_random_noise:
             self.noise = self.get_noise(first_call=True)
-            
 
-    def get_noise(self, first_call = False):
+    def get_noise(self, first_call=False):
         if self.fix_random_noise and not first_call:
             return self.noise
         else:
@@ -141,9 +143,9 @@ class BayesLinear(GenerativeFunction):
             # Generate Gaussian values
             z_w = self.gaussian_sampler(z_w_shape)
             z_b = self.gaussian_sampler(z_b_shape)
-            
+
             return (z_w, z_b)
-            
+
     def forward(self, inputs):
         """Forwards the given input through the Bayesian Neural Network.
         Generates as many samples of the stochastic output as indicated.
@@ -428,21 +430,18 @@ class GP(GenerativeFunction):
         # approximate the kernel
         self.z = self.gaussian_sampler((self.input_dim, self.inner_layer_dim))
         self.b = 2 * np.pi * self.uniform_sampler((1, self.inner_layer_dim))
-        
+
         if self.fix_random_noise:
             self.noise = self.get_noise(first_call=True)
-            
 
-    def get_noise(self, first_call = False):
+    def get_noise(self, first_call=False):
         if self.fix_random_noise and not first_call:
             return self.noise
         else:
             self.gaussian_sampler.reset_seed()
             # Compute the shape of the noise to generate
-            w = self.gaussian_sampler((self.num_samples, 
-                                       self.inner_layer_dim, 
-                                       1))
-            
+            w = self.gaussian_sampler((self.num_samples, self.inner_layer_dim, 1))
+
             return w
 
     def forward(self, inputs):
@@ -474,14 +473,12 @@ class GP(GenerativeFunction):
         )
         # Compute phi, shape [N, inner_dim]
         phi = scale_factor * torch.cos(x @ self.z + self.b)
-        
 
         # Once the kernel is approximated, generate the desired number
         # of samples from the approximate GP.
         w = self.get_noise()
 
         return phi @ w
-
 
 
 class CosFunctions(GenerativeFunction):
@@ -523,9 +520,7 @@ class CosFunctions(GenerativeFunction):
         if self.fix_random_noise:
             self.noise = self.get_noise(first_call=True)
 
-            
-
-    def get_noise(self, first_call = False):
+    def get_noise(self, first_call=False):
         if self.fix_random_noise and not first_call:
             return self.noise
         else:
@@ -552,19 +547,19 @@ class CosFunctions(GenerativeFunction):
 
         # Compute kernel function, start by scaling the inputs by the length
         x = inputs / torch.exp(self.log_kernel_length)
-        
+
         # Compute the normalizing factor
         scale_factor = torch.sqrt(
             2.0 * torch.exp(self.log_kernel_amp) / self.output_dim
         )
-        
+
         # Get noise values:
         # w comes from a standard Gaussian with shape
         #   (num_samples, input_dim, output_dim)
-        # b comes from a uniform (0, 2pi) with shape 
+        # b comes from a uniform (0, 2pi) with shape
         #   (num_samples, 1, output_dim)
         w, b = self.get_noise()
-        
+
         # Compute phi, shape (num_samples, batch_size, output_dim)
         phi = scale_factor * torch.cos(x @ w + b)
 
