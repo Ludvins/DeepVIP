@@ -163,7 +163,7 @@ def get_parser():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=10000,
+        default=1000,
         help="Number of regression coefficients to use",
     )
     parser.add_argument(

@@ -120,7 +120,7 @@ class BayesLinear(GenerativeFunction):
             self.bias_mu = 0
         else:
             self.weight_mu = torch.nn.Parameter(
-                torch.tensor(np.zeros((self.input_dim, 1)))
+                torch.tensor(0.0)
             )
             self.bias_mu = torch.nn.Parameter(torch.tensor(0.0))
 

@@ -358,51 +358,17 @@ class DVIP_Base(torch.nn.Module):
 
     def bb_alpha_energy(self, X, Y, alpha=0.5):
         """
-        Compute Black-Box alpha energy obejective function for
+        Compute Black-Box alpha energy objective function for
         the given inputs, targets and value of alpha.
 
         This value is estimated using MonteCarlo if different
         from zero.
         """
-        # When alpha is zero, this coincides with the variational
-        # expected log likelihood.
-        if alpha == 0:
-            return self.expected_data_log_likelihood(X, Y)
-
-        # Compute predictive mixtures.
+        # Compute model predictions, shape [S, N, D]
         F_mean, F_var = self.predict_f(X, num_samples=self.num_samples, full_cov=False)
-        # Create MonteCarlo samples equally distributed between
-        # the mixture components.
-        n_mixtures = F_mean.shape[0]
-        MC_samples = 100
-        if MC_samples < n_mixtures:
-            MC_samples = n_mixtures
-
-        # Set random generator
-        generator = torch.Generator(self.device)
-        generator.manual_seed(2147483647)
-
-        # Given that all distributions in the predictive mixture are equally
-        # probable, generate the same number of samples of each one.
-        z = torch.randn(
-            [MC_samples // n_mixtures, *F_mean.shape],
-            generator=generator,
-            dtype=self.dtype,
-            device=self.device,
-        )
-        samples = F_mean + z * torch.sqrt(F_var)
-        # Flatten the mixture dimension. Shape [MC_samples, N, D_out]
-        samples = samples.reshape([MC_samples, *samples.shape[-2:]])
-        # Compute log pdf of the targets. Shape [MC_samples, N, D_out]
-        log_pdf = self.likelihood.logp(samples, Y)
-
-        # Compute alpha energy
-        log_expected = torch.logsumexp(alpha * log_pdf, 0) - torch.tensor(
-            MC_samples, dtype=self.dtype
-        )
-
-        return log_expected / alpha
-
+        var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y, alpha = alpha)
+        return var_exp
+    
     def nelbo(self, X, y):
         """
         Computes the objective minimization function. When alpha is 0
@@ -420,7 +386,7 @@ class DVIP_Base(torch.nn.Module):
 
         """
         # Compute loss
-        bb_alpha = self.expected_data_log_likelihood(X, y)
+        bb_alpha = self.bb_alpha_energy(X, y, self.bb_alpha)
         # Agregate on data dimension
         bb_alpha = torch.sum(bb_alpha)
 

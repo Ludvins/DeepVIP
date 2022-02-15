@@ -75,12 +75,22 @@ class Gaussian(Likelihood):
         vairances (Fvar)"""
         return self.logdensity(Y, Fmu, Fvar + self.log_variance.exp())
 
-    def variational_expectations(self, Fmu, Fvar, Y):
+    def variational_expectations(self, Fmu, Fvar, Y, alpha):
         """Computes the variational expectation, i.e, the expectation under
         Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f). As both distributions
         are Gaussian this can be computed in closed form."""
-        return (
-            -0.5 * np.log(2 * np.pi)
-            - 0.5 * self.log_variance
-            - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
-        )
+        if alpha == 0:
+            logpdf =  (
+                -0.5 * np.log(2 * np.pi)
+                - 0.5 * self.log_variance
+                - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
+            )
+            return torch.mean(logpdf, dim=0)  
+        else:
+            S = torch.tensor(Fmu.shape[0])
+            variance = torch.exp(self.log_variance)
+            C = torch.sqrt(2 * torch.pi * variance / alpha) \
+                / torch.sqrt(2 * torch.pi * variance)**alpha
+            
+            logpdf = self.logdensity(Y, Fmu, Fvar + variance/alpha)   
+            return torch.logsumexp(logpdf, dim = 0) + torch.log(C) - torch.log(S)

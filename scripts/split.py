@@ -25,7 +25,7 @@ torch.manual_seed(2147483647)
 
 # CUDA for PyTorch
 use_cuda = torch.cuda.is_available()
-device = torch.device("cuda:0" if use_cuda else "cpu")
+device = "cpu"
 torch.backends.cudnn.benchmark = True
 vars(args)["device"] = device
 

@@ -22,6 +22,9 @@ def create_file_name(args):
     if args.bb_alpha != 0:
         filename += "_alpha=" + str(args.bb_alpha)
 
+    if args.num_samples_train != 1:
+        filename += "_num_samples_train=" + str(args.num_samples_train)
+
     if args.prior_kl:
         filename += "_prior-kl"
     if args.zero_mean_prior:
