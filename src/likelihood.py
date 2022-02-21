@@ -62,7 +62,7 @@ class Gaussian(Likelihood):
 
     def logp(self, F, Y):
         """Computes the log likelihood of the targets Y under the predictions F,
-        using the likelihoo variance."""
+        using the likelihood variance."""
         return self.logdensity(Y, F, self.log_variance.exp())
 
     def predict_mean_and_var(self, Fmu, Fvar):
@@ -77,8 +77,11 @@ class Gaussian(Likelihood):
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         """Computes the variational expectation, i.e, the expectation under
-        Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f). As both distributions
-        are Gaussian this can be computed in closed form."""
+        Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f). 
+        
+        As both distributions are Gaussian this can be computed in closed form.
+        """
+        
         if alpha == 0:
             logpdf =  (
                 -0.5 * np.log(2 * np.pi)
@@ -86,11 +89,16 @@ class Gaussian(Likelihood):
                 - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
             )
             return torch.mean(logpdf, dim=0)  
-        else:
-            S = torch.tensor(Fmu.shape[0])
-            variance = torch.exp(self.log_variance)
-            C = torch.sqrt(2 * torch.pi * variance / alpha) \
-                / torch.sqrt(2 * torch.pi * variance)**alpha
+        
+        # Black-box alpha-energy
+        # Number of predictive mixtures
+        S = torch.tensor(Fmu.shape[0])
             
-            logpdf = self.logdensity(Y, Fmu, Fvar + variance/alpha)   
-            return torch.logsumexp(logpdf, dim = 0) + torch.log(C) - torch.log(S)
+        variance = torch.exp(self.log_variance)
+        # Proportionality constant
+        C = torch.sqrt(2 * torch.pi * variance / alpha) \
+            / torch.sqrt(2 * torch.pi * variance)**alpha
+            
+        logpdf = self.logdensity(Y, Fmu, Fvar + variance/alpha)   
+        logpdf = torch.logsumexp(logpdf, dim = 0) + torch.log(C) - torch.log(S)
+        return logpdf / alpha

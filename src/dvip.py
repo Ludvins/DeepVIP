@@ -194,7 +194,9 @@ class DVIP_Base(torch.nn.Module):
         and the predicted mean and standard deviation.
         """
 
-        mean, var = self.predict_y(predict_at, self.num_samples, full_cov=full_cov)
+        mean, var = self.predict_y(predict_at, 
+                                   self.num_samples, 
+                                   full_cov=full_cov)
         # Return predictions scaled to the original scale.
         return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
 
@@ -334,28 +336,6 @@ class DVIP_Base(torch.nn.Module):
         # Scale data
         return Fpriors * self.y_std + self.y_mean
 
-    def expected_data_log_likelihood(self, X, Y):
-        """
-        Compute expectations of the expected data log likelihood
-        under the variational distribution with MC samples.
-
-        Parameters
-        ----------
-        X : torch tensor of shape (batch_size, data_dim)
-            Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input, must be standardized.
-
-        """
-        # Compute model predictions, shape [S, N, D]
-        F_mean, F_var = self.predict_f(X, num_samples=self.num_samples, full_cov=False)
-        # Compute variational expectation. Shape [S, N, D]
-        var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y)
-        # As the mixture in the predictive distribution gives
-        # equal probability to each mixture, averaging is
-        # perfirmed using a mean.
-        return torch.mean(var_exp, dim=0)  # Shape [N, D]
-
     def bb_alpha_energy(self, X, Y, alpha=0.5):
         """
         Compute Black-Box alpha energy objective function for
@@ -365,17 +345,21 @@ class DVIP_Base(torch.nn.Module):
         from zero.
         """
         # Compute model predictions, shape [S, N, D]
-        F_mean, F_var = self.predict_f(X, num_samples=self.num_samples, full_cov=False)
-        var_exp = self.likelihood.variational_expectations(F_mean, F_var, Y, alpha = alpha)
-        return var_exp
+        F_mean, F_var = self.predict_f(X, 
+                                       num_samples=self.num_samples, 
+                                       full_cov=False)
+        # Compute variational expectation using Black-box alpha energy. 
+        # Shape [N, D]
+        return self.likelihood.variational_expectations(F_mean, 
+                                                        F_var, 
+                                                        Y, 
+                                                        alpha = alpha)
     
     def nelbo(self, X, y):
         """
         Computes the objective minimization function. When alpha is 0
         this function equals the variational evidence lower bound.
-        Othewise, Black-Box alpha inference is used, estimating the
-        objective with MonteCarlo samples from the predictive mixture
-        distribution.
+        Otherwise, Black-Box alpha inference is used.
 
         Parameters
         ----------
@@ -387,15 +371,22 @@ class DVIP_Base(torch.nn.Module):
         """
         # Compute loss
         bb_alpha = self.bb_alpha_energy(X, y, self.bb_alpha)
-        # Agregate on data dimension
+        # Aggregate on data dimension
         bb_alpha = torch.sum(bb_alpha)
+
 
         # Scale loss term corresponding to minibatch size
         scale = self.num_data
         scale /= X.shape[0]
+        print(scale)
+        
         # Compute KL term
         KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
-        return -scale * bb_alpha + KL
+        a =  -scale * bb_alpha + KL
+        
+        print(a)
+        input()
+        return a
 
     def freeze_posterior(self):
         """Sets the posterior parameters of every layer as non-trainable."""

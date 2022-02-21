@@ -107,8 +107,8 @@ ax3.plot(loss, label="Training loss")
 ax3.legend()
 ax3.set_title("Loss evolution")
 ax4.plot(
-    np.arange(loss.shape[0] // 2, loss.shape[0]),
-    loss[loss.shape[0] // 2 :],
+    np.arange(loss.shape[0] // 5, loss.shape[0]),
+    loss[loss.shape[0] // 5 :],
     label="Training loss",
 )
 ax4.legend()

@@ -81,7 +81,6 @@ dvip = DVIP_Base(
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
-# scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9999)
 
 # Set the number of training samples to generate
 dvip.num_samples = args.num_samples_train

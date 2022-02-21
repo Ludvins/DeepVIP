@@ -34,6 +34,12 @@ def manage_experiment_configuration(args=None):
 
     if args.dtype == "float64":
         FLAGS["dtype"] = torch.float64
+    
+    args.batch_size = min(args.batch_size, len(args.dataset))
+    if args.epochs is None:
+        if args.iterations is None:
+            raise ValueError("Either Epochs or Iterations must be selecetd.")
+        args.epochs = int(args.iterations / (len(args.dataset) / args.batch_size))
 
     return args
 
@@ -96,8 +102,14 @@ def get_parser():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=20000,
+        default=None,
         help="Training epochs",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=None,
+        help="Training iterations",
     )
     parser.add_argument(
         "--vip_layers",
@@ -157,13 +169,13 @@ def get_parser():
     parser.add_argument(
         "--regression_coeffs",
         type=int,
-        default=20,
+        default=50,
         help="Number of regression coefficients to use",
     )
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1000,
+        default=100,
         help="Number of regression coefficients to use",
     )
     parser.add_argument(
@@ -181,7 +193,7 @@ def get_parser():
     parser.add_argument(
         "--lr",
         type=float,
-        default=0.001,
+        default=0.01,
         help="Training learning rate",
     )
     parser.add_argument("--warmup", type=int, default=0)
