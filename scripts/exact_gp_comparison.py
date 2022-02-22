@@ -43,20 +43,21 @@ train_dataset = Training_Dataset(
     verbose=False,
 )
 
-#inputs = rng.standard_normal(300)
+# inputs = rng.standard_normal(300)
 inputs = np.loadtxt("data/SPGP_dist/test_inputs")
 
 test_dataset = Test_Dataset(
     inputs[..., np.newaxis],
-    inputs_mean = train_dataset.inputs_mean,
-    inputs_std = train_dataset.inputs_std,
+    inputs_mean=train_dataset.inputs_mean,
+    inputs_std=train_dataset.inputs_std,
 )
 
 from matplotlib import pyplot as plt
-plt.figure(figsize=(18,10))
-#plt.scatter(
+
+plt.figure(figsize=(18, 10))
+# plt.scatter(
 #    test_dataset.inputs, test_dataset.targets, label="Test points", s=2, alpha=0.8
-#)
+# )
 plt.scatter(
     train_dataset.inputs,
     train_dataset.targets * train_dataset.targets_std + train_dataset.targets_mean,
@@ -67,11 +68,12 @@ plt.scatter(
 
 ################## EXACT GP #################
 
+
 def RBF(x, y=None, kernel_amp=1, kernel_length=1):
     if y is None:
         y = x
     dist = (x - y.T) ** 2
-    return kernel_amp**2 * np.exp(-0.5 * dist / kernel_length ** 2)
+    return kernel_amp ** 2 * np.exp(-0.5 * dist / kernel_length ** 2)
 
 
 def get_exact_GP_predictions(
@@ -81,10 +83,10 @@ def get_exact_GP_predictions(
     Ku = RBF(x_test, x_train, kernel_amp=kernel_amp, kernel_length=kernel_length)
     Kuu = RBF(x_test, kernel_amp=kernel_amp, kernel_length=kernel_length)
     K = RBF(x_train, kernel_amp=kernel_amp, kernel_length=kernel_length)
-    
+
     K = K + white_noise * np.eye(y_train.shape[0])
     Kuu = Kuu + white_noise * np.eye(x_test.shape[0])
-    
+
     K_inv = np.linalg.inv(K)
 
     GP_pred_mean = Ku @ K_inv @ y_train
@@ -106,7 +108,7 @@ layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args
 
 
 # Instantiate Likelihood
-ll = Gaussian(device = args.device, trainable = not args.freeze_ll)
+ll = Gaussian(device=args.device, trainable=not args.freeze_ll)
 
 dvip = DVIP_Base(
     ll,
@@ -141,9 +143,8 @@ dvip.print_variables()
 
 #################### EXACT DVIP #############################
 
-def get_exact_VIP_predictions(
-    x_train, y_train, x_test, y_mean, y_std, white_noise
-):
+
+def get_exact_VIP_predictions(x_train, y_train, x_test, y_mean, y_std, white_noise):
 
     layer = dvip.vip_layers[0]
     genf = layer.generative_function
@@ -151,7 +152,6 @@ def get_exact_VIP_predictions(
     # Shape (S, N, D)
     f_train = genf(torch.tensor(x_train)).detach().numpy()
     f_test = genf(torch.tensor(x_test)).detach().numpy()
-
 
     # Compute mean value, shape (N, D)
     m_train = np.mean(f_train, axis=0)
@@ -163,9 +163,9 @@ def get_exact_VIP_predictions(
     K_train = np.einsum("snd, smd -> dnm", phi_train, phi_train) + white_noise * I
     K_train_inv = np.transpose(np.linalg.inv(K_train), (1, 2, 0))
 
-    A =  np.einsum("snd, nmd -> smd", phi_train, K_train_inv)
-    q_mu = np.einsum("snd, nd -> sd", A, y_train - m_train)  
-                
+    A = np.einsum("snd, nmd -> smd", phi_train, K_train_inv)
+    q_mu = np.einsum("snd, nd -> sd", A, y_train - m_train)
+
     I = np.eye(layer.num_coeffs)
     I_tiled = np.tile(I[..., np.newaxis], [1, 1, layer.output_dim])
     q_sigma = I_tiled - np.einsum("snd, and -> sad", A, phi_train)
@@ -175,8 +175,7 @@ def get_exact_VIP_predictions(
     m_test = np.mean(f_test, axis=0)
     # Compute regresion function, shape (S , N, D)
     phi_test = (f_test - m_test) / np.sqrt(layer.num_coeffs - 1)
-        
-        
+
     mean = m_test + np.einsum("snd,sd->nd", phi_test, q_mu)
 
     # Compute variance in two steps
@@ -189,9 +188,10 @@ def get_exact_VIP_predictions(
         K = K + np.exp(layer.log_layer_noise.detach().numpy())
 
     mean = mean * y_std + y_mean
-    sqrt =  np.sqrt(K + white_noise) * y_std
-    
+    sqrt = np.sqrt(K + white_noise) * y_std
+
     return mean, sqrt
+
 
 ###############################################################
 
@@ -222,8 +222,8 @@ plt.plot(
 )
 plt.fill_between(
     test_dataset.inputs.flatten()[sort],
-    (test_prediction_mean[sort] - 3*test_prediction_sqrt[sort]).flatten(),
-    (test_prediction_mean[sort] + 3*test_prediction_sqrt[sort]).flatten(),
+    (test_prediction_mean[sort] - 3 * test_prediction_sqrt[sort]).flatten(),
+    (test_prediction_mean[sort] + 3 * test_prediction_sqrt[sort]).flatten(),
     color="purple",
     alpha=0.2,
 )
@@ -233,7 +233,7 @@ for prior_sample in test_prior_samples[:10]:
         test_dataset.inputs.flatten()[sort],
         prior_sample.flatten()[sort],
         color="red",
-        alpha = 0.1
+        alpha=0.1,
     )
 
 try:
@@ -269,8 +269,8 @@ plt.plot(
 )
 plt.fill_between(
     test_dataset.inputs.flatten()[sort],
-    (GP_pred_mean[sort] - 3*GP_pred_std[sort]).flatten(),
-    (GP_pred_mean[sort] + 3*GP_pred_std[sort]).flatten(),
+    (GP_pred_mean[sort] - 3 * GP_pred_std[sort]).flatten(),
+    (GP_pred_mean[sort] + 3 * GP_pred_std[sort]).flatten(),
     color="gray",
     alpha=0.2,
 )
@@ -292,12 +292,12 @@ plt.plot(
 )
 plt.fill_between(
     test_dataset.inputs.flatten()[sort],
-    (VIP_pred_mean[sort] - 3*VIP_pred_std[sort]).flatten(),
-    (VIP_pred_mean[sort] + 3*VIP_pred_std[sort]).flatten(),
+    (VIP_pred_mean[sort] - 3 * VIP_pred_std[sort]).flatten(),
+    (VIP_pred_mean[sort] + 3 * VIP_pred_std[sort]).flatten(),
     color="orange",
     alpha=0.2,
 )
 
 plt.legend()
-plt.savefig("plots/gp_comp_" + create_file_name(args) + ".pdf", dpi = 1000)
+plt.savefig("plots/gp_comp_" + create_file_name(args) + ".pdf", dpi=1000)
 plt.show()

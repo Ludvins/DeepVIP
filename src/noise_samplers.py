@@ -67,21 +67,21 @@ class UniformSampler(NoiseSampler):
         return torch.tensor(self.rng.uniform(size=size))
 
 
-class GaussianSamplerSobol():
+class GaussianSamplerSobol:
     def __init__(self, seed):
         self.seed = seed
-        
+
     def __call__(self, size):
-        soboleng = torch.quasirandom.SobolEngine(dimension=size[1], seed= self.seed)
-        draws = soboleng.draw(size[0], dtype = torch.float64) + 1e-6
+        soboleng = torch.quasirandom.SobolEngine(dimension=size[1], seed=self.seed)
+        draws = soboleng.draw(size[0], dtype=torch.float64) + 1e-6
         m = torch.distributions.normal.Normal(torch.tensor([0.0]), torch.tensor([1.0]))
-        return torch.reshape(m.icdf(draws), shape = size)
+        return torch.reshape(m.icdf(draws), shape=size)
 
 
-class UniformSamplerSobol():
+class UniformSamplerSobol:
     def __init__(self, seed):
         self.seed = seed
-        
+
     def __call__(self, size):
-        soboleng = torch.quasirandom.SobolEngine(dimension=size[1], seed = self.seed)
-        return torch.reshape(soboleng.draw(size[0], dtype = torch.float64), shape = size)
+        soboleng = torch.quasirandom.SobolEngine(dimension=size[1], seed=self.seed)
+        return torch.reshape(soboleng.draw(size[0], dtype=torch.float64), shape=size)

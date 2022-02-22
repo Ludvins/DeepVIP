@@ -34,7 +34,7 @@ def manage_experiment_configuration(args=None):
 
     if args.dtype == "float64":
         FLAGS["dtype"] = torch.float64
-    
+
     args.batch_size = min(args.batch_size, len(args.dataset))
     if args.epochs is None:
         if args.iterations is None:

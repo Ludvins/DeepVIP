@@ -34,7 +34,9 @@ class Likelihood(torch.nn.Module):
 
 
 class Gaussian(Likelihood):
-    def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None, trainable = False):
+    def __init__(
+        self, log_variance=-5.0, dtype=torch.float64, device=None, trainable=False
+    ):
         """Gaussian Likelihood. Encapsulates the likelihood noise
         as a parameter.
         Arguments
@@ -77,28 +79,30 @@ class Gaussian(Likelihood):
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         """Computes the variational expectation, i.e, the expectation under
-        Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f). 
-        
+        Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f).
+
         As both distributions are Gaussian this can be computed in closed form.
         """
-        
+
         if alpha == 0:
-            logpdf =  (
+            logpdf = (
                 -0.5 * np.log(2 * np.pi)
                 - 0.5 * self.log_variance
                 - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
             )
-            return torch.mean(logpdf, dim=0)  
-        
+            return torch.mean(logpdf, dim=0)
+
         # Black-box alpha-energy
         # Number of predictive mixtures
         S = torch.tensor(Fmu.shape[0])
-            
+
         variance = torch.exp(self.log_variance)
         # Proportionality constant
-        C = torch.sqrt(2 * torch.pi * variance / alpha) \
-            / torch.sqrt(2 * torch.pi * variance)**alpha
-            
-        logpdf = self.logdensity(Y, Fmu, Fvar + variance/alpha)   
-        logpdf = torch.logsumexp(logpdf, dim = 0) + torch.log(C) - torch.log(S)
+        C = (
+            torch.sqrt(2 * torch.pi * variance / alpha)
+            / torch.sqrt(2 * torch.pi * variance) ** alpha
+        )
+
+        logpdf = self.logdensity(Y, Fmu, Fvar + variance / alpha)
+        logpdf = torch.logsumexp(logpdf, dim=0) + torch.log(C) - torch.log(S)
         return logpdf / alpha

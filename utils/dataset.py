@@ -22,7 +22,7 @@ class Training_Dataset(Dataset):
         # Normalize inputs
         self.inputs_std = np.std(self.inputs, axis=0, keepdims=True) + 1e-6
         self.inputs_mean = np.mean(self.inputs, axis=0, keepdims=True)
-        
+
         self.inputs = (self.inputs - self.inputs_mean) / self.inputs_std
         if verbose:
             print("Number of samples: ", self.n_samples)
@@ -77,7 +77,8 @@ class DVIPDataset(Dataset):
 
     def __len__(self):
         return len(self.inputs)
-    
+
+
 class SPGP_Dataset(DVIPDataset):
     def __init__(self):
         rng = np.random.default_rng(seed=0)
@@ -85,13 +86,12 @@ class SPGP_Dataset(DVIPDataset):
         def f(x):
             return np.cos(5 * x) / (np.abs(x) + 1)
 
-        #inputs = rng.standard_normal(300)
+        # inputs = rng.standard_normal(300)
         inputs = np.loadtxt("data/SPGP_dist/train_inputs")
         targets = np.loadtxt("data/SPGP_dist/train_outputs")
 
         self.inputs = inputs[..., np.newaxis]
         self.targets = targets[..., np.newaxis]
-
 
 
 class Synthetic_Dataset(DVIPDataset):
@@ -101,8 +101,8 @@ class Synthetic_Dataset(DVIPDataset):
         def f(x):
             return np.cos(5 * x) / (np.abs(x) + 1)
 
-        #inputs = rng.standard_normal(300)
-        inputs = np.linspace(-1., 1., 300)
+        # inputs = rng.standard_normal(300)
+        inputs = np.linspace(-1.0, 1.0, 300)
         targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.1
 
         self.inputs = inputs[..., np.newaxis]

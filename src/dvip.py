@@ -194,9 +194,7 @@ class DVIP_Base(torch.nn.Module):
         and the predicted mean and standard deviation.
         """
 
-        mean, var = self.predict_y(predict_at, 
-                                   self.num_samples, 
-                                   full_cov=full_cov)
+        mean, var = self.predict_y(predict_at, self.num_samples, full_cov=full_cov)
         # Return predictions scaled to the original scale.
         return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
 
@@ -345,16 +343,11 @@ class DVIP_Base(torch.nn.Module):
         from zero.
         """
         # Compute model predictions, shape [S, N, D]
-        F_mean, F_var = self.predict_f(X, 
-                                       num_samples=self.num_samples, 
-                                       full_cov=False)
-        # Compute variational expectation using Black-box alpha energy. 
+        F_mean, F_var = self.predict_f(X, num_samples=self.num_samples, full_cov=False)
+        # Compute variational expectation using Black-box alpha energy.
         # Shape [N, D]
-        return self.likelihood.variational_expectations(F_mean, 
-                                                        F_var, 
-                                                        Y, 
-                                                        alpha = alpha)
-    
+        return self.likelihood.variational_expectations(F_mean, F_var, Y, alpha=alpha)
+
     def nelbo(self, X, y):
         """
         Computes the objective minimization function. When alpha is 0
@@ -374,19 +367,13 @@ class DVIP_Base(torch.nn.Module):
         # Aggregate on data dimension
         bb_alpha = torch.sum(bb_alpha)
 
-
         # Scale loss term corresponding to minibatch size
         scale = self.num_data
         scale /= X.shape[0]
-        print(scale)
-        
+
         # Compute KL term
         KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
-        a =  -scale * bb_alpha + KL
-        
-        print(a)
-        input()
-        return a
+        return -scale * bb_alpha + KL
 
     def freeze_posterior(self):
         """Sets the posterior parameters of every layer as non-trainable."""

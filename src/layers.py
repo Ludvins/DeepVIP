@@ -279,7 +279,6 @@ class VIPLayer(Layer):
         # phi has shape (S, N, 1)
         mean = m.squeeze(axis=0) + torch.einsum("snd,sd->nd", phi, self.q_mu)
 
-
         # Shape (S, S, D)
         q_sqrt = (
             torch.zeros((self.num_coeffs, self.num_coeffs, self.output_dim))
@@ -290,7 +289,7 @@ class VIPLayer(Layer):
         q_sqrt[li, lj] = self.q_sqrt_tri
 
         K = torch.einsum("ind, sid -> snd", phi, q_sqrt)
-        K = torch.sum(K * K, dim = 0)
+        K = torch.sum(K * K, dim=0)
 
         # Add layer noise to variance
         if self.log_layer_noise is not None:
@@ -300,8 +299,7 @@ class VIPLayer(Layer):
         if self.mean_function is not None:
             mean = mean + self.mean_function(X)
         return mean, K, f
-    
-    
+
     def KL(self):
         """
         Computes the KL divergence from the variational distribution of

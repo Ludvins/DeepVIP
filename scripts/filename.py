@@ -16,7 +16,7 @@ def create_file_name(args):
     elif args.genf == "GP":
         filename += "_genf=GP_inner-dim=" + str(args.bnn_inner_dim)
     else:
-        filename += "_genf="+  args.genf
+        filename += "_genf=" + args.genf
 
     filename += "_regression-coeffs=" + str(args.regression_coeffs)
     if args.bb_alpha != 0:
@@ -33,7 +33,6 @@ def create_file_name(args):
         filename += "_prior-fixed-noise"
     if args.freeze_ll:
         filename += "_freeze-ll-noise"
-
 
     if args.split is not None:
         filename += "_split=" + str(args.split)
