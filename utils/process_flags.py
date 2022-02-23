@@ -193,7 +193,7 @@ def get_parser():
     parser.add_argument(
         "--lr",
         type=float,
-        default=0.01,
+        default=0.001,
         help="Training learning rate",
     )
     parser.add_argument("--warmup", type=int, default=0)

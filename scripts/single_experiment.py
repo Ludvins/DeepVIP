@@ -35,6 +35,12 @@ train_indexes, test_indexes = train_test_split(
 train_dataset = Training_Dataset(
     args.dataset.inputs[train_indexes], args.dataset.targets[train_indexes]
 )
+train_test_dataset = Test_Dataset(
+    args.dataset.inputs[train_indexes],
+    args.dataset.targets[train_indexes],
+    train_dataset.inputs_mean,
+    train_dataset.inputs_std,
+)
 test_dataset = Test_Dataset(
     args.dataset.inputs[test_indexes],
     args.dataset.targets[test_indexes],
@@ -45,7 +51,8 @@ test_dataset = Test_Dataset(
 # Get VIP layers
 layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args))
 
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle = True)
+train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 val_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 # Instantiate Likelihood
@@ -85,6 +92,7 @@ dvip.print_variables()
 
 dvip.num_samples = args.num_samples_test
 test_metrics = score(dvip, val_loader, device=args.device)
+train_metrics = score(dvip, train_test_loader, device=args.device)
 
 print("TEST RESULTS: ")
 print("\t - NELBO: {}".format(test_metrics["LOSS"]))
@@ -134,7 +142,7 @@ ax1.vlines(
 )
 ax1.legend()
 
-ax2.set_title("RMSE evolution")
+ax1.set_title("RMSE evolution")
 ax2.plot(df[["NLL"]].to_numpy(), label="Training NLL")
 ax2.plot(df_val[["NLL"]].to_numpy(), label="Validation NLL")
 ymin, ymax = ax2.get_ylim()
@@ -149,7 +157,7 @@ ax2.vlines(
 )
 ax2.vlines(
     np.argmin(df_val[["NLL"]].to_numpy()),
-    np.min(df[["NLL"]].to_numpy()) - d,
+    np.min(df_val[["NLL"]].to_numpy()) - d,
     np.min(df_val[["NLL"]].to_numpy()) + d,
     color="black",
 )
@@ -161,8 +169,12 @@ plt.savefig("plots/" + create_file_name(args) + ".png")
 # open file for writing
 f = open("plots/" + create_file_name(args) + ".txt", "w")
 
+d = {
+    **{k + "_train": v for k, v in train_metrics.items()},
+    **test_metrics,
+}
 # write file
-f.write(str(test_metrics))
+f.write(str(d))
 
 # close file
 f.close()

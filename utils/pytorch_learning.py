@@ -236,7 +236,6 @@ def fit_with_metrics(
                     mean_pred,
                     std_pred,
                 )
-
         # Store history of metrics
         metrics_dict = metrics.get_dict()
         history.append(metrics_dict)

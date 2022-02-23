@@ -59,7 +59,7 @@ test_dataset = Test_Dataset(
 layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args))
 
 # Initialize DataLoader
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle = True)
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
