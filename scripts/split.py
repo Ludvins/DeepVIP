@@ -21,7 +21,7 @@ from scripts.filename import create_file_name
 
 args = manage_experiment_configuration()
 
-torch.manual_seed(2147483647)
+torch.manual_seed(args.seed)
 
 # CUDA for PyTorch
 use_cuda = torch.cuda.is_available()
@@ -33,7 +33,7 @@ vars(args)["device"] = device
 train_indexes, test_indexes = train_test_split(
     np.arange(len(args.dataset)),
     test_size=0.1,
-    random_state=2147483647 + args.split,
+    random_state=args.seed + args.split,
 )
 
 
