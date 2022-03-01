@@ -1,4 +1,5 @@
 import torch
+from .utils import reparameterize
 
 
 class DVIP_Base(torch.nn.Module):
@@ -16,6 +17,7 @@ class DVIP_Base(torch.nn.Module):
         y_std=1.0,
         device=None,
         dtype=torch.float64,
+        seed=2147483647,
     ):
         """
         Defines a Base class for Deep Variational Implicit Processes as a
@@ -73,6 +75,9 @@ class DVIP_Base(torch.nn.Module):
         # Store likelihood and Variational Implicit layers
         self.likelihood = likelihood
         self.vip_layers = torch.nn.ModuleList(layers)
+
+        self.generator = torch.Generator(device)
+        self.generator.manual_seed(seed)
 
         # Warning about vip_layers and posterior samples
         if len(self.vip_layers) == 1 and self.num_samples > 1:
@@ -177,7 +182,7 @@ class DVIP_Base(torch.nn.Module):
 
         return loss, mean_pred, std_pred
 
-    def forward(self, predict_at, full_cov=False):
+    def forward(self, predict_at):
         """
         Computes the predicted labels for the given input.
 
@@ -185,23 +190,22 @@ class DVIP_Base(torch.nn.Module):
         ----------
         predict_at : torch tensor of shape (batch_size, data_dim)
                      Contains the input features.
-        full_cov : boolean
-                   Whether to use the full covariance matrix or just
-                   the diagonal values.
+
         Returns
         -------
         The predicted labels using the model's likelihood
         and the predicted mean and standard deviation.
         """
 
-        mean, var = self.predict_y(predict_at, self.num_samples, full_cov=full_cov)
+        mean, var = self.predict_y(predict_at, self.num_samples)
         # Return predictions scaled to the original scale.
         return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
 
-    def propagate(self, X, num_samples=1, full_cov=False):
+    def propagate(self, X, num_samples=1, return_prior_samples=False):
         """
-        Propagates the input trough the layer, using the output of the previous
-        as the input for the next one.
+        Propagates the input trough the layer.
+        Propagates a sample of the predictive distribution of each layer
+        through the next layer, iteratively.
 
         Parameters
         ----------
@@ -209,10 +213,6 @@ class DVIP_Base(torch.nn.Module):
             Contains the input features.
         num_samples : int
                       Number of MonteCarlo resamples to use
-        full_cov : boolean
-                   Whether to use the full covariance matrix or just
-                   the diagonal values. Full covariances is not
-                   supported by now.
 
         Returns
         -------
@@ -237,16 +237,49 @@ class DVIP_Base(torch.nn.Module):
         # The first input values are the original ones
         F = sX
         for layer in self.vip_layers:
-            F, Fmean, Fvar, Fprior = layer.sample_from_conditional(F)
 
+            # Get input shape, S = MC resamples, N = num data, D 0 data dim
+            S, N, D = F.shape
+            # Flatten the MC resamples
+            F_flat = torch.reshape(F, [S * N, D])
+
+            # Get the layer's predictive distribution and
+            # prior samples if required.
+            results = layer(F_flat, return_prior_samples)
+
+            # Reshape predictions to the original shape
+            D_out = results[0].shape[-1]
+            Fmean = torch.reshape(results[0], [S, N, D_out])
+            Fvar = torch.reshape(results[1], [S, N, D_out])
+
+            # Use Gaussian re-parameterization trick to create samples.
+            z = torch.randn(
+                Fmean.shape,
+                generator=self.generator,
+                dtype=self.dtype,
+                device=self.device,
+            )
+            F = reparameterize(Fmean, Fvar, z)
+
+            # Store this layer results
             Fs.append(F)
             Fmeans.append(Fmean)
             Fvars.append(Fvar)
-            Fpriors.append(Fprior)
 
-        return Fs, Fmeans, Fvars, Fpriors
+            # If prior samples are retrieved, store them in the original
+            # shape.
+            if return_prior_samples:
+                Fprior = torch.reshape(
+                    results[2],
+                    [results[2].shape[0], S, N, D_out],
+                )
+                Fpriors.append(Fprior)
 
-    def predict_f(self, predict_at, num_samples, full_cov=False):
+        if return_prior_samples:
+            return Fs, Fmeans, Fvars, Fpriors
+        return Fs, Fmeans, Fvars
+
+    def predict_f(self, predict_at, num_samples):
         """
         Returns the predicted mean and variance at the last layer.
 
@@ -269,14 +302,13 @@ class DVIP_Base(torch.nn.Module):
                 each layer.
         """
 
-        _, Fmeans, Fvars, _ = self.propagate(
+        _, Fmeans, Fvars = self.propagate(
             predict_at,
             num_samples,
-            full_cov=full_cov,
         )
         return Fmeans[-1], Fvars[-1]
 
-    def predict_y(self, predict_at, num_samples, full_cov=False):
+    def predict_y(self, predict_at, num_samples):
         """
         Returns the predicted mean and variance for the given inputs.
         Takes the predictions from the last layer and considers
@@ -288,10 +320,6 @@ class DVIP_Base(torch.nn.Module):
                      Contains the input features.
         num_samples : int
                       Number of MonteCarlo resamples to use
-        full_cov : boolean
-                   Whether to use the full covariance matrix or just
-                   the diagonal values.
-
 
         Returns
         -------
@@ -300,13 +328,11 @@ class DVIP_Base(torch.nn.Module):
         Fvars : torch tensor of shape (num_layers, batch_size, output_dim)
                 Contains the standard deviation of the predictions.
         """
-        Fmean, Fvar = self.predict_f(
-            predict_at, num_samples=num_samples, full_cov=full_cov
-        )
+        Fmean, Fvar = self.predict_f(predict_at, num_samples=num_samples)
 
         return self.likelihood.predict_mean_and_var(Fmean, Fvar)
 
-    def get_prior_samples(self, X, full_cov=False):
+    def get_prior_samples(self, X):
         """
         Returns the prior samples of the given inputs using 1 MonteCarlo
         resample.
@@ -315,9 +341,6 @@ class DVIP_Base(torch.nn.Module):
         ----------
         X : torch tensor of shape (batch_size, data_dim)
             Contains the input features.
-        full_cov : boolean
-                   Whether to use the full covariance matrix or just
-                   the diagonal values.
 
         Returns
         -------
@@ -326,7 +349,7 @@ class DVIP_Base(torch.nn.Module):
                  point.
         """
         _, _, _, Fpriors = self.propagate(
-            X, num_samples=self.num_samples, full_cov=full_cov
+            X, num_samples=self.num_samples, predict_prior_samples=True
         )
 
         # Squeeze the MonteCarlo dimension
@@ -339,11 +362,26 @@ class DVIP_Base(torch.nn.Module):
         Compute Black-Box alpha energy objective function for
         the given inputs, targets and value of alpha.
 
-        This value is estimated using MonteCarlo if different
-        from zero.
+        If alpha is 0, the standard variational evidence lower
+        bound is computed.
+
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input, must be standardized.
+        alpha : float between 0 and 1
+                Value of alpha in BB-alpha energy.
+
+        Returns
+        -------
+        bb_alpha : torch tensor of shape (batch_size, output_dim)
+                   Contains the BB-alpha energy per data point.
+
         """
         # Compute model predictions, shape [S, N, D]
-        F_mean, F_var = self.predict_f(X, num_samples=self.num_samples, full_cov=False)
+        F_mean, F_var = self.predict_f(X, num_samples=self.num_samples)
         # Compute variational expectation using Black-box alpha energy.
         # Shape [N, D]
         return self.likelihood.variational_expectations(F_mean, F_var, Y, alpha=alpha)
@@ -361,6 +399,10 @@ class DVIP_Base(torch.nn.Module):
         y : torch tensor of shape (batch_size, output_dim)
             Targets of the given input, must be standardized.
 
+        Returns
+        -------
+        nelbo : float
+                Objective minimization function.
         """
         # Compute loss
         bb_alpha = self.bb_alpha_energy(X, y, self.bb_alpha)
@@ -390,7 +432,7 @@ class DVIP_Base(torch.nn.Module):
         self.likelihood.log_variance.requires_grad = False
 
     def print_variables(self):
-        """Prints the model variables in a prettier way."""
+        """Prints the model variables in a prettier format."""
         import numpy as np
 
         print("\n---- MODEL PARAMETERS ----")

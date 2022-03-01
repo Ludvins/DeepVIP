@@ -1,8 +1,5 @@
-from re import M
 import numpy as np
 import torch
-
-from .utils import reparameterize
 
 
 class Layer(torch.nn.Module):
@@ -32,62 +29,11 @@ class Layer(torch.nn.Module):
         self.generator = torch.Generator(device)
         self.generator.manual_seed(seed)
 
-    def conditional_ND(self):
-        raise NotImplementedError
-
     def KL(self):
         raise NotImplementedError
 
-    def sample_from_conditional(self, X):
-        """
-        Calculates self.conditional and also draws a sample.
-        Adds input propagation if necessary.
-
-        Parameters
-        ----------
-        X : torch tensor of shape (..., N, D_in)
-            Input locations. Additional dimensions at the beggining are
-            propagated over each computation.
-        full_cov : boolean
-                   Wether to compute or not the full covariance matrix or just
-                   the diagonal.
-        Returns
-        -------
-        samples : torch tensor of shape (..., N, self.output_dim)
-                  Samples from a Gaussian given by mean and var.
-        mean : torch tensor of shape (..., N, self.output_dim)
-               Mean values from conditional_ND applied to X.
-        var : torch tensor of shape (..., N , self.output_dim)
-              Variance values from conditional_ND applied to X.
-        prior_samples : torch tensor of shape (self.num_coeffs, ...,
-                        N, self.output_dim)
-                        Prior samples from conditional_ND applied to X.
-        """
-
-        # Get input shape, S = MC resamples, N = num data, D 0 data dim
-        S, N, D = X.shape
-        # Given that no full cov is used, flatten the MC resamples
-        X_flat = torch.reshape(X, [S * N, D])
-
-        # Create mean and var predictions from layer
-        mean, var, prior_samples = self.conditional_ND(X_flat)
-        # Reshape predictions to the original shape
-        mean = torch.reshape(mean, [S, N, mean.shape[-1]])
-        var = torch.reshape(var, [S, N, var.shape[-1]])
-        prior_samples = torch.reshape(
-            prior_samples,
-            [prior_samples.shape[0], S, N, prior_samples.shape[-1]],
-        )
-
-        # Use Gaussian re-parameterization trick to create samples.
-        z = torch.randn(
-            mean.shape,
-            generator=self.generator,
-            dtype=self.dtype,
-            device=self.device,
-        )
-        samples = reparameterize(mean, var, z)
-        return samples, mean, var, prior_samples
+    def forward(self, X):
+        raise NotImplementedError
 
 
 class VIPLayer(Layer):
@@ -213,17 +159,7 @@ class VIPLayer(Layer):
         )
         self.q_sqrt_tri = torch.nn.Parameter(self.q_sqrt_tri)
 
-    def freeze_posterior(self):
-        """Sets the model parameters as non-trainable."""
-        self.q_mu.requires_grad = False
-        self.q_sqrt_tri.requires_grad = False
-        self.log_layer_noise.requires_grad = False
-
-    def freeze_prior(self):
-        """Sets the prior parameters of this layer as non trainable."""
-        self.generative_function.freeze_parameters()
-
-    def conditional_ND(self, X):
+    def forward(self, X, return_prior_samples=False):
         """
         Computes Q*(y|x, a) using the linear regression approximation.
         Given that this distribution is Gaussian and Q(a) is also Gaussian
@@ -253,6 +189,9 @@ class VIPLayer(Layer):
         -----------
         X : torch tensor of shape (N, D)
             Contains the input locations.
+        return_prior_samples : boolean
+                               Whether to return the generated prior
+                               samples or not.
 
         Returns:
         --------
@@ -288,6 +227,8 @@ class VIPLayer(Layer):
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
 
+        # Compute the diagonal of the predictive covariance matrix
+        # K = diag(phi^T q_sqrt^T q_sqrt phi)
         K = torch.einsum("ind, sid -> snd", phi, q_sqrt)
         K = torch.sum(K * K, dim=0)
 
@@ -298,7 +239,11 @@ class VIPLayer(Layer):
         # Add mean function
         if self.mean_function is not None:
             mean = mean + self.mean_function(X)
-        return mean, K, f
+
+        if return_prior_samples:
+            return mean, K, f
+
+        return mean, K
 
     def KL(self):
         """
@@ -337,3 +282,13 @@ class VIPLayer(Layer):
             KL += self.generative_function.KL()
 
         return KL
+
+    def freeze_posterior(self):
+        """Sets the model parameters as non-trainable."""
+        self.q_mu.requires_grad = False
+        self.q_sqrt_tri.requires_grad = False
+        self.log_layer_noise.requires_grad = False
+
+    def freeze_prior(self):
+        """Sets the prior parameters of this layer as non trainable."""
+        self.generative_function.freeze_parameters()
