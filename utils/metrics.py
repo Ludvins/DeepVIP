@@ -2,7 +2,6 @@
 import numpy as np
 import torch
 
-
 class Metrics:
     def __init__(self, num_data=-1, device=None):
         """Defines a class that encapsulates all considered metrics.
@@ -25,11 +24,30 @@ class Metrics:
     def reset(self):
         """Ressets all the metrics to zero."""
         self.loss = torch.tensor(0.0, device=self.device)
-        self.mse = torch.tensor(0.0, device=self.device)
         self.nll = torch.tensor(0.0, device=self.device)
+
+    def update(self, y, loss, mean_pred, std_pred, likelihood, light=True):
+        raise NotImplementedError
+    
+    def compute_nll(self, y, mean_pred, std_pred, likelihood):
+        l = likelihood.logdensity(y, mean_pred, std_pred**2)
+        l = torch.sum(l, -1)
+        log_num_samples = torch.log(torch.tensor(mean_pred.shape[0]))
+        lse =  torch.logsumexp(l , axis=0)- log_num_samples
+        return -torch.mean(lse)
+
+
+class MetricsRegression(Metrics):
+    def __init__(self, num_data=-1, device=None):
+        super().__init__(num_data, device)
+
+    def reset(self):
+        """Ressets all the metrics to zero."""
+        super().reset()
+        self.mse = torch.tensor(0.0, device=self.device)
         self.crps = torch.tensor(0.0, device=self.device)
 
-    def update(self, y, loss, mean_pred, std_pred, light=True):
+    def update(self, y, loss, mean_pred, std_pred, likelihood, light=True):
         """Updates all the metrics given the results in the parameters.
 
         Arguments
@@ -59,30 +77,15 @@ class Metrics:
         # The RMSE is computed using the mean prediction of the Gaussian
         #  Mixture, that is, the mean of the mean predictions.
         self.mse += scale * self.compute_mse(y, mean_pred.mean(0))
-        self.nll += scale * self.compute_nll(y, mean_pred, std_pred)
-
+        self.nll += scale * self.compute_nll(y, mean_pred, std_pred, likelihood)
         # Update heavy metrics
         if not light:
             self.crps += scale * self.compute_crps(y, mean_pred, std_pred)
 
     def compute_mse(self, y, prediction):
         """Computes the root mean squared error for the given predictions."""
-        return torch.nn.functional.mse_loss(y, prediction)
-
-    def compute_nll(self, y, mean_pred, std_pred):
-        """Computes the negative log likelihood for the given predictions.
-        Assumes Gaussian likelihood."""
-        # Get the number of posterior samples
-        S = mean_pred.shape[0]
-        # Compute the Gaussian likelihood of the data in each sample
-        normal = torch.distributions.Normal(loc=mean_pred, scale=std_pred)
-        logpdf = normal.log_prob(y)
-        # Sum label dimensionality
-        logpdf = torch.sum(logpdf, -1)
-        # Compute the Negative log-likelihood on the Gaussian mixture
-        ll = torch.logsumexp(logpdf, 0) - np.log(S)
-        return -ll.mean()
-
+        return torch.nn.functional.mse_loss(prediction, y)
+    
     def compute_crps(self, y, mean_pred, std_pred):
 
         if mean_pred.shape[-1] != 1:
@@ -150,4 +153,60 @@ class Metrics:
             "RMSE": np.sqrt(self.mse.detach().cpu().numpy()),
             "NLL": float(self.nll.detach().cpu().numpy()),
             "CRPS": float(self.crps.detach().cpu().numpy()),
+        }
+
+
+
+class MetricsClassification(Metrics):
+    def __init__(self, num_data=-1, device=None):
+        super().__init__(num_data, device)
+
+    def reset(self):
+        """Ressets all the metrics to zero."""
+        super().reset()
+        self.acc = torch.tensor(0.0, device=self.device)
+
+    def update(self, y, loss, mean_pred, std_pred, likelihood, light = True):
+        """Updates all the metrics given the results in the parameters.
+
+        Arguments
+        ---------
+
+        y : torch tensor of shape (batch_size, output_dim)
+            Contains the true targets of the data.
+        loss : torch tensor of shape ()
+               Contains the loss value for the given batch.
+        pred : torch tensor of shape (S, batch_size, output_dim)
+               Contains the predictions for each sample
+               in the batch.
+        """
+        # Conmpute the scale value using the batch_size
+        batch_size = y.shape[0]
+        if self.num_data == -1:
+            scale = 1
+        else:
+            scale = batch_size / self.num_data
+        # Update light metrics
+        self.loss += scale * loss
+        self.acc += scale * self.compute_acc(y, mean_pred)
+        self.nll += scale * self.compute_nll(y, mean_pred, std_pred, likelihood)
+
+    def compute_nll(self, y, mean_pred, std_pred, likelihood):
+        l = likelihood.logdensity( mean_pred, std_pred**2, y)
+        l = torch.sum(l, -1)
+        log_num_samples = torch.log(torch.tensor(mean_pred.shape[0]))
+        lse =  torch.logsumexp(l , axis=0)- log_num_samples
+        return -torch.mean(lse)
+
+    def compute_acc(self, y, prediction):
+        """"""
+        #mode(np.argmax(m, 2), 0)[0].reshape(Y_batch.shape).astype(int)==Y_batch.astype(int))
+        pred = torch.mode(torch.argmax(prediction, -1), 0)[0]
+        return (pred == y.flatten()).float().mean()
+
+    def get_dict(self):
+        return {
+            "LOSS": float(self.loss.detach().cpu().numpy()),
+            "NLL": float(self.nll.detach().cpu().numpy()),
+            "ACC": float(self.acc.detach().cpu().numpy()),
         }

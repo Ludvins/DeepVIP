@@ -287,7 +287,8 @@ class VIPLayer(Layer):
         """Sets the model parameters as non-trainable."""
         self.q_mu.requires_grad = False
         self.q_sqrt_tri.requires_grad = False
-        self.log_layer_noise.requires_grad = False
+        if self.log_layer_noise:
+            self.log_layer_noise.requires_grad = False
 
     def freeze_prior(self):
         """Sets the prior parameters of this layer as non trainable."""

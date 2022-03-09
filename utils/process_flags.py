@@ -2,6 +2,10 @@ import argparse
 
 import numpy as np
 import torch
+
+from src.generative_functions import BayesLinear, SimplerBayesLinear
+from src.likelihood import BroadcastedLikelihood, Gaussian, MultiClass
+from utils.metrics import MetricsClassification, MetricsRegression
 from .dataset import get_dataset
 
 
@@ -13,8 +17,27 @@ def manage_experiment_configuration(args=None):
         args = parser.parse_args()
 
     FLAGS = vars(args)
+    
+    if args.device == "gpu":
+        # CUDA for PyTorch
+        use_cuda = torch.cuda.is_available()
+        args.device = torch.device("cuda:0" if use_cuda else "cpu")
+        torch.backends.cudnn.benchmark = True
+
+    
     # Manage Dataset
     args.dataset = get_dataset(args.dataset_name)
+    
+    FLAGS["metrics_type"] = args.dataset.type
+    if args.dataset.type == "regression":
+        args.likelihood = Gaussian(dtype = args.dtype, device = args.device)
+        args.metrics = MetricsRegression
+    elif args.dataset.type == "multiclass":
+        mc = MultiClass(num_classes = args.dataset.classes,
+                        device = args.device, 
+                        dtype = args.dtype)
+        args.likelihood = BroadcastedLikelihood(mc)
+        args.metrics = MetricsClassification
 
     FLAGS["activation_str"] = args.activation
     # Manage Generative function
@@ -31,15 +54,27 @@ def manage_experiment_configuration(args=None):
             FLAGS["activation"] = torch.sigmoid
         elif args.activation == "cos":
             FLAGS["activation"] = torch.cos
-
+        else:
+            raise ValueError("Invalid BNN activation type.")        
+        
+        FLAGS["bnn_layer_str"] = args.bnn_layer
+        if args.bnn_layer == "BayesLinear":
+            FLAGS["bnn_layer"] = BayesLinear
+        elif args.bnn_layer == "SimplerBayesLinear":
+            FLAGS["bnn_layer"] = SimplerBayesLinear
+        else:
+            raise ValueError("Invalid BNN layer type.")    
+            
     if args.dtype == "float64":
         FLAGS["dtype"] = torch.float64
 
-    args.batch_size = min(args.batch_size, len(args.dataset))
+
+    len_train = args.dataset.len_train(args.test_size)
+    args.batch_size = min(args.batch_size, len_train)
     if args.epochs is None:
         if args.iterations is None:
             raise ValueError("Either Epochs or Iterations must be selecetd.")
-        args.epochs = int(args.iterations / (len(args.dataset) / args.batch_size))
+        args.epochs = int(args.iterations / (len_train / args.batch_size))
 
     return args
 
@@ -85,6 +120,11 @@ def get_parser():
         "use during inference",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+    )
+    parser.add_argument(
         "--genf",
         type=str,
         default="BNN",
@@ -93,6 +133,11 @@ def get_parser():
             " (BNN), Gaussian Process (GP) or Gaussian Process with "
             " Inducing Points (GPI)"
         ),
+    )
+    parser.add_argument(
+        "--bnn_layer",
+        type=str,
+        default="BayesLinear",
     )
     parser.add_argument(
         "--dataset_name",
@@ -127,7 +172,7 @@ def get_parser():
         "--final_layer_mu",
         type=float,
         default=0,
-    )
+    )    
     parser.add_argument(
         "--final_layer_sqrt",
         type=float,
@@ -148,9 +193,10 @@ def get_parser():
         type=float,
         default=1e-5,
     )
+
     parser.add_argument(
         "--inner_layers_noise",
-        type=float,
+        type=lambda x: None if x == "None" else float(x),
         default=-5,
     )
     parser.add_argument(
@@ -169,7 +215,7 @@ def get_parser():
     parser.add_argument(
         "--regression_coeffs",
         type=int,
-        default=50,
+        default=20,
         help="Number of regression coefficients to use",
     )
     parser.add_argument(
@@ -195,6 +241,11 @@ def get_parser():
         type=float,
         default=0.001,
         help="Training learning rate",
+    )
+    parser.add_argument(
+        "--test_size",
+        type=float,
+        default=0.1,
     )
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument(
@@ -236,7 +287,7 @@ def get_parser():
     parser.add_argument(
         "--dtype",
         type=str,
-        default="float64",
+        default=torch.float64,
     )
     parser.add_argument(
         "--split",

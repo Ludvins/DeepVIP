@@ -108,7 +108,7 @@ layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args
 
 
 # Instantiate Likelihood
-ll = Gaussian(device=args.device, trainable=not args.freeze_ll)
+ll = args.likelihood(device=args.device, dtype = args.dtype)
 
 dvip = DVIP_Base(
     ll,

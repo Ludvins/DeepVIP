@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+from scripts.filename import create_file_name
+
 
 def build_plot_name(
     vip_layers,
@@ -234,3 +236,54 @@ def plot_prior_samples(X, prior_samples, ax):
             ax=ax,
         )
     ax.legend()
+
+
+def learning_curve(df, df_val, test_metrics_names, num_metrics, args):
+    fig = plt.figure(figsize=(20, 10))
+
+    ax3 = fig.add_subplot(2, 2, 2)
+    ax4 = fig.add_subplot(2, 2, 4)
+
+    loss = df[["LOSS"]].to_numpy().flatten()
+    ax3.plot(loss, label="Training loss")
+    ax3.legend()
+    ax3.set_title("Loss evolution")
+    ax4.plot(
+        np.arange(loss.shape[0] // 5, loss.shape[0]),
+        loss[loss.shape[0] // 5 :],
+        label="Training loss",
+    )
+    ax4.legend()
+    ax4.set_title("Loss evolution in last half of epochs")
+
+    for i, m in enumerate(test_metrics_names[1:]):
+        ax = fig.add_subplot(num_metrics - 1, 2, 2*i + 1)
+        ax.plot(df[[m]].to_numpy(), label="Training {}".format(m))
+        ax.plot(df_val[[m]].to_numpy(), label="Validation {}".format(m))
+        ymin, ymax = ax.get_ylim()
+        d = (ymax - ymin) / 10
+        ax.vlines(
+            np.argmin(df[[m]].to_numpy()),
+            np.min(df[[m]].to_numpy()) - d,
+            np.min(df[[m]].to_numpy()) + d,
+            color="black",
+            label="Minimum value",
+        )
+        ax.vlines(
+            np.argmin(df_val[[m]].to_numpy()),
+            np.min(df_val[[m]].to_numpy()) - d,
+            np.min(df_val[[m]].to_numpy()) + d,
+            color="black",
+        )
+        if m == "RMSE":
+            ax.set_yscale('log')
+        ax.legend()
+        ax.set_title("{} evolution".format(m))
+
+
+
+    plt.savefig("plots/" + create_file_name(args) + ".png")
+    # open file for writing
+
+    if args.show:
+        plt.show()

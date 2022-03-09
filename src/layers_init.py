@@ -32,6 +32,7 @@ def init_layers(
     regression_coeffs,
     bnn_structure,
     bnn_inner_dim,
+    bnn_layer,
     activation,
     seed,
     device,
@@ -85,6 +86,8 @@ def init_layers(
     bnn_inner_dims : int
                      Number of inner dimensions for the BNN-GP model.
                      Number of samples to approximate the RBF kernel.
+    bnn_layer : 
+                     
     activation : callable
                  Non-linear function to apply at each inner
                  dimension of the Bayesian Network.
@@ -167,6 +170,9 @@ def init_layers(
 
         # Dimensionality reduction, PCA using svd decomposition
         elif dim_in > dim_out:
+            q_mu_initial_value = inner_layers_mu
+            q_sqrt_initial_value = inner_layers_sqrt
+            log_layer_noise = inner_layers_noise
             _, _, V = np.linalg.svd(X_running, full_matrices=False)
 
             mf = LinearProjection(V[:dim_out, :].T, device=device)
@@ -186,6 +192,7 @@ def init_layers(
                 structure=bnn_structure,
                 activation=activation,
                 output_dim=dim_out,
+                layer_model = bnn_layer,
                 dropout=dropout,
                 fix_random_noise=fix_prior_noise,
                 zero_mean_prior=zero_mean_prior,

@@ -21,16 +21,16 @@ args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
 
-train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(0.1, args.seed + args.split)
+
 
 # Get VIP layers
 layers = init_layers(train_dataset.inputs, args.dataset.output_dim, **vars(args))
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle = True)
-print(train_dataset.targets)
-input()
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 val_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+
+ll = Gaussian(device=args.device)
 
 # Create DVIP object
 dvip = DVIP_Base(

@@ -5,8 +5,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import sys
-import time
-
+from timeit import default_timer as timer
 
 sys.path.append(".")
 
@@ -23,37 +22,8 @@ args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
 
-# CUDA for PyTorch
-use_cuda = torch.cuda.is_available()
-device = "cpu"
-torch.backends.cudnn.benchmark = True
-vars(args)["device"] = device
+train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(0.1, args.seed + args.split)
 
-# Generate train/test partition using split number
-train_indexes, test_indexes = train_test_split(
-    np.arange(len(args.dataset)),
-    test_size=0.1,
-    random_state=args.seed + args.split,
-)
-
-
-train_dataset = Training_Dataset(
-    args.dataset.inputs[train_indexes],
-    args.dataset.targets[train_indexes],
-    verbose=False,
-)
-train_test_dataset = Test_Dataset(
-    args.dataset.inputs[train_indexes],
-    args.dataset.targets[train_indexes],
-    train_dataset.inputs_mean,
-    train_dataset.inputs_std,
-)
-test_dataset = Test_Dataset(
-    args.dataset.inputs[test_indexes],
-    args.dataset.targets[test_indexes],
-    train_dataset.inputs_mean,
-    train_dataset.inputs_std,
-)
 
 # Get VIP layers
 layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args))
@@ -63,12 +33,9 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle = T
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-# Instantiate Likelihood
-ll = Gaussian(device=args.device, trainable=not args.freeze_ll)
-
 # Create DVIP object
 dvip = DVIP_Base(
-    ll,
+    args.likelihood,
     layers,
     len(train_dataset),
     bb_alpha=args.bb_alpha,
@@ -85,23 +52,25 @@ opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 # Set the number of training samples to generate
 dvip.num_samples = args.num_samples_train
 # Train the model
+start = timer()
 fit(
     dvip,
     train_loader,
     opt,
-    # scheduler=scheduler,
     epochs=args.epochs,
     device=args.device,
 )
+end = timer()
 
 # Set the number of test samples to generate
 dvip.num_samples = args.num_samples_test
 
 # Test the model
-train_metrics = score(dvip, train_test_loader, device=args.device)
-test_metrics = score(dvip, test_loader, device=args.device)
+train_metrics = score(dvip, train_test_loader, args.metrics, device=args.device)
+test_metrics = score(dvip, test_loader, args.metrics, device=args.device)
 d = {
     **vars(args),
+    **{"time": end - start},
     **{k + "_train": v for k, v in train_metrics.items()},
     **test_metrics,
 }

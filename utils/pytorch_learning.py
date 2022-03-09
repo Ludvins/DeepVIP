@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from .metrics import Metrics
+from .metrics import MetricsRegression, MetricsClassification
 from tqdm import tqdm
 
 
@@ -32,6 +32,7 @@ def fit(
              Device in which to perform all computations.
     """
     # Set model in training mode
+    
     model.train()
     for _ in range(epochs):
         # Mini-batch training
@@ -45,7 +46,7 @@ def fit(
             scheduler.step()
 
 
-def score(model, generator, device=None):
+def score(model, generator, metrics, device=None):
     """
     Evaluates the given model using the arguments provided.
 
@@ -68,7 +69,7 @@ def score(model, generator, device=None):
     # Set model in evaluation mode
     model.eval()
     # Initialize metrics
-    metrics = Metrics(len(generator.dataset), device=device)
+    metrics = metrics(len(generator.dataset), device=device)
     with torch.no_grad():
         # Batches evaluation
         for data, target in generator:
@@ -76,7 +77,8 @@ def score(model, generator, device=None):
             target = target.to(device)
             loss, mean_pred, std_pred = model.test_step(data, target)
             # Update mertics using this batch
-            metrics.update(target, loss, mean_pred, std_pred, light=False)
+            metrics.update(target, loss, mean_pred, std_pred, 
+                    model.likelihood, light=False)
     # Return metrics as a dictionary
     return metrics.get_dict()
 
@@ -138,6 +140,7 @@ def fit_with_metrics(
     model,
     training_generator,
     optimizer,
+    metric,
     val_generator=None,
     val_mc_samples=20,
     scheduler=None,
@@ -189,11 +192,11 @@ def fit_with_metrics(
     train_mc_samples = model.num_samples
 
     # Initialize training metrics
-    metrics = Metrics(len(training_generator.dataset), device=device)
+    metrics = metric(len(training_generator.dataset), device=device)
 
     # Initialize validation metrics if generator is provided.
     if val_generator is not None:
-        metrics_val = Metrics(len(val_generator.dataset), device=device)
+        metrics_val = metric(len(val_generator.dataset), device=device)
 
     # Initialize history arrays.
     history = []
@@ -201,12 +204,8 @@ def fit_with_metrics(
 
     # Initialize TQDM if verbose is set to 1.
     if verbose == 1:
-        # TQDM update interval. This value indicates how often (in epochs)
-        # TQDM is updated
-        miniters = 10
-
         # Initialize TQDM bar
-        tepoch = tqdm(range(epochs), unit="epoch", miniters=miniters)
+        tepoch = tqdm(range(epochs), unit="epoch")
         tepoch.set_description("Training ")
     else:
         tepoch = range(epochs)
@@ -235,6 +234,7 @@ def fit_with_metrics(
                     loss,
                     mean_pred,
                     std_pred,
+                    model.likelihood,
                 )
         # Store history of metrics
         metrics_dict = metrics.get_dict()
@@ -263,7 +263,11 @@ def fit_with_metrics(
                     # Get loss and predictions.
                     loss, mean_pred, std_pred = model.test_step(data, target)
                     # Compute validation metrics
-                    metrics_val.update(target, loss, mean_pred, std_pred)
+                    metrics_val.update(target, 
+                                       loss,
+                                       mean_pred, 
+                                       std_pred,
+                                       model.likelihood)
 
             # Store metrics and reset them
             metrics_val_dict = metrics_val.get_dict()
@@ -272,20 +276,13 @@ def fit_with_metrics(
 
             # Handle Validation metrics in TQDM
             if verbose == 1:
-                val_postfix = {
-                    "rmse_val": "{0:.2f}".format(metrics_val_dict["RMSE"]),
-                    "nll_val": "{0:.2f}".format(metrics_val_dict["NLL"]),
-                }
+                val_postfix = {k.lower()+'_val': v for k, v in metrics_val_dict.items()}
 
         # Show metrics in TQDM
-        if verbose == 1 and epoch % miniters == 0:
+        if verbose == 1:
             tepoch.set_postfix(
                 {
-                    **{
-                        "loss_train": "{0:.2f}".format(metrics_dict["LOSS"]),
-                        "rmse_train": "{0:.2f}".format(metrics_dict["RMSE"]),
-                        "nll_train": "{0:.2f}".format(metrics_dict["NLL"]),
-                    },
+                    **{k.lower()+'_train': v for k, v in metrics_dict.items()},
                     **val_postfix,
                 }
             )

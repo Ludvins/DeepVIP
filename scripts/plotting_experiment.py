@@ -12,61 +12,26 @@ from src.likelihood import Gaussian
 from utils.dataset import (
     Test_Dataset,
     Training_Dataset,
-    Synthetic_Dataset,
 )
 from utils.plotting_utils import build_plot_name, plot_train_test
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit, predict, predict_prior_samples, score
-
+from utils.pytorch_learning import fit, fit_with_metrics, predict, predict_prior_samples, score
 args = manage_experiment_configuration()
 
-torch.manual_seed(2147483647)
+torch.manual_seed(args.seed)
 
+train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(0.1, args.seed + args.split)
 
-# CUDA for PyTorch
-use_cuda = torch.cuda.is_available()
-device = "cpu"  # torch.device("cuda:0" if use_cuda else "cpu")
-torch.backends.cudnn.benchmark = True
-vars(args)["device"] = device
+# Get VIP layers
+layers = init_layers(train_dataset.inputs, args.dataset.output_dim, **vars(args))
 
-# Generate train/test partition using split number
-train_indexes, test_indexes = train_test_split(
-    np.arange(len(args.dataset)),
-    test_size=0.1,
-    random_state=2147483647 + args.split,
-)
-
-train_dataset = Training_Dataset(
-    args.dataset.inputs[train_indexes],
-    args.dataset.targets[train_indexes],
-    verbose=False,
-)
-train_test_dataset = Test_Dataset(
-    args.dataset.inputs[train_indexes],
-    args.dataset.targets[train_indexes],
-    train_dataset.inputs_mean,
-    train_dataset.inputs_std,
-)
-test_dataset = Test_Dataset(
-    args.dataset.inputs[test_indexes],
-    args.dataset.targets[test_indexes],
-    train_dataset.inputs_mean,
-    train_dataset.inputs_std,
-)
-
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle = True)
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-# Get VIP layers
-layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args))
-
-
-# Instantiate Likelihood
-ll = Gaussian(device=args.device, trainable=not args.freeze_ll)
-
+# Create DVIP object
 dvip = DVIP_Base(
-    ll,
+    args.likelihood,
     layers,
     len(train_dataset),
     bb_alpha=args.bb_alpha,
@@ -84,11 +49,12 @@ opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
 
 # Train the model
-fit(
+fit_with_metrics(
     dvip,
     train_loader,
     opt,
-    # scheduler=scheduler,
+    args.metrics,
+    val_generator=test_loader,
     epochs=args.epochs,
     device=args.device,
 )

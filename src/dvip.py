@@ -135,7 +135,6 @@ class DVIP_Base(torch.nn.Module):
         loss = self.nelbo(X, y)
         # Create backpropagation graph
         loss.backward()
-        # torch.nn.utils.clip_grad_norm_(self.parameters(), 10)
 
         # Make optimization step
         optimizer.step()
@@ -150,7 +149,7 @@ class DVIP_Base(torch.nn.Module):
         X : torch tensor of shape (batch_size, data_dim)
             Contains the input features.
         y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input, must be standardized.
+            Targets of the given input.
         Returns
         -------
         loss : float
@@ -329,8 +328,14 @@ class DVIP_Base(torch.nn.Module):
                 Contains the standard deviation of the predictions.
         """
         Fmean, Fvar = self.predict_f(predict_at, num_samples=num_samples)
-
         return self.likelihood.predict_mean_and_var(Fmean, Fvar)
+    
+    def predict_logdensity(self, Xnew, Ynew):
+        Fmean, Fvar = self.predict_f(Xnew, num_samples=self.num_samples)
+        l = self.likelihood.predict_logdensity(Fmean, Fvar, Ynew)
+        l = torch.sum(l, -1)
+        log_num_samples = torch.log(torch.tensor(self.num_samples))
+        return torch.logsumexp(l , axis=0)- log_num_samples
 
     def get_prior_samples(self, X):
         """
@@ -349,7 +354,7 @@ class DVIP_Base(torch.nn.Module):
                  point.
         """
         _, _, _, Fpriors = self.propagate(
-            X, num_samples=self.num_samples, predict_prior_samples=True
+            X, num_samples=self.num_samples, return_prior_samples=True
         )
 
         # Squeeze the MonteCarlo dimension

@@ -119,11 +119,11 @@ class BayesLinear(GenerativeFunction):
             self.weight_mu = 0
             self.bias_mu = 0
         else:
-            self.weight_mu = torch.nn.Parameter(torch.tensor(0.0))
-            self.bias_mu = torch.nn.Parameter(torch.tensor(0.0))
+            self.weight_mu = torch.nn.Parameter(torch.zeros([input_dim, output_dim], dtype = dtype))
+            self.bias_mu = torch.nn.Parameter(torch.zeros([1, output_dim], dtype = dtype))
 
-        self.weight_log_sigma = torch.nn.Parameter(torch.tensor(0.0))
-        self.bias_log_sigma = torch.nn.Parameter(torch.tensor(0.0))
+        self.weight_log_sigma = torch.nn.Parameter(torch.zeros([input_dim, output_dim], dtype = dtype))
+        self.bias_log_sigma = torch.nn.Parameter(torch.zeros([1, output_dim], dtype = dtype))
 
         # Reset the generator's seed if fixed noise.
         self.gaussian_sampler.reset_seed()
@@ -164,8 +164,8 @@ class BayesLinear(GenerativeFunction):
         z_w, z_b = self.get_noise()
 
         # Perform reparameterization trick
-        w = z_w * torch.exp(self.weight_log_sigma) + self.weight_mu
-        b = z_b * torch.exp(self.bias_log_sigma) + self.bias_mu
+        w = self.weight_mu + z_w * torch.exp(self.weight_log_sigma) 
+        b = self.bias_mu + z_b * torch.exp(self.bias_log_sigma)
 
         # Apply linear transformation.
         return inputs @ w + b
@@ -180,31 +180,85 @@ class BayesLinear(GenerativeFunction):
         KL : int
              The addition of the 2 KL terms computed
         """
-        # Compute w's flattened mean and covariance diagonal matrix
-        if self.zero_mean_prior:
-            w_m = torch.zeros_like(self.weight_log_sigma)
-            b_m = torch.zeros_like(self.bias_log_sigma)
-        else:
-            w_m = torch.flatten(self.weight_mu)
-            b_m = torch.flatten(self.bias_mu)
+        # Compute covariance diagonal matrixes
+        w_Sigma = torch.square(torch.exp(self.weight_log_sigma))
+        b_Sigma = torch.square(torch.exp(self.bias_log_sigma))
 
-        w_Sigma = torch.flatten(torch.square(torch.exp(self.weight_log_sigma)))
-        b_Sigma = torch.flatten(torch.square(torch.exp(self.bias_log_sigma)))
-
-        # Compute the KL divergence of w
-        KL = -w_m.size(dim=0)
+        # Compute the 2*KL divergence of w
+        KL = -self.input_dim * self.output_dim
         KL += torch.sum(w_Sigma)
-        KL += torch.sum(w_m ** 2)
+        KL += torch.sum(self.weight_mu ** 2)
         KL -= 2 * torch.sum(self.weight_log_sigma)
 
-        # Compute the KL divergence of b
-        KL -= b_m.size(dim=0)
+        # Compute the 2*KL divergence of b
+        KL -= self.output_dim
         KL += torch.sum(b_Sigma)
-        KL += torch.sum(b_m ** 2)
+        KL += torch.sum(self.bias_mu ** 2)
         KL -= 2 * torch.sum(self.bias_log_sigma)
 
+        # Re-escale
         return KL / 2
 
+class SimplerBayesLinear(BayesLinear):
+    def __init__(
+        self,
+        num_samples,
+        input_dim,
+        output_dim,
+        device=None,
+        fix_random_noise=False,
+        zero_mean_prior=False,
+        seed=0,
+        dtype=torch.float64,
+    ):
+        """
+        Generates samples from a stochastic Bayesian Linear function
+        f(x) = w^T x + b,   where w and b follow a Gaussian distribution,
+        parameterized by their mean and log standard deviation.
+
+        Parameters:
+        -----------
+        num_samples : int
+                      Number of samples to generate.
+        input_dim : int
+                    Dimensionality of the input values `x`.
+        output_dim : int
+                     Dimensionality of the function output.
+        device : torch.device
+                 The device in which the computations are made.
+        fix_random_noise : boolean
+                           Wether to reset the Random Generator's seed in each
+                           iteration.
+        zero_mean_prior : boolean
+                          wether to consider 0 mean prior or not, i. e, to
+                          create variables for the mean values of the gaussian
+                          distributions or fix these to 0.
+        seed : int
+               Initial seed for the random number generator.
+        dtype : data-type
+                The dtype of the layer's computations and weights.
+        """
+        super(SimplerBayesLinear, self).__init__(
+            num_samples,
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            zero_mean_prior=zero_mean_prior,
+            seed=seed,
+            dtype=dtype,
+        )
+        # If the BNN has zero mean, no parameters are considered for the
+        # mean values the weights and bias variable
+        if zero_mean_prior:
+            self.weight_mu = 0
+            self.bias_mu = 0
+        else:
+            self.weight_mu = torch.nn.Parameter(torch.tensor(0.0))
+            self.bias_mu = torch.nn.Parameter(torch.tensor(0.0))
+
+        self.weight_log_sigma = torch.nn.Parameter(torch.tensor(0.0))
+        self.bias_log_sigma = torch.nn.Parameter(torch.tensor(0.0))
 
 class BayesianNN(GenerativeFunction):
     def __init__(
@@ -214,6 +268,7 @@ class BayesianNN(GenerativeFunction):
         num_samples,
         input_dim=1,
         output_dim=1,
+        layer_model = BayesLinear,
         dropout=0.0,
         seed=2147483647,
         fix_random_noise=False,
@@ -236,6 +291,8 @@ class BayesianNN(GenerativeFunction):
                     Dimensionality of the input values `x`.
         output_dim : int
                      Dimensionality of the function output.
+        layer_model :              
+                     
         dropout : float between 0 and 1
                   The degree of dropout used after each activation layer
         device : torch.device
@@ -271,14 +328,12 @@ class BayesianNN(GenerativeFunction):
         dims = [input_dim] + structure + [1]
         layers = []
 
-        gaussian_sampler = GaussianSampler(seed)
-
         # Loop over the input and output dimension of each sub-layer.
         for _in, _out in zip(dims, dims[1:]):
 
             # Append the Bayesian linear layer to the array of layers
             layers.append(
-                BayesLinear(
+                layer_model(
                     self.num_samples,
                     _in,
                     _out,
@@ -319,9 +374,9 @@ class BayesianNN(GenerativeFunction):
         for layer in self.layers[:-1]:
             # Apply BNN layer
             x = self.activation(layer(x))
-            # Pytorch internaly handles when the dropout layer is in
+            # Pytorch internally handles when the dropout layer is in
             # training mode. Moreover, if p = 0, no bernoully samples
-            # are taken, so there is no aditional computational cost
+            # are taken, so there is no additional computational cost
             # in calling this function in evaluation or p=0.
             x = self.dropout(x)
 
@@ -330,8 +385,7 @@ class BayesianNN(GenerativeFunction):
 
     def KL(self):
         """Computes the Kl divergence of the model as the addition of the
-        KL divergences of its sub-models.
-        """
+        KL divergences of its sub-models."""
         return torch.stack([layer.KL() for layer in self.layers]).sum()
 
 
@@ -467,7 +521,7 @@ class GP(GenerativeFunction):
         x = inputs / torch.exp(self.log_kernel_length)
         # Compute the normalizing factor
         scale_factor = torch.sqrt(
-            2.0 * torch.exp(self.log_kernel_amp) * self.inner_layer_dim_inv
+            2.0 * torch.exp(self.log_kernel_amp) / self.inner_layer_dim_inv
         )
         # Compute phi, shape [N, inner_dim]
         phi = scale_factor * torch.cos(x @ self.z + self.b)
