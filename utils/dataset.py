@@ -10,7 +10,7 @@ from sklearn.model_selection import train_test_split
 
 
 class Training_Dataset(Dataset):
-    def __init__(self, inputs, targets, verbose=True, normalize_targets = True):
+    def __init__(self, inputs, targets, verbose=True, normalize_targets=True):
 
         self.inputs = inputs
         if normalize_targets:
@@ -77,20 +77,17 @@ class DVIPDataset(Dataset):
             self.inputs = self.inputs[..., np.newaxis]
         if len(self.targets.shape) == 1:
             self.targets = self.targets[..., np.newaxis]
-            
+
     def get_split(self, test_size, seed):
         train_indexes, test_indexes = train_test_split(
             np.arange(len(self)), test_size=test_size, random_state=seed
         )
-        print(self.targets[train_indexes])
-        input()
 
         train_dataset = Training_Dataset(
-            self.inputs[train_indexes], self.targets[train_indexes],
-            normalize_targets=self.type == "regression"
+            self.inputs[train_indexes],
+            self.targets[train_indexes],
+            normalize_targets=self.type == "regression",
         )
-        print(train_dataset.targets)
-        input()
         train_test_dataset = Test_Dataset(
             self.inputs[train_indexes],
             self.targets[train_indexes],
@@ -103,7 +100,7 @@ class DVIPDataset(Dataset):
             train_dataset.inputs_mean,
             train_dataset.inputs_std,
         )
-        
+
         return train_dataset, train_test_dataset, test_dataset
 
     def __getitem__(self, index):
@@ -111,7 +108,7 @@ class DVIPDataset(Dataset):
 
     def __len__(self):
         return len(self.inputs)
-    
+
     def len_train(self, test_size):
         train_indexes, test_indexes = train_test_split(
             np.arange(len(self)), test_size=test_size, random_state=0
@@ -254,83 +251,90 @@ class WineWhite_Dataset(DVIPDataset):
         url = "{}{}".format(uci_base, "wine-quality/winequality-white.csv")
         data = pd.read_csv(url, delimiter=";").values
         self.split_data(data)
-        
-        
+
+
 class C02_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
         url = "https://scrippsco2.ucsd.edu/assets/data/atmospheric/stations/in_situ_co2/monthly/monthly_in_situ_co2_mlo.csv"
-        data = pd.read_csv(url, comment = '"', header = [0,1,2], dtype = float).values[:, [3, 4]]
-        mask =(data == -99.99).any(1)
+        data = pd.read_csv(url, comment='"', header=[0, 1, 2], dtype=float).values[
+            :, [3, 4]
+        ]
+        mask = (data == -99.99).any(1)
         self.data = data[~mask]
         self.n_data = self.data.shape[0]
 
-        
     def __len__(self):
         return 778
 
     def get_split(self, split, *args):
-        n_train = split * self.n_data //100
+        n_train = split * self.n_data // 100
         train_data = self.data[:n_train, :1]
         test_data = self.data[n_train:, :1]
         train_targets = self.data[:n_train, 1:]
         test_targets = self.data[n_train:, 1:]
-        
 
         self.train = Training_Dataset(train_data, train_targets)
 
         self.train_test = Test_Dataset(
-            self.data[:, :1], 
+            self.data[:, :1],
             self.data[:, 1:],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            test_data, 
+            test_data,
             test_targets,
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         return self.train, self.train_test, self.test
 
+
 class MNIST_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "multiclass"
         self.classes = 10
         self.output_dim = 10
-        train = datasets.MNIST(root="./data", train = True, download = True, transform=transforms.ToTensor())
-        test = datasets.MNIST(root="./data", train = False, download = True, transform=transforms.ToTensor())
-        
+        train = datasets.MNIST(
+            root="./data", train=True, download=True, transform=transforms.ToTensor()
+        )
+        test = datasets.MNIST(
+            root="./data", train=False, download=True, transform=transforms.ToTensor()
+        )
+
         train_data = train.data.reshape(60000, -1)
         test_data = test.data.reshape(10000, -1)
         train_targets = train.targets.reshape(-1, 1)
         test_targets = test.targets.reshape(-1, 1)
 
-        self.train = Training_Dataset(train_data.numpy(), train_targets.numpy(), normalize_targets=False)
+        self.train = Training_Dataset(
+            train_data.numpy(), train_targets.numpy(), normalize_targets=False
+        )
 
         self.train_test = Test_Dataset(
-            train_data.numpy(), 
+            train_data.numpy(),
             train_targets.numpy(),
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            test_data.numpy(), 
+            test_data.numpy(),
             test_targets.numpy(),
             self.train.inputs_mean,
             self.train.inputs_std,
         )
-        
+
     def __len__(self):
         return 70000
 
     def get_split(self, *args):
         return self.train, self.train_test, self.test
-    
-    
+
     def len_train(self, test_size):
         return 60000
+
 
 class Iris_Dataset(DVIPDataset):
     def __init__(self):
@@ -339,11 +343,15 @@ class Iris_Dataset(DVIPDataset):
         self.output_dim = 3
         url = "{}{}".format(uci_base, "iris/iris.data")
 
-        data = pd.read_csv(url, header = None)
-        data[4].replace(['Iris-setosa', 'Iris-versicolor', 'Iris-virginica'],
-                        [0, 1, 2], inplace=True)
+        data = pd.read_csv(url, header=None)
+        data[4].replace(
+            ["Iris-setosa", "Iris-versicolor", "Iris-virginica"],
+            [0, 1, 2],
+            inplace=True,
+        )
         self.split_data(data.values)
-        
+
+
 class Bimodal_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
@@ -351,33 +359,35 @@ class Bimodal_Dataset(DVIPDataset):
 
         rng = np.random.default_rng(seed=0)
 
-        x = rng.uniform(size = 2000) * 8 - 4
-        epsilon = rng.normal(size = 2000)
+        x = rng.uniform(size=2000) * 8 - 4
+        epsilon = rng.normal(size=2000)
 
-        c = rng.normal(size = 2000)
+        c = rng.normal(size=2000)
         y = np.zeros_like(x)
-        y[c >= 0.5] = 10*np.cos(x[c >= 0.5] - 0.5) + epsilon[c >= 0.5]
+        y[c >= 0.5] = 10 * np.cos(x[c >= 0.5] - 0.5) + epsilon[c >= 0.5]
 
-        y[c < 0.5] = 10*np.sin(x[c < 0.5] - 0.5) + epsilon[c < 0.5]
+        y[c < 0.5] = 10 * np.sin(x[c < 0.5] - 0.5) + epsilon[c < 0.5]
 
         self.inputs = x[..., np.newaxis]
         self.targets = y[..., np.newaxis]
+
 
 class Heterocedastic_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
 
-        rng = np.random.default_rng(seed = 0)
+        rng = np.random.default_rng(seed=0)
 
-        x = rng.uniform(size = 2000) * 8 - 4
-        epsilon = rng.normal(size = 2000) * 2
+        x = rng.uniform(size=2000) * 8 - 4
+        epsilon = rng.normal(size=2000) * 2
 
         sin = np.sin(x)
-        
+
         y = 7 * sin + epsilon * sin + 10
         self.inputs = x[..., np.newaxis]
         self.targets = y[..., np.newaxis]
+
 
 def get_dataset(dataset_name):
     if dataset_name == "boston":

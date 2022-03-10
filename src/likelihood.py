@@ -29,14 +29,19 @@ class Likelihood(torch.nn.Module):
 
            \int p(y=Y|f)q(f) df
         """
-        raise NotImplementedError("implement the logdensity function\
-                                  for this likelihood")
+        raise NotImplementedError(
+            "implement the logdensity function\
+                                  for this likelihood"
+        )
+
     def logp(self, F, Y):
         """
         Return the log density of the data given the function values.
         """
-        raise NotImplementedError("implement the logp function\
-                                  for this likelihood")
+        raise NotImplementedError(
+            "implement the logp function\
+                                  for this likelihood"
+        )
 
     def conditional_mean(self, F):
         """
@@ -66,8 +71,7 @@ class Likelihood(torch.nn.Module):
 
         """
         raise NotImplementedError
-    
-    
+
     def predict_mean_and_var(self, Fmu, Fvar):
         """
         Given a Normal distribution for the latent function,
@@ -88,6 +92,7 @@ class Likelihood(torch.nn.Module):
 
            \int\int y^2 p(y|f)q(f) df dy  - [ \int\int y^2 p(y|f)q(f) df dy ]^2
         """
+
     def predict_logdensity(self, Fmu, Fvar, Y):
         """
         Given a Normal distribution for the latent function, and a datum Y,
@@ -128,9 +133,7 @@ class Likelihood(torch.nn.Module):
 
 
 class Gaussian(Likelihood):
-    def __init__(
-        self, log_variance=-5.0, dtype=torch.float64, device=None
-    ):
+    def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None):
         """Gaussian Likelihood. Encapsulates the likelihood noise
         as a parameter.
         Arguments
@@ -201,29 +204,28 @@ class Gaussian(Likelihood):
         return logpdf / alpha
 
 
-
 class MultiClass(Likelihood):
-    def __init__(self, num_classes, dtype, device, epsilon = 0.001):
+    def __init__(self, num_classes, dtype, device, epsilon=1e-3):
         super().__init__(dtype, device)
         self.num_gauss_hermite_points = 20
         self.num_classes = num_classes
         self.epsilon = torch.tensor(epsilon)
-        self.K1 = self.epsilon/(self.num_classes - 1)
-        
+        self.K1 = self.epsilon / (self.num_classes - 1)
+
     def logdensity(self, mean, var, x):
-        """ Computes the probability of the labels (x) comming from a Bernoulli with
+        """Computes the probability of the labels (x) comming from a Bernoulli with
         mean (mean) and variance (var).
         """
         # Set labels to one-hot notation
         oh_on = one_hot(x.long().flatten(), self.num_classes).type(self.dtype)
-        # One_hot multiplied by the probability of each label 
+        # One_hot multiplied by the probability of each label
         #  contains only the probability of the given targets.
         return torch.log(torch.sum(oh_on * mean, -1))
-    
+
     def logp(self, F, Y):
         """
         Return the log density of the data given the function values.
-        
+
         Parameters
         ----------
         F : torch tensor of shape (num_data, n_classes)
@@ -231,7 +233,7 @@ class MultiClass(Likelihood):
             mixture.
         Y : torch tensor of shape (num_data, 1)
             Contains the true class for each data sample.
-        
+
         """
         # Tensor of shape (num_data, 1), with 1 if the prediction is correct
         # and 0 otherwise.
@@ -244,13 +246,13 @@ class MultiClass(Likelihood):
     def conditional_mean(self, F):
         """
         Given a value of the latent function, compute the probability of the data.
-        
+
         Parameters
         ----------
         F : torch tensor of shape (num_data, n_classes)
             Contains the score of each class for each data point on each
             mixture.
-        
+
         Returns
         -------
         oh : torch tensor of shape (num_data, n_classes)
@@ -272,55 +274,57 @@ class MultiClass(Likelihood):
 
     def predict_mean_and_var(self, Fmu, Fvar):
         # Size (n_classes, n_data)
-        possible_outputs = [torch.full([Fmu.size()[0], 1],i) for i in
-                                range(self.num_classes)]
+        possible_outputs = [
+            torch.full([Fmu.size()[0], 1], i) for i in range(self.num_classes)
+        ]
         # Size (n_classes, n_data)
         ps = [self.predict_density(Fmu, Fvar, po) for po in possible_outputs]
         # Shape (n_data, n_classes)
-        ps = torch.concat(ps, dim = 1)
+        ps = torch.concat(ps, dim=1)
         return ps, ps - torch.square(ps)
-    
+
     def hermgauss(self, n):
         # Return the locations and weights of GH quadrature
         x, w = np.polynomial.hermite.hermgauss(n)
-        return torch.tensor(x, dtype = self.dtype),  torch.tensor(w, dtype = self.dtype)
+        return torch.tensor(x, dtype=self.dtype), torch.tensor(w, dtype=self.dtype)
 
     def prob_is_largest(self, Y, mu, var, gh_x, gh_w):
         # Work out what the mean and variance is of the indicated latent function.
         # Shape (num_samples, num_classes)
         oh_on = one_hot(Y.long().flatten(), self.num_classes).type(self.dtype)
         # Only mean and var values corresponging to true label remain. The rest are
-        #  multiplied by 0. In short, that summation equals to retrieve the 
+        #  multiplied by 0. In short, that summation equals to retrieve the
         #  mean and var on the true label for each sample
         # Shape (num_samples, 1)
         mu_selected = torch.sum(oh_on * mu, 1).reshape(-1, 1)
         var_selected = torch.sum(oh_on * var, 1).reshape(-1, 1)
 
-        var_selected = torch.sqrt(torch.clip(2. * var_selected, min = 1e-10))
-        
+        sqrt_selected = torch.sqrt(torch.clip(2.0 * var_selected, min=1e-10))
+
         # Generate Gauss Hermite grid. Shape (num_samples, num_hermite)
-        X = mu_selected + gh_x * var_selected
+        X = mu_selected + gh_x * sqrt_selected
         # Compute the CDF of the Gaussian between the latent functions and the grid,
         # (including the selected function).
         # Shape (num_samples, num_classes, num_hermite)
-        dist = (torch.unsqueeze(X, 1) - torch.unsqueeze(mu, 2)) / torch.unsqueeze(var_selected, 2)
+        dist = (torch.unsqueeze(X, 1) - torch.unsqueeze(mu, 2)) / torch.unsqueeze(
+            var, 2
+        )
         cdfs = 0.5 * (1.0 + torch.erf(dist / np.sqrt(2.0)))
-        cdfs = cdfs * (1 - 2e-4) + 1e-4
-
+        cdfs = cdfs * (1 - 2e-6) + 1e-6
         # Blank out all the distances on the selected latent function.
         # Get off values as abs(oh_on - 1)
         oh_off = torch.abs(oh_on - 1)
         cdfs = cdfs * torch.unsqueeze(oh_off, 2) + torch.unsqueeze(oh_on, 2)
 
         # Take the product over the latent functions, and the sum over the GH grid.
-        gh_w = gh_w.unsqueeze(-1)/ np.sqrt(np.pi)
-        return torch.prod(cdfs, dim = 1) @ gh_w
+        gh_w = gh_w.unsqueeze(-1) / np.sqrt(np.pi)
+        return torch.prod(cdfs, dim=1) @ gh_w
 
     def predict_density(self, Fmu, Fvar, Y):
         gh_x, gh_w = self.hermgauss(self.num_gauss_hermite_points)
         p = self.prob_is_largest(Y, Fmu, Fvar, gh_x, gh_w)
-        return  p * (1 - self.epsilon) + (1. - p) * (self.K1)
-        
+        return p * (1 - self.epsilon) + (1.0 - p) * (self.K1)
+
     def predict_logdensity(self, Fmu, Fvar, Y):
         return self.log(self.predict_density(Fmu, Fvar, Y))
 
@@ -328,7 +332,7 @@ class MultiClass(Likelihood):
         """
         Compute the expected log density of the data, given a Gaussian
         distribution for the function values.
-
+        [http://mlg.eng.cam.ac.uk/matthews/thesis.pdf]
         if
             q(f) = N(Fmu, Fvar)
 
@@ -345,12 +349,8 @@ class MultiClass(Likelihood):
         """
         gh_x, gh_w = self.hermgauss(self.num_gauss_hermite_points)
         p = self.prob_is_largest(Y, Fmu, Fvar, gh_x, gh_w)
-        ve = p * torch.log(1.0 - self.epsilon) + (1.0 - p) * torch.log(
-            self.K1
-        )
+        ve = p * torch.log(1.0 - self.epsilon) + (1.0 - p) * torch.log(self.K1)
         return torch.sum(ve, dim=-1)
-
-
 
 
 class BroadcastedLikelihood(Likelihood):
@@ -358,13 +358,12 @@ class BroadcastedLikelihood(Likelihood):
         super().__init__(likelihood.dtype, likelihood.device)
         self.likelihood = likelihood
 
-        
     def _broadcast(self, f, vars_SND, vars_ND):
         S, N, D = vars_SND[0].size()
         vars_tiled = [torch.tile(x[None, :, :], [S, 1, 1]) for x in vars_ND]
 
-        flattened_SND = [torch.reshape(x, [S*N, D]) for x in vars_SND]
-        flattened_tiled = [torch.reshape(x, [S*N, -1]) for x in vars_tiled]
+        flattened_SND = [torch.reshape(x, [S * N, D]) for x in vars_SND]
+        flattened_tiled = [torch.reshape(x, [S * N, -1]) for x in vars_tiled]
 
         flattened_result = f(flattened_SND, flattened_tiled)
         if isinstance(flattened_result, tuple):
@@ -373,38 +372,39 @@ class BroadcastedLikelihood(Likelihood):
             return torch.reshape(flattened_result, [S, N, -1])
 
     def logdensity(self, p, q, x):
-        f = lambda vars_SND, vars_ND: self.likelihood.logdensity(vars_SND[0],
-                                                                vars_SND[1],
-                                                                vars_ND[0],
-                                                                )
-        return self._broadcast(f,[p, q], [x])
-    
+        f = lambda vars_SND, vars_ND: self.likelihood.logdensity(
+            vars_SND[0],
+            vars_SND[1],
+            vars_ND[0],
+        )
+        return self._broadcast(f, [p, q], [x])
+
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
-        f = lambda vars_SND, vars_ND: self.likelihood.variational_expectations(vars_SND[0],
-                                                                                vars_SND[1],
-                                                                                vars_ND[0],
-                                                                                alpha)
-        return self._broadcast(f,[Fmu, Fvar], [Y])
+        f = lambda vars_SND, vars_ND: self.likelihood.variational_expectations(
+            vars_SND[0], vars_SND[1], vars_ND[0], alpha
+        )
+        return self._broadcast(f, [Fmu, Fvar], [Y])
 
     def logp(self, F, Y):
         f = lambda vars_SND, vars_ND: self.likelihood.logp(vars_SND[0], vars_ND[0])
         return self._broadcast(f, [F], [Y])
 
     def conditional_mean(self, F):
-         f = lambda vars_SND, vars_ND: self.likelihood.conditional_mean(vars_SND[0])
-         return self._broadcast(f,[F], [])
+        f = lambda vars_SND, vars_ND: self.likelihood.conditional_mean(vars_SND[0])
+        return self._broadcast(f, [F], [])
 
     def conditional_variance(self, F):
-         f = lambda vars_SND, vars_ND: self.likelihood.conditional_variance(vars_SND[0])
-         return self._broadcast(f,[F], [])
+        f = lambda vars_SND, vars_ND: self.likelihood.conditional_variance(vars_SND[0])
+        return self._broadcast(f, [F], [])
 
     def predict_mean_and_var(self, Fmu, Fvar):
-         f = lambda vars_SND, vars_ND: self.likelihood.predict_mean_and_var(vars_SND[0],
-                                                                             vars_SND[1])
-         return self._broadcast(f,[Fmu, Fvar], [])
+        f = lambda vars_SND, vars_ND: self.likelihood.predict_mean_and_var(
+            vars_SND[0], vars_SND[1]
+        )
+        return self._broadcast(f, [Fmu, Fvar], [])
 
     def predict_logdensity(self, Fmu, Fvar, Y):
-        f = lambda vars_SND, vars_ND: self.likelihood.predict_logdensity(vars_SND[0],
-                                                                       vars_SND[1],
-                                                                       vars_ND[0])
-        return self._broadcast(f,[Fmu, Fvar], [Y])
+        f = lambda vars_SND, vars_ND: self.likelihood.predict_logdensity(
+            vars_SND[0], vars_SND[1], vars_ND[0]
+        )
+        return self._broadcast(f, [Fmu, Fvar], [Y])

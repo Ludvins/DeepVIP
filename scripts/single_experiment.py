@@ -21,14 +21,14 @@ args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
 
-train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(0.1, args.seed + args.split)
+train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
+    0.1, args.seed + args.split
+)
 
 # Get VIP layers
 layers = init_layers(train_dataset.inputs, args.dataset.output_dim, **vars(args))
 
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle = True)
-print(train_dataset.targets)
-input()
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 val_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
@@ -98,7 +98,7 @@ ax4.legend()
 ax4.set_title("Loss evolution in last half of epochs")
 
 for i, m in enumerate(test_metrics_names[1:]):
-    ax = fig.add_subplot(num_metrics - 1, 2, 2*i + 1)
+    ax = fig.add_subplot(num_metrics - 1, 2, 2 * i + 1)
     ax.plot(df[[m]].to_numpy(), label="Training {}".format(m))
     ax.plot(df_val[[m]].to_numpy(), label="Validation {}".format(m))
     ymin, ymax = ax.get_ylim()
@@ -118,7 +118,6 @@ for i, m in enumerate(test_metrics_names[1:]):
     )
     ax.legend()
     ax.set_title("{} evolution".format(m))
-
 
 
 plt.savefig("plots/" + create_file_name(args) + ".png")
