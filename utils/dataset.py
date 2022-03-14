@@ -4,13 +4,17 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
+import torch
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from sklearn.model_selection import train_test_split
 
 
 class Training_Dataset(Dataset):
-    def __init__(self, inputs, targets, verbose=True, normalize_targets=True):
+    def __init__(self, inputs, targets,
+                 verbose=True,
+                 normalize_inputs = True,
+                 normalize_targets=True):
 
         self.inputs = inputs
         if normalize_targets:
@@ -26,8 +30,12 @@ class Training_Dataset(Dataset):
         self.output_dim = targets.shape[1]
 
         # Normalize inputs
-        self.inputs_std = np.std(self.inputs, axis=0, keepdims=True) + 1e-6
-        self.inputs_mean = np.mean(self.inputs, axis=0, keepdims=True)
+        if normalize_inputs:
+            self.inputs_std = np.std(self.inputs, axis=0, keepdims=True) + 1e-6
+            self.inputs_mean = np.mean(self.inputs, axis=0, keepdims=True)
+        else:
+            self.inputs_mean = 0
+            self.inputs_std = 1     
 
         self.inputs = (self.inputs - self.inputs_mean) / self.inputs_std
         if verbose:
@@ -263,18 +271,23 @@ class C02_Dataset(DVIPDataset):
         ]
         mask = (data == -99.99).any(1)
         self.data = data[~mask]
-        self.n_data = self.data.shape[0]
+        self.len_data = self.data.shape[0]
+        
+        split = self.len_data//5
+        test_indexes = np.concatenate(
+            (np.arange(split, 2*split),
+            np.arange(3*split, 4*split)),
+            axis = 0
+        )
+        train_indexes = np.setdiff1d(np.arange(self.len_data), test_indexes)
 
-    def __len__(self):
-        return 778
+        
+        train_data = self.data[train_indexes, :1]
+        test_data = self.data[test_indexes, :1]
+        train_targets = self.data[train_indexes, 1:]
+        test_targets = self.data[test_indexes, 1:]
 
-    def get_split(self, split, *args):
-        n_train = split * self.n_data // 100
-        train_data = self.data[:n_train, :1]
-        test_data = self.data[n_train:, :1]
-        train_targets = self.data[:n_train, 1:]
-        test_targets = self.data[n_train:, 1:]
-
+        
         self.train = Training_Dataset(train_data, train_targets)
 
         self.train_test = Test_Dataset(
@@ -288,7 +301,15 @@ class C02_Dataset(DVIPDataset):
             test_targets,
             self.train.inputs_mean,
             self.train.inputs_std,
-        )
+        )    
+
+    def __len__(self):
+        return 778
+    
+    def len_train(self, test_size):
+        return len(self.train)
+
+    def get_split(self, split, *args):
         return self.train, self.train_test, self.test
 
 
@@ -303,14 +324,16 @@ class MNIST_Dataset(DVIPDataset):
         test = datasets.MNIST(
             root="./data", train=False, download=True, transform=transforms.ToTensor()
         )
-
-        train_data = train.data.reshape(60000, -1)
-        test_data = test.data.reshape(10000, -1)
+        
+        train_data = train.data.reshape(60000, -1)/255.
+        test_data = test.data.reshape(10000, -1)/255.
         train_targets = train.targets.reshape(-1, 1)
         test_targets = test.targets.reshape(-1, 1)
 
         self.train = Training_Dataset(
-            train_data.numpy(), train_targets.numpy(), normalize_targets=False
+            train_data.numpy(), train_targets.numpy(),
+            normalize_targets=False, 
+            normalize_inputs=False,
         )
 
         self.train_test = Test_Dataset(
@@ -350,6 +373,90 @@ class Iris_Dataset(DVIPDataset):
             inplace=True,
         )
         self.split_data(data.values)
+        
+class SolarIrradiance_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+        url = "https://lasp.colorado.edu/lisird/latis/dap/nrl2_tsi_P1M.csv?&time,irradiance"
+
+        self.data = pd.read_csv(url, header=[0], dtype=float).values
+        self.len_data = self.data.shape[0]
+        
+        test_indexes = np.concatenate(
+            (np.arange(self.len_data//6, self.len_data//6 + self.len_data // 5),
+            np.arange(2 * self.len_data // 4, 2 * self.len_data // 4 + self.len_data // 5)),
+            axis = 0
+        )
+        train_indexes = np.setdiff1d(np.arange(self.len_data), test_indexes)
+        
+        
+        train_data = self.data[train_indexes, :1]
+        test_data = self.data[test_indexes, :1]
+        train_targets = self.data[train_indexes, 1:]
+        test_targets = self.data[test_indexes, 1:]
+
+        
+        self.train = Training_Dataset(train_data, train_targets)
+
+        self.train_test = Test_Dataset(
+            self.data[:, :1],
+            self.data[:, 1:],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_data,
+            test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )    
+
+    def __len__(self):
+        return self.len_data
+    
+    def len_train(self, test_size):
+        return len(self.train)
+
+    def get_split(self, split, *args):
+        return self.train, self.train_test, self.test
+    
+class Rectangles_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "binaryclass"
+        self.classes = 2
+        self.output_dim = 2
+        
+        train_data = np.loadtxt('data/rectangles/rectangles_im_train.amat')
+        test_data = np.loadtxt('data/rectangles/rectangles_im_test.amat')
+        self.len_data = train_data.shape[0] + test_data.shape[0]
+        self.train = Training_Dataset(train_data[:, :-1],
+                                      train_data[:, -1].reshape(-1, 1),
+                                      normalize_targets=False, 
+                                      normalize_inputs=True)
+
+        self.train_test = Test_Dataset(
+            train_data[:, :-1],
+            train_data[:, -1].reshape(-1, 1),
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_data[:, :-1],
+            test_data[:, -1].reshape(-1, 1),
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )    
+
+    def __len__(self):
+        return self.len_data
+    
+    def len_train(self, test_size):
+        return len(self.train)
+
+    def get_split(self, split, *args):
+        return self.train, self.train_test, self.test
+        
 
 
 class Bimodal_Dataset(DVIPDataset):
@@ -416,10 +523,14 @@ def get_dataset(dataset_name):
         return SPGP_Dataset()
     elif dataset_name == "CO2":
         return C02_Dataset()
+    elif dataset_name == "Solar":
+        return SolarIrradiance_Dataset()
     elif dataset_name == "MNIST":
         return MNIST_Dataset()
     elif dataset_name == "Iris":
         return Iris_Dataset()
+    elif dataset_name == "Rectangles":
+        return Rectangles_Dataset()
     elif dataset_name == "Bimodal":
         return Bimodal_Dataset()
     elif dataset_name == "Heterocedastic":
