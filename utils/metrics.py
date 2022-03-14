@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 
+
 class Metrics:
     def __init__(self, num_data=-1, device=None):
         """Defines a class that encapsulates all considered metrics.
@@ -28,12 +29,12 @@ class Metrics:
 
     def update(self, y, loss, mean_pred, std_pred, likelihood, light=True):
         raise NotImplementedError
-    
+
     def compute_nll(self, y, mean_pred, std_pred, likelihood):
-        l = likelihood.logdensity(y, mean_pred, std_pred**2)
+        l = likelihood.logdensity(mean_pred, std_pred ** 2, y)
         l = torch.sum(l, -1)
         log_num_samples = torch.log(torch.tensor(mean_pred.shape[0]))
-        lse =  torch.logsumexp(l , axis=0)- log_num_samples
+        lse = torch.logsumexp(l, axis=0) - log_num_samples
         return -torch.mean(lse)
 
 
@@ -85,7 +86,7 @@ class MetricsRegression(Metrics):
     def compute_mse(self, y, prediction):
         """Computes the root mean squared error for the given predictions."""
         return torch.nn.functional.mse_loss(prediction, y)
-    
+
     def compute_crps(self, y, mean_pred, std_pred):
 
         if mean_pred.shape[-1] != 1:
@@ -156,7 +157,6 @@ class MetricsRegression(Metrics):
         }
 
 
-
 class MetricsClassification(Metrics):
     def __init__(self, num_data=-1, device=None):
         super().__init__(num_data, device)
@@ -166,7 +166,7 @@ class MetricsClassification(Metrics):
         super().reset()
         self.acc = torch.tensor(0.0, device=self.device)
 
-    def update(self, y, loss, mean_pred, std_pred, likelihood, light = True):
+    def update(self, y, loss, mean_pred, std_pred, likelihood, light=True):
         """Updates all the metrics given the results in the parameters.
 
         Arguments
@@ -191,16 +191,9 @@ class MetricsClassification(Metrics):
         self.acc += scale * self.compute_acc(y, mean_pred)
         self.nll += scale * self.compute_nll(y, mean_pred, std_pred, likelihood)
 
-    def compute_nll(self, y, mean_pred, std_pred, likelihood):
-        l = likelihood.logdensity( mean_pred, std_pred**2, y)
-        l = torch.sum(l, -1)
-        log_num_samples = torch.log(torch.tensor(mean_pred.shape[0]))
-        lse =  torch.logsumexp(l , axis=0)- log_num_samples
-        return -torch.mean(lse)
-
     def compute_acc(self, y, prediction):
         """"""
-        #mode(np.argmax(m, 2), 0)[0].reshape(Y_batch.shape).astype(int)==Y_batch.astype(int))
+        # mode(np.argmax(m, 2), 0)[0].reshape(Y_batch.shape).astype(int)==Y_batch.astype(int))
         pred = torch.mode(torch.argmax(prediction, -1), 0)[0]
         return (pred == y.flatten()).float().mean()
 

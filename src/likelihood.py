@@ -153,7 +153,7 @@ class Gaussian(Likelihood):
         self.log_variance = torch.tensor(log_variance, dtype=dtype, device=self.device)
         self.log_variance = torch.nn.Parameter(self.log_variance)
 
-    def logdensity(self, x, mu, var):
+    def logdensity(self, mu, var, x):
         """Computes the log density of a one dimensional
         Gaussian distribution of mean mu and variance var, evaluated
         on x
@@ -170,13 +170,12 @@ class Gaussian(Likelihood):
         In this case, it results in accumulating the variances."""
         return Fmu, Fvar + self.log_variance.exp()
 
-    def predict_logdensity(self, Fmu, Fvar, Y, y_mean = 0, y_std = 1):
+    def predict_logdensity(self, Fmu, Fvar, Y, y_mean=0, y_std=1):
         """Computes the predictive density of the targets given the means (Fmu) and
         variances (Fvar)"""
-        return self.logdensity(Y, 
-                               Fmu * y_std + y_mean, 
-                               (Fvar + self.log_variance.exp()) * y_std**2
-                               )
+        return self.logdensity(
+            Y, Fmu * y_std + y_mean, (Fvar + self.log_variance.exp()) * y_std ** 2
+        )
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         """Computes the variational expectation, i.e, the expectation under
@@ -217,15 +216,16 @@ class MultiClass(Likelihood):
         self.epsilon = torch.tensor(epsilon)
         self.K1 = self.epsilon / (self.num_classes - 1)
 
-    def logdensity(self, mean, var, x):
+    def logdensity(self, p, var, x):
         """Computes the probability of the labels (x) comming from a Bernoulli with
-        mean (mean) and variance (var).
+        mean (p) and variance (var).
         """
         # Set labels to one-hot notation
         oh_on = one_hot(x.long().flatten(), self.num_classes).type(self.dtype)
         # One_hot multiplied by the probability of each label
         #  contains only the probability of the given targets.
-        return torch.log(torch.sum(oh_on * mean, -1))
+        p = torch.sum(oh_on * p, -1)
+        return torch.log(p * (1 - self.epsilon) + (1.0 - p) * (self.K1))
 
     def logp(self, F, Y):
         """
@@ -325,12 +325,10 @@ class MultiClass(Likelihood):
         p = self.prob_is_largest(Y, Fmu, Fvar, gh_x, gh_w)
         return p * (1 - self.epsilon) + (1.0 - p) * (self.K1)
 
-    def predict_logdensity(self, Fmu, Fvar, Y, y_mean = 0, y_std = 1):
-        return torch.log(self.predict_density(
-                               Fmu * y_std + y_mean, 
-                               Fvar * y_std**2, 
-                               Y
-                               ))
+    def predict_logdensity(self, Fmu, Fvar, Y, y_mean=0, y_std=1):
+        return torch.log(
+            self.predict_density(Fmu * y_std + y_mean, Fvar * y_std ** 2, Y)
+        )
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         """
@@ -355,7 +353,8 @@ class MultiClass(Likelihood):
         p = self.prob_is_largest(Y, Fmu, Fvar, gh_x, gh_w)
         ve = p * torch.log(1.0 - self.epsilon) + (1.0 - p) * torch.log(self.K1)
         return torch.sum(ve, dim=-1)
-    
+
+
 class Bernoulli(Likelihood):
     def __init__(self, dtype, device, epsilon=1e-3):
         super().__init__(dtype, device)
@@ -376,11 +375,11 @@ class Bernoulli(Likelihood):
         p = self.inv_probit(Fmu / torch.sqrt(1 + Fvar))
         return p, p - torch.square(p)
 
-    def predict_logdensity(self, Fmu, Fvar, Y, y_mean = 0, y_std = 1):
-        p = self.predict_mean_and_var( 
-                               Fmu  * y_std + y_mean, 
-                               Fvar * y_std**2,
-                               )[0]
+    def predict_logdensity(self, Fmu, Fvar, Y, y_mean=0, y_std=1):
+        p = self.predict_mean_and_var(
+            Fmu * y_std + y_mean,
+            Fvar * y_std ** 2,
+        )[0]
         b = bernoulli.Bernoulli(p)
         return torch.sum(b.log_prob(Y), -1)
 
@@ -408,12 +407,11 @@ class Bernoulli(Likelihood):
            \int (\log p(y|f)) q(f) df.
 
         """
-        
-        return ndiagquad(self.logp,
-                         self.num_gauss_hermite_points,
-                         Fmu, Fvar, dtype = self.dtype, Y = Y)
-    
-    
+
+        return ndiagquad(
+            self.logp, self.num_gauss_hermite_points, Fmu, Fvar, dtype=self.dtype, Y=Y
+        )
+
 
 class BroadcastedLikelihood(Likelihood):
     def __init__(self, likelihood):

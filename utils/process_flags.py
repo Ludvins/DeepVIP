@@ -17,43 +17,40 @@ def manage_experiment_configuration(args=None):
         args = parser.parse_args()
 
     FLAGS = vars(args)
-    
+
     if args.device == "gpu":
         # CUDA for PyTorch
         use_cuda = torch.cuda.is_available()
         args.device = torch.device("cuda:0" if use_cuda else "cpu")
         torch.backends.cudnn.benchmark = True
 
-    
     # Manage Dataset
     args.dataset = get_dataset(args.dataset_name)
-    
+
     FLAGS["metrics_type"] = args.dataset.type
     if args.dataset.type == "regression":
-        args.likelihood = Gaussian(dtype = args.dtype, device = args.device)
+        args.likelihood = Gaussian(dtype=args.dtype, device=args.device)
         args.metrics = MetricsRegression
     elif args.dataset.type == "multiclass":
-        mc = MultiClass(num_classes = args.dataset.classes,
-                        device = args.device, 
-                        dtype = args.dtype)
+        mc = MultiClass(
+            num_classes=args.dataset.classes, device=args.device, dtype=args.dtype
+        )
         args.likelihood = BroadcastedLikelihood(mc)
         args.metrics = MetricsClassification
-        
+
     elif args.dataset.type == "binaryclass":
-        mc = MultiClass(num_classes = args.dataset.classes,
-                        device = args.device, 
-                        dtype = args.dtype)
+        mc = MultiClass(
+            num_classes=args.dataset.classes, device=args.device, dtype=args.dtype
+        )
         args.likelihood = BroadcastedLikelihood(mc)
         args.metrics = MetricsClassification
 
     FLAGS["activation_str"] = args.activation
     # Manage Generative function
     if args.genf == "BNN":
-        
+
         if args.bnn_structure == [0]:
-            print("asdasd")
             args.bnn_structure = []
-        
         FLAGS["bnn_structure"] = args.bnn_structure
 
         if args.activation == "tanh":
@@ -67,26 +64,27 @@ def manage_experiment_configuration(args=None):
         elif args.activation == "cos":
             FLAGS["activation"] = torch.cos
         else:
-            raise ValueError("Invalid BNN activation type.")        
-        
+            raise ValueError("Invalid BNN activation type.")
+
         FLAGS["bnn_layer_str"] = args.bnn_layer
         if args.bnn_layer == "BayesLinear":
             FLAGS["bnn_layer"] = BayesLinear
         elif args.bnn_layer == "SimplerBayesLinear":
             FLAGS["bnn_layer"] = SimplerBayesLinear
         else:
-            raise ValueError("Invalid BNN layer type.")    
-            
+            raise ValueError("Invalid BNN layer type.")
+
     if args.dtype == "float64":
         FLAGS["dtype"] = torch.float64
-
 
     len_train = args.dataset.len_train(args.test_size)
     args.batch_size = min(args.batch_size, len_train)
     if args.epochs is None:
         if args.iterations is None:
             raise ValueError("Either Epochs or Iterations must be selecetd.")
-        args.epochs = int(args.iterations / (len_train / args.batch_size))
+        args.epochs = int(
+            np.round(args.iterations / np.ceil(len_train / args.batch_size))
+        )
 
     return args
 
@@ -184,7 +182,7 @@ def get_parser():
         "--final_layer_mu",
         type=float,
         default=0,
-    )    
+    )
     parser.add_argument(
         "--final_layer_sqrt",
         type=float,
