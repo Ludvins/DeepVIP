@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from src.generative_functions import BayesLinear, SimplerBayesLinear
-from src.likelihood import BroadcastedLikelihood, Gaussian, MultiClass
+from src.likelihood import BroadcastedLikelihood, Gaussian, MultiClass, Bernoulli
 from utils.metrics import MetricsClassification, MetricsRegression
 from .dataset import get_dataset
 
@@ -38,10 +38,22 @@ def manage_experiment_configuration(args=None):
                         dtype = args.dtype)
         args.likelihood = BroadcastedLikelihood(mc)
         args.metrics = MetricsClassification
+        
+    elif args.dataset.type == "binaryclass":
+        mc = MultiClass(num_classes = args.dataset.classes,
+                        device = args.device, 
+                        dtype = args.dtype)
+        args.likelihood = BroadcastedLikelihood(mc)
+        args.metrics = MetricsClassification
 
     FLAGS["activation_str"] = args.activation
     # Manage Generative function
     if args.genf == "BNN":
+        
+        if args.bnn_structure == [0]:
+            print("asdasd")
+            args.bnn_structure = []
+        
         FLAGS["bnn_structure"] = args.bnn_structure
 
         if args.activation == "tanh":

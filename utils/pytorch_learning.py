@@ -76,6 +76,7 @@ def score(model, generator, metrics, device=None):
             data = data.to(device)
             target = target.to(device)
             loss, mean_pred, std_pred = model.test_step(data, target)
+            #log_likelihood = model.predict_logdensity(data, target)
             # Update mertics using this batch
             metrics.update(target, loss, mean_pred, std_pred, 
                     model.likelihood, light=False)
@@ -228,9 +229,12 @@ def fit_with_metrics(
             with torch.no_grad():
                 # Make predictions
                 mean_pred, std_pred = model(data)
+                
                 # Compute metrics using the original data scaled.
+                scaled_target = target* model.y_std + model.y_mean
+                #log_likelihood = model.predict_logdensity(data, scaled_target)
                 metrics.update(
-                    target * model.y_std + model.y_mean,
+                    scaled_target,
                     loss,
                     mean_pred,
                     std_pred,
@@ -260,8 +264,10 @@ def fit_with_metrics(
                     # Send to device
                     data = data.to(device)
                     target = target.to(device)
+                    
                     # Get loss and predictions.
                     loss, mean_pred, std_pred = model.test_step(data, target)
+                    #log_likelihood = model.predict_logdensity(data, target)
                     # Compute validation metrics
                     metrics_val.update(target, 
                                        loss,

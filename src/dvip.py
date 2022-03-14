@@ -1,6 +1,6 @@
 import torch
 from .utils import reparameterize
-
+import numpy as np
 
 class DVIP_Base(torch.nn.Module):
     def name(self):
@@ -195,7 +195,10 @@ class DVIP_Base(torch.nn.Module):
         The predicted labels using the model's likelihood
         and the predicted mean and standard deviation.
         """
-
+         # Cast types if needed.
+        if self.dtype != predict_at.dtype:
+            predict_at = predict_at.to(self.dtype)       
+        
         mean, var = self.predict_y(predict_at, self.num_samples)
         # Return predictions scaled to the original scale.
         return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
@@ -228,8 +231,8 @@ class DVIP_Base(torch.nn.Module):
                  point.
         """
         # Replicate X in a new axis for MonteCarlo samples
-        sX = torch.tile(X.unsqueeze(0), [num_samples, 1, 1])
-
+        sX = X.unsqueeze(0).transpose(0, -1)
+        sX = torch.tile(sX, [num_samples]).transpose(0, -1)
         # Initialize arrays
         Fs, Fmeans, Fvars, Fpriors = [], [], [], []
 
@@ -238,9 +241,10 @@ class DVIP_Base(torch.nn.Module):
         for layer in self.vip_layers:
 
             # Get input shape, S = MC resamples, N = num data, D 0 data dim
-            S, N, D = F.shape
+            S, N = F.shape[:2]
+            D = F.shape[2:]
             # Flatten the MC resamples
-            F_flat = torch.reshape(F, [S * N, D])
+            F_flat = torch.reshape(F, [S * N, *D])
 
             # Get the layer's predictive distribution and
             # prior samples if required.
@@ -331,11 +335,18 @@ class DVIP_Base(torch.nn.Module):
         return self.likelihood.predict_mean_and_var(Fmean, Fvar)
     
     def predict_logdensity(self, Xnew, Ynew):
+    
+         # Cast types if needed.
+        if self.dtype != Xnew.dtype:
+            Xnew = Xnew.to(self.dtype)    
+        
         Fmean, Fvar = self.predict_f(Xnew, num_samples=self.num_samples)
-        l = self.likelihood.predict_logdensity(Fmean, Fvar, Ynew)
+        l = self.likelihood.predict_logdensity(Fmean * self.y_std + self.y_mean,
+                                               Fvar * self.y_std**2,
+                                               Ynew)
         l = torch.sum(l, -1)
         log_num_samples = torch.log(torch.tensor(self.num_samples))
-        return torch.logsumexp(l , axis=0)- log_num_samples
+        return torch.mean(torch.logsumexp(l , axis=0) - log_num_samples)
 
     def get_prior_samples(self, X):
         """
@@ -387,6 +398,7 @@ class DVIP_Base(torch.nn.Module):
         """
         # Compute model predictions, shape [S, N, D]
         F_mean, F_var = self.predict_f(X, num_samples=self.num_samples)
+
         # Compute variational expectation using Black-box alpha energy.
         # Shape [N, D]
         return self.likelihood.variational_expectations(F_mean, F_var, Y, alpha=alpha)
@@ -454,7 +466,9 @@ class DVIP_Base(torch.nn.Module):
             padding = "\t" * (len(name) - 1)
             print(
                 padding,
-                "{}: {}".format(name[-1], param.data.detach().cpu().numpy().flatten()),
+                "{}: ({})".format(name[-1], str(list(param.data.size()))[1:-1]),
             )
+            print(padding+ " "*(len(name[-1]) + 2), param.data.detach().cpu().numpy().flatten()
+                  )
 
         print("\n---------------------------\n\n")

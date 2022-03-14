@@ -4,6 +4,8 @@ from itertools import product
 import numpy as np
 import torch
 from torch.nn.functional import one_hot
+from torch.distributions import bernoulli, normal
+from .quadrature import hermgauss, ndiagquad
 
 
 class Likelihood(torch.nn.Module):
@@ -168,10 +170,13 @@ class Gaussian(Likelihood):
         In this case, it results in accumulating the variances."""
         return Fmu, Fvar + self.log_variance.exp()
 
-    def predict_logdensity(self, Fmu, Fvar, Y):
+    def predict_logdensity(self, Fmu, Fvar, Y, y_mean = 0, y_std = 1):
         """Computes the predictive density of the targets given the means (Fmu) and
         variances (Fvar)"""
-        return self.logdensity(Y, Fmu, Fvar + self.log_variance.exp())
+        return self.logdensity(Y, 
+                               Fmu * y_std + y_mean, 
+                               (Fvar + self.log_variance.exp()) * y_std**2
+                               )
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         """Computes the variational expectation, i.e, the expectation under
@@ -283,11 +288,6 @@ class MultiClass(Likelihood):
         ps = torch.concat(ps, dim=1)
         return ps, ps - torch.square(ps)
 
-    def hermgauss(self, n):
-        # Return the locations and weights of GH quadrature
-        x, w = np.polynomial.hermite.hermgauss(n)
-        return torch.tensor(x, dtype=self.dtype), torch.tensor(w, dtype=self.dtype)
-
     def prob_is_largest(self, Y, mu, var, gh_x, gh_w):
         # Work out what the mean and variance is of the indicated latent function.
         # Shape (num_samples, num_classes)
@@ -321,12 +321,16 @@ class MultiClass(Likelihood):
         return torch.prod(cdfs, dim=1) @ gh_w
 
     def predict_density(self, Fmu, Fvar, Y):
-        gh_x, gh_w = self.hermgauss(self.num_gauss_hermite_points)
+        gh_x, gh_w = hermgauss(self.num_gauss_hermite_points, self.dtype)
         p = self.prob_is_largest(Y, Fmu, Fvar, gh_x, gh_w)
         return p * (1 - self.epsilon) + (1.0 - p) * (self.K1)
 
-    def predict_logdensity(self, Fmu, Fvar, Y):
-        return self.log(self.predict_density(Fmu, Fvar, Y))
+    def predict_logdensity(self, Fmu, Fvar, Y, y_mean = 0, y_std = 1):
+        return torch.log(self.predict_density(
+                               Fmu * y_std + y_mean, 
+                               Fvar * y_std**2, 
+                               Y
+                               ))
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         """
@@ -347,11 +351,69 @@ class MultiClass(Likelihood):
 
         Here, we implement a Gauss-Hermite quadrature routine.
         """
-        gh_x, gh_w = self.hermgauss(self.num_gauss_hermite_points)
+        gh_x, gh_w = hermgauss(self.num_gauss_hermite_points, self.dtype)
         p = self.prob_is_largest(Y, Fmu, Fvar, gh_x, gh_w)
         ve = p * torch.log(1.0 - self.epsilon) + (1.0 - p) * torch.log(self.K1)
         return torch.sum(ve, dim=-1)
+    
+class Bernoulli(Likelihood):
+    def __init__(self, dtype, device, epsilon=1e-3):
+        super().__init__(dtype, device)
+        self.num_gauss_hermite_points = 20
 
+    def inv_probit(self, x):
+        n = normal.Normal(0, 1)
+        return n.cdf(x)
+
+        jitter = 1e-3  # ensures output is strictly between 0 and 1
+        return 0.5 * (1.0 + torch.erf(x / np.sqrt(2.0))) * (1 - 2 * jitter) + jitter
+
+    def logp(self, F, Y):
+        b = bernoulli.Bernoulli(self.inv_probit(F))
+        return b.log_prob(Y)
+
+    def predict_mean_and_var(self, Fmu, Fvar):
+        p = self.inv_probit(Fmu / torch.sqrt(1 + Fvar))
+        return p, p - torch.square(p)
+
+    def predict_logdensity(self, Fmu, Fvar, Y, y_mean = 0, y_std = 1):
+        p = self.predict_mean_and_var( 
+                               Fmu  * y_std + y_mean, 
+                               Fvar * y_std**2,
+                               )[0]
+        b = bernoulli.Bernoulli(p)
+        return torch.sum(b.log_prob(Y), -1)
+
+    def conditional_mean(self, F):
+        return self.inv_probit(F)
+
+    def conditional_variance(self, F):
+        p = self.conditional_mean(F)
+        return p - torch.square(p)
+
+    def variational_expectations(self, Fmu, Fvar, Y, alpha):
+        """
+        Compute the expected log density of the data, given a Gaussian
+        distribution for the function values.
+
+        if
+            q(f) = N(Fmu, Fvar)
+
+        and this object represents
+
+            p(y|f)
+
+        then this method computes
+
+           \int (\log p(y|f)) q(f) df.
+
+        """
+        
+        return ndiagquad(self.logp,
+                         self.num_gauss_hermite_points,
+                         Fmu, Fvar, dtype = self.dtype, Y = Y)
+    
+    
 
 class BroadcastedLikelihood(Likelihood):
     def __init__(self, likelihood):
@@ -403,8 +465,8 @@ class BroadcastedLikelihood(Likelihood):
         )
         return self._broadcast(f, [Fmu, Fvar], [])
 
-    def predict_logdensity(self, Fmu, Fvar, Y):
+    def predict_logdensity(self, Fmu, Fvar, Y, y_mean, y_std):
         f = lambda vars_SND, vars_ND: self.likelihood.predict_logdensity(
-            vars_SND[0], vars_SND[1], vars_ND[0]
+            vars_SND[0], vars_SND[1], vars_ND[0], y_mean, y_std
         )
         return self._broadcast(f, [Fmu, Fvar], [Y])

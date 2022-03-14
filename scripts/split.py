@@ -5,7 +5,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import sys
-from timeit import default_timer as timer
+from timeit import process_time as timer
 
 sys.path.append(".")
 

@@ -208,5 +208,5 @@ class MetricsClassification(Metrics):
         return {
             "LOSS": float(self.loss.detach().cpu().numpy()),
             "NLL": float(self.nll.detach().cpu().numpy()),
-            "ACC": float(self.acc.detach().cpu().numpy()),
+            "Error": 1 - float(self.acc.detach().cpu().numpy()),
         }

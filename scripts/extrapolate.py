@@ -40,7 +40,7 @@ dvip = DVIP_Base(
     dtype=args.dtype,
     device=args.device,
 )
-
+#dvip.freeze_ll_variance()
 dvip.print_variables()
 
 # Define optimizer and compile model
@@ -91,36 +91,44 @@ fig_title, path = build_plot_name(**vars(args))
 
 import matplotlib.pyplot as plt
 
-fig = plt.figure(figsize=(16, 9))
+f, (ax0, ax1) = plt.subplots(2, 1, gridspec_kw={'height_ratios': [3, 1]}, figsize=(16, 9))
 
-plt.scatter(train_d.inputs * train_d.inputs_std + train_d.inputs_mean, 
+ax0.scatter(train_d.inputs * train_d.inputs_std + train_d.inputs_mean, 
             train_d.targets* train_d.targets_std + train_d.targets_mean,
             s = 0.2,
             label = "Training set")
-plt.scatter(test_d.inputs * train_d.inputs_std + train_d.inputs_mean, 
+ax0.scatter(test_d.inputs * train_d.inputs_std + train_d.inputs_mean, 
             test_d.targets,
             s = 0.2,
             color = "purple",
             label = "Test set")
 
 X = train_test_d.inputs* train_d.inputs_std + train_d.inputs_mean
-plt.plot(X,
+ax0.plot(X,
          test_prediction_mean,
          color = "orange",
          label = "Predictive mean")
-plt.fill_between(X.flatten(),
+ax0.fill_between(X.flatten(),
                  (test_prediction_mean - 2*np.sqrt(test_prediction_var)).flatten(),
                  (test_prediction_mean + 2*np.sqrt(test_prediction_var)).flatten(),
                  color = "orange",
                  alpha = 0.3,
                  label = "Predictive std")
 
-ymin, ymax = plt.ylim()
+ymin, ymax = ax0.get_ylim()
 
-plt.plot(X.flatten(), prior_samples[:, :-1], color = "red", alpha = 0.05)
-plt.plot(X.flatten(), prior_samples[:, -1], color = "red", alpha = 0.05, label = "Prior samples")
-plt.ylim([ymin, ymax])
-plt.legend()
+ax0.plot(X.flatten(), prior_samples[:, :-1], color = "red", alpha = 0.05)
+ax0.plot(X.flatten(), prior_samples[:, -1], color = "red", alpha = 0.05, label = "Prior samples")
+ax0.set_ylim([ymin, ymax])
+ax0.legend()
+
+ax1.fill_between(X.flatten(),
+                 np.zeros_like(X.flatten()),
+                 (np.sqrt(test_prediction_var)).flatten(),
+                 color = "orange",
+                 alpha = 0.3,
+                 label = "Predictive std")
+ax1.legend()
 
 plt.savefig("plots/extrapolate_" + create_file_name(args) + ".pdf")
 

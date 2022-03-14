@@ -241,3 +241,64 @@ def init_layers(
         )
 
     return layers
+
+
+
+def init_layers2(
+    X,
+    generative_functions,
+    regression_coeffs,
+    seed,
+    device,
+    dtype,
+    **kwargs
+):
+    """
+    """
+    
+    dims = [genf.input_shape for genf in generative_functions]
+
+    # Initialize layers array
+    layers = []
+    # We maintain a copy of X, where each projection is applied. That is,
+    # if two data reductions are made, the matrix of the second is computed
+    # using the projected (from the first projection) data.
+    X_running = np.copy(X)
+    for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
+
+        # Last layer has no transformation
+        if i == len(dims) - 2:
+            mf = None
+
+        # No dimension change, identity matrix
+        elif dim_in == dim_out:
+            mf = LinearProjection(np.identity(n=dim_in), device=device)
+
+        # Dimensionality reduction, PCA using svd decomposition
+        elif dim_in > dim_out:
+            _, _, V = np.linalg.svd(X_running, full_matrices=False)
+
+            mf = LinearProjection(V[:dim_out, :].T, device=device)
+            # Apply the projection to the running data,
+            X_running = X_running @ V[:dim_out].T
+
+        else:
+            raise NotImplementedError(
+                "Dimensionality augmentation is not handled currently."
+            )
+
+        # Create layer
+        layers.append(
+            VIPLayer(
+                generative_functions[i],
+                num_regression_coeffs=regression_coeffs,
+                input_dim=dim_in,
+                output_dim=dim_out,
+                mean_function=mf,
+                seed=seed,
+                dtype=dtype,
+                device=device,
+            )
+        )
+
+    return layers

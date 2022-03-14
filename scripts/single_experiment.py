@@ -22,7 +22,7 @@ args = manage_experiment_configuration()
 torch.manual_seed(args.seed)
 
 train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
-    0.1, args.seed + args.split
+    args.test_size, args.seed + args.split
 )
 
 # Get VIP layers

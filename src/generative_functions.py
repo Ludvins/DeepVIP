@@ -266,9 +266,9 @@ class BayesianNN(GenerativeFunction):
         structure,
         activation,
         num_samples,
-        input_dim=1,
-        output_dim=1,
-        layer_model = BayesLinear,
+        input_dim,
+        output_dim,
+        layer_model,
         dropout=0.0,
         seed=2147483647,
         fix_random_noise=False,
@@ -317,6 +317,9 @@ class BayesianNN(GenerativeFunction):
             seed=seed,
             dtype=dtype,
         )
+        
+        self.input_dim = input_dim
+        
         # Store parameters
         self.structure = structure
         self.activation = activation
@@ -325,7 +328,7 @@ class BayesianNN(GenerativeFunction):
         self.dropout = torch.nn.Dropout(dropout)
         # Create an array symbolizing the dimensionality of the data at
         # each inner layer.
-        dims = [input_dim] + structure + [1]
+        dims = [self.input_dim] + structure + [1]
         layers = []
 
         # Loop over the input and output dimension of each sub-layer.
@@ -387,6 +390,123 @@ class BayesianNN(GenerativeFunction):
         """Computes the Kl divergence of the model as the addition of the
         KL divergences of its sub-models."""
         return torch.stack([layer.KL() for layer in self.layers]).sum()
+
+class BayesianConv(torch.nn.Module):
+    def __init__(
+        self,
+        in_channels,  
+        out_channels,
+        kernel_size,
+        seed=2147483647,
+        fix_random_noise=False,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super(BayesianConv, self).__init__()
+        
+        self.fix_random_noise  = fix_random_noise
+        self.gaussian_sampler = GaussianSampler(seed)
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.device = device
+        self.dtype = dtype
+        
+        self.kernel_size = kernel_size if isinstance(kernel_size, tuple)\
+            else (kernel_size, kernel_size)
+        
+        self.W_mu = torch.nn.Parameter(torch.zeros(self.kernel_size, device=self.device))
+        self.W_log_std = torch.nn.Parameter(torch.zeros(self.kernel_size, device=self.device))
+        self.bias_mu = torch.nn.Parameter(torch.zeros([1], device=self.device))
+        self.bias_log_std = torch.nn.Parameter(torch.zeros([1], device=self.device))
+
+        # Reset the generator's seed if fixed noise.
+        self.gaussian_sampler.reset_seed()
+        if self.fix_random_noise:
+            self.noise = self.get_noise(first_call=True)
+
+    def get_noise(self, first_call=False):
+        if self.fix_random_noise and not first_call:
+            return self.noise
+        else:
+            # Compute the shape of the noise to generate
+            z_w_shape = (self.out_channels, 1, *self.W_mu.size())
+            z_b_shape = (self.out_channels)
+
+            # Generate Gaussian values
+            z_w = self.gaussian_sampler(z_w_shape)
+            z_w = torch.tile(z_w, (1, self.in_channels, 1, 1))
+            z_b = self.gaussian_sampler(z_b_shape)
+
+            return (z_w, z_b)
+
+    def forward(self, input):
+
+        # Generate Gaussian values
+        z_w, z_b = self.get_noise()
+        
+        W = self.W_mu + z_w * torch.exp(self.W_log_std) 
+        b = self.bias_mu + z_b * torch.exp(self.bias_log_std) 
+
+        x = torch.nn.functional.conv2d(input, W, b)
+        return x
+    
+class BayesianConvNN(GenerativeFunction):
+    def __init__(
+        self,
+        num_samples,
+        input_dim,
+        output_dim,
+        activation,
+        seed=2147483647,
+        fix_random_noise=False,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__(
+            num_samples,
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
+        self.activation = activation
+
+        self.conv1 = BayesianConv(1, num_samples, 3,
+            seed=2147483647,
+            fix_random_noise=False,
+            device=device,
+            dtype=dtype,
+        )
+        self.conv2 = BayesianConv(num_samples, num_samples, 3,
+            seed=2147483647,
+            fix_random_noise=False,
+            device=device,
+            dtype=dtype,
+        )
+        self.conv3 = BayesianConv(num_samples, num_samples, 5,
+            seed=2147483647,
+            fix_random_noise=False,
+            device=device,
+            dtype=dtype,
+        )
+    
+    def forward(self, input):
+        # in_channel dimension as 1
+        x = input.reshape((input.shape[0], 1, *self.input_dim))
+        
+        # Shape (N, num_samples, ...)
+        x = self.conv1(x)
+        x = self.activation(x)
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = self.conv2(x)
+        x = self.activation(x)
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = self.conv3(x)
+        x = x.transpose(0, 1)
+        x = x.reshape((x.shape[0], x.shape[1], -1))
+        return x  
 
 
 class GP(GenerativeFunction):
