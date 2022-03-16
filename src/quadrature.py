@@ -30,79 +30,27 @@ def mvhermgauss(H, D, dtype):
     return torch.tensor(x, dtype= dtype), torch.tensor(w, dtype = dtype)
 
 
-def ndiagquad(funcs, H, Fmu, Fvar, dtype, logspace=False, **Ys):
-    """
-    Computes N Gaussian expectation integrals of one or more functions
-    using Gauss-Hermite quadrature. The Gaussians must be independent.
+def ndiagquad(f, H, Fmu, Fvar, Y, dtype):
 
-    Parameters
-    ----------
-    funcs : Callable or Iterable of Callables
-            The function integrands. Operates elementwise. 
-            All arguments will be tensors of shape (N, 1).
-    H : int
-        number of Gauss-Hermite quadrature points
-    Fmu : Tenfor of shape
+    # Shape (num hermite)
+    xn, wn = hermgauss(H, dtype)
 
-    :param funcs: the integrand(s):
-        Callable or Iterable of Callables that operates elementwise, on the following arguments:
-        - `Din` positional arguments to match Fmu and Fvar; i.e., 1 if Fmu and Fvar are tensors;
-          otherwise len(Fmu) (== len(Fvar)) positional arguments F1, F2, ...
-        - the same keyword arguments as given by **Ys
-        All arguments will be tensors of shape (N, 1)
+    # Shape (1, num_hermite)
+    gh_x = xn.reshape(1, -1)          
+    # Shape (N, num_hermite)
+    Xall = gh_x * torch.sqrt(torch.clip(2.0 * Fvar, min=1e-10)) + Fmu 
 
-    :param H: number of Gauss-Hermite quadrature points
-    :param Fmu: array/tensor or `Din`-tuple/list thereof
-    :param Fvar: array/tensor or `Din`-tuple/list thereof
-    :param logspace: if True, funcs are the log-integrands and this calculates
-        the log-expectation of exp(funcs)
-    :param **Ys: arrays/tensors; deterministic arguments to be passed by name
 
-    Fmu, Fvar, Ys should all have same shape, with overall size `N` (i.e., shape (N,) or (N, 1))
-    :return: shape is the same as that of the first Fmu
-    """
-    def unify(f_list):
-        """
-        Stack a list of means/vars into a full block
-        """
-        return torch.reshape(
-                torch.concat([torch.reshape(f, (-1, 1)) for f in f_list], axis=1),
-                (-1, 1, Din))
+    # Shape (num_hermite, 1)
+    gh_w = wn.reshape(-1, 1) / np.sqrt(np.pi)
 
-    if isinstance(Fmu, (tuple, list)):
-        Din = len(Fmu)
-        shape = torch.shape(Fmu[0])
-        Fmu, Fvar = map(unify, [Fmu, Fvar])    # both N x 1 x Din
+    if Y is not None:
+        # Shape( N, num_hermite )
+        Y = torch.tile(Y, [1, H])  # broadcast Y to match X
+        feval = f(Xall, Y)
     else:
-        Din = 1
-        shape = Fmu.shape
-        Fmu, Fvar = [torch.reshape(f, (-1, 1, 1)) for f in [Fmu, Fvar]]
-
-    xn, wn = mvhermgauss(H, Din, dtype)
-    # xn: H**Din x Din, wn: H**Din
-
-    gh_x = xn.reshape(1, -1, Din)             # 1 x H**Din x Din
-    Xall = gh_x * torch.sqrt(2.0 * Fvar) + Fmu   # N x H**Din x Din
-    Xs = [Xall[:, :, i] for i in range(Din)]  # N x H**Din  each
-
-    gh_w = wn * np.pi ** (-0.5 * Din)  # H**Din x 1
-
-    for name, Y in Ys.items():
-        Y = torch.reshape(Y, (-1, 1))
-        Y = torch.tile(Y, [1, H**Din])  # broadcast Y to match X
-        # without the tiling, some calls such as tf.where() (in bernoulli) fail
-        Ys[name] = Y  # now N x H**Din
-
-    def eval_func(f):
-        feval = f(*Xs, **Ys)  # f should be elementwise: return shape N x H**Din
-        if logspace:
-            log_gh_w = np.log(gh_w.reshape(1, -1))
-            result = torch.reduce_logsumexp(feval + log_gh_w, axis=1)
-        else:
-            result = torch.matmul(feval, gh_w.reshape(-1, 1))
-        return torch.reshape(result, shape)
-
-    if isinstance(funcs, Iterable):
-        return [eval_func(f) for f in funcs]
-    else:
-        return eval_func(funcs)
+        feval = f(Xall)
+        
+    # Shape (N, num_hermite)
+    feval = feval @ gh_w
+    return feval

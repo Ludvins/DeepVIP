@@ -193,8 +193,10 @@ class MetricsClassification(Metrics):
 
     def compute_acc(self, y, prediction):
         """"""
-        # mode(np.argmax(m, 2), 0)[0].reshape(Y_batch.shape).astype(int)==Y_batch.astype(int))
-        pred = torch.mode(torch.argmax(prediction, -1), 0)[0]
+        if prediction.shape[-1] == 1:
+            pred = torch.mode(torch.round(prediction), 0)[0].flatten()
+        else:
+            pred = torch.mode(torch.argmax(prediction, -1), 0)[0]
         return (pred == y.flatten()).float().mean()
 
     def get_dict(self):

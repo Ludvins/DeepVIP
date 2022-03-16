@@ -39,8 +39,7 @@ def manage_experiment_configuration(args=None):
         args.metrics = MetricsClassification
 
     elif args.dataset.type == "binaryclass":
-        mc = MultiClass(
-            num_classes=args.dataset.classes, device=args.device, dtype=args.dtype
+        mc = Bernoulli(device=args.device, dtype=args.dtype
         )
         args.likelihood = BroadcastedLikelihood(mc)
         args.metrics = MetricsClassification

@@ -382,10 +382,14 @@ class SolarIrradiance_Dataset(DVIPDataset):
 
         self.data = pd.read_csv(url, header=[0], dtype=float).values
         self.len_data = self.data.shape[0]
-        
+        split = self.len_data//5
+        d = self.len_data // 10
         test_indexes = np.concatenate(
-            (np.arange(self.len_data//6, self.len_data//6 + self.len_data // 5),
-            np.arange(2 * self.len_data // 4, 2 * self.len_data // 4 + self.len_data // 5)),
+            (np.arange(split, split + d),
+            np.arange(2*split, 2*split + d),
+            np.arange(3*split, 3*split + d),
+            np.arange(4*split, 4*split + d)
+            ),
             axis = 0
         )
         train_indexes = np.setdiff1d(np.arange(self.len_data), test_indexes)
@@ -425,7 +429,7 @@ class Rectangles_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "binaryclass"
         self.classes = 2
-        self.output_dim = 2
+        self.output_dim = 1
         
         train_data = np.loadtxt('data/rectangles/rectangles_im_train.amat')
         test_data = np.loadtxt('data/rectangles/rectangles_im_test.amat')
@@ -457,7 +461,17 @@ class Rectangles_Dataset(DVIPDataset):
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
         
-
+    
+class Banknote_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "binaryclass"
+        self.classes = 2
+        self.output_dim = 1
+        
+        url = "{}{}".format(uci_base, "00267/data_banknote_authentication.txt")
+        data = np.loadtxt(url, delimiter =",")
+        self.split_data(data)
+        
 
 class Bimodal_Dataset(DVIPDataset):
     def __init__(self):
@@ -535,5 +549,7 @@ def get_dataset(dataset_name):
         return Bimodal_Dataset()
     elif dataset_name == "Heterocedastic":
         return Heterocedastic_Dataset()
+    elif dataset_name == "Banknote":
+        return Banknote_Dataset()
     else:
         raise RuntimeError("No available dataset selected.")
