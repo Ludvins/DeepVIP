@@ -11,10 +11,14 @@ from sklearn.model_selection import train_test_split
 
 
 class Training_Dataset(Dataset):
-    def __init__(self, inputs, targets,
-                 verbose=True,
-                 normalize_inputs = True,
-                 normalize_targets=True):
+    def __init__(
+        self,
+        inputs,
+        targets,
+        verbose=True,
+        normalize_inputs=True,
+        normalize_targets=True,
+    ):
 
         self.inputs = inputs
         if normalize_targets:
@@ -35,7 +39,7 @@ class Training_Dataset(Dataset):
             self.inputs_mean = np.mean(self.inputs, axis=0, keepdims=True)
         else:
             self.inputs_mean = 0
-            self.inputs_std = 1     
+            self.inputs_std = 1
 
         self.inputs = (self.inputs - self.inputs_mean) / self.inputs_std
         if verbose:
@@ -272,22 +276,18 @@ class C02_Dataset(DVIPDataset):
         mask = (data == -99.99).any(1)
         self.data = data[~mask]
         self.len_data = self.data.shape[0]
-        
-        split = self.len_data//5
+
+        split = self.len_data // 5
         test_indexes = np.concatenate(
-            (np.arange(split, 2*split),
-            np.arange(3*split, 4*split)),
-            axis = 0
+            (np.arange(split, 2 * split), np.arange(3 * split, 4 * split)), axis=0
         )
         train_indexes = np.setdiff1d(np.arange(self.len_data), test_indexes)
 
-        
         train_data = self.data[train_indexes, :1]
         test_data = self.data[test_indexes, :1]
         train_targets = self.data[train_indexes, 1:]
         test_targets = self.data[test_indexes, 1:]
 
-        
         self.train = Training_Dataset(train_data, train_targets)
 
         self.train_test = Test_Dataset(
@@ -301,11 +301,11 @@ class C02_Dataset(DVIPDataset):
             test_targets,
             self.train.inputs_mean,
             self.train.inputs_std,
-        )    
+        )
 
     def __len__(self):
         return 778
-    
+
     def len_train(self, test_size):
         return len(self.train)
 
@@ -324,15 +324,16 @@ class MNIST_Dataset(DVIPDataset):
         test = datasets.MNIST(
             root="./data", train=False, download=True, transform=transforms.ToTensor()
         )
-        
-        train_data = train.data.reshape(60000, -1)/255.
-        test_data = test.data.reshape(10000, -1)/255.
+
+        train_data = train.data.reshape(60000, -1) / 255.0
+        test_data = test.data.reshape(10000, -1) / 255.0
         train_targets = train.targets.reshape(-1, 1)
         test_targets = test.targets.reshape(-1, 1)
 
         self.train = Training_Dataset(
-            train_data.numpy(), train_targets.numpy(),
-            normalize_targets=False, 
+            train_data.numpy(),
+            train_targets.numpy(),
+            normalize_targets=False,
             normalize_inputs=False,
         )
 
@@ -373,7 +374,8 @@ class Iris_Dataset(DVIPDataset):
             inplace=True,
         )
         self.split_data(data.values)
-        
+
+
 class SolarIrradiance_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
@@ -382,25 +384,16 @@ class SolarIrradiance_Dataset(DVIPDataset):
 
         self.data = pd.read_csv(url, header=[0], dtype=float).values
         self.len_data = self.data.shape[0]
-        split = self.len_data//5
-        d = self.len_data // 10
-        test_indexes = np.concatenate(
-            (np.arange(split, split + d),
-            np.arange(2*split, 2*split + d),
-            np.arange(3*split, 3*split + d),
-            np.arange(4*split, 4*split + d)
-            ),
-            axis = 0
-        )
+        split = self.len_data // 3
+        d = self.len_data // 3
+        test_indexes = np.arange(split, split + d)
         train_indexes = np.setdiff1d(np.arange(self.len_data), test_indexes)
-        
-        
+
         train_data = self.data[train_indexes, :1]
         test_data = self.data[test_indexes, :1]
         train_targets = self.data[train_indexes, 1:]
         test_targets = self.data[test_indexes, 1:]
 
-        
         self.train = Training_Dataset(train_data, train_targets)
 
         self.train_test = Test_Dataset(
@@ -414,30 +407,33 @@ class SolarIrradiance_Dataset(DVIPDataset):
             test_targets,
             self.train.inputs_mean,
             self.train.inputs_std,
-        )    
+        )
 
     def __len__(self):
         return self.len_data
-    
+
     def len_train(self, test_size):
         return len(self.train)
 
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
-    
+
+
 class Rectangles_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "binaryclass"
         self.classes = 2
         self.output_dim = 1
-        
-        train_data = np.loadtxt('data/rectangles/rectangles_im_train.amat')
-        test_data = np.loadtxt('data/rectangles/rectangles_im_test.amat')
+
+        train_data = np.loadtxt("data/rectangles/rectangles_im_train.amat")
+        test_data = np.loadtxt("data/rectangles/rectangles_im_test.amat")
         self.len_data = train_data.shape[0] + test_data.shape[0]
-        self.train = Training_Dataset(train_data[:, :-1],
-                                      train_data[:, -1].reshape(-1, 1),
-                                      normalize_targets=False, 
-                                      normalize_inputs=True)
+        self.train = Training_Dataset(
+            train_data[:, :-1],
+            train_data[:, -1].reshape(-1, 1),
+            normalize_targets=False,
+            normalize_inputs=True,
+        )
 
         self.train_test = Test_Dataset(
             train_data[:, :-1],
@@ -450,28 +446,28 @@ class Rectangles_Dataset(DVIPDataset):
             test_data[:, -1].reshape(-1, 1),
             self.train.inputs_mean,
             self.train.inputs_std,
-        )    
+        )
 
     def __len__(self):
         return self.len_data
-    
+
     def len_train(self, test_size):
         return len(self.train)
 
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
-        
-    
+
+
 class Banknote_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "binaryclass"
         self.classes = 2
         self.output_dim = 1
-        
+
         url = "{}{}".format(uci_base, "00267/data_banknote_authentication.txt")
-        data = np.loadtxt(url, delimiter =",")
+        data = np.loadtxt(url, delimiter=",")
         self.split_data(data)
-        
+
 
 class Bimodal_Dataset(DVIPDataset):
     def __init__(self):
