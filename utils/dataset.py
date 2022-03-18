@@ -380,31 +380,35 @@ class SolarIrradiance_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
-        url = "https://lasp.colorado.edu/lisird/latis/dap/nrl2_tsi_P1M.csv?&time,irradiance"
+        data = np.loadtxt("data/Solar/solar_data.txt", delimiter=",", dtype = float)
+        #print(data)
 
-        self.data = pd.read_csv(url, header=[0], dtype=float).values
-        self.len_data = self.data.shape[0]
-        split = self.len_data // 3
-        d = self.len_data // 3
-        test_indexes = np.arange(split, split + d)
-        train_indexes = np.setdiff1d(np.arange(self.len_data), test_indexes)
+        X = data[:, 0:1]
+        Y = data[:, 2:3]
 
-        train_data = self.data[train_indexes, :1]
-        test_data = self.data[test_indexes, :1]
-        train_targets = self.data[train_indexes, 1:]
-        test_targets = self.data[test_indexes, 1:]
+        # remove some chunks of data
+        X_test, Y_test = [], []
 
-        self.train = Training_Dataset(train_data, train_targets)
+        intervals = ((1620, 1650), (1700, 1720), (1780, 1800), (1850, 1870), (1930, 1950))
+        for low, up in intervals:
+            ind = np.logical_and(X.flatten() > low, X.flatten() < up)
+            X_test.append(X[ind])
+            Y_test.append(Y[ind])
+            X = np.delete(X, np.where(ind)[0], axis=0)
+            Y = np.delete(Y, np.where(ind)[0], axis=0)
+        X_test, Y_test = np.vstack(X_test), np.vstack(Y_test)
+
+        self.train = Training_Dataset(X, Y)
 
         self.train_test = Test_Dataset(
-            self.data[:, :1],
-            self.data[:, 1:],
+            data[:, 0:1],
+            data[:, 2:3],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            test_data,
-            test_targets,
+            X_test,
+            Y_test,
             self.train.inputs_mean,
             self.train.inputs_std,
         )

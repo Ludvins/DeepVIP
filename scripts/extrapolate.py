@@ -40,7 +40,6 @@ dvip = DVIP_Base(
     dtype=args.dtype,
     device=args.device,
 )
-#dvip.freeze_ll_variance()
 dvip.print_variables()
 
 # Define optimizer and compile model
@@ -80,8 +79,8 @@ for k, v in test_metrics.items():
     print("\t - {}: {}".format(k, v))
     
     
-test_mean, test_var = predict(dvip, train_test_loader, device=args.device)
-test_prediction_mean, test_prediction_var = get_predictive_results(test_mean, test_var)
+test_mean, test_std = predict(dvip, train_test_loader, device=args.device)
+test_prediction_mean, test_prediction_var = get_predictive_results(test_mean, test_std**2)
 
 dvip.eval()
 prior_samples = predict_prior_samples(dvip, train_test_loader).T[0, :, :, -1]

@@ -47,7 +47,7 @@ def hermgaussquadrature(f, num_gh, Fmu, Fvar, Y, dtype):
 
     if Y is not None:
         # Shape( N, num_hermite )
-        Y = torch.tile(Y, [1, H])  # broadcast Y to match X
+        Y = torch.tile(Y, [1, num_gh])  # broadcast Y to match X
         feval = f(Xall, Y)
     else:
         feval = f(Xall)

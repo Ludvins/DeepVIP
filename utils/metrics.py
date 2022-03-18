@@ -98,6 +98,7 @@ class MetricsRegression(Metrics):
 
         # Define the auxiliary function to help with the calculations
         def A(mu, sigma_2):
+            
             norm = torch.distributions.normal.Normal(
                 torch.zeros_like(mu), torch.ones_like(mu)
             )

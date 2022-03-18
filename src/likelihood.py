@@ -282,7 +282,7 @@ class Gaussian(Likelihood):
             / torch.sqrt(2 * torch.pi * variance) ** alpha
         )
 
-        logpdf = self.logdensity(Y, Fmu, Fvar + variance / alpha)
+        logpdf = self.logdensity(Fmu, Fvar + variance / alpha, Y)
         logpdf = torch.logsumexp(logpdf, dim=0) + torch.log(C) - torch.log(S)
         return logpdf / alpha
 
@@ -377,8 +377,8 @@ class MultiClass(Likelihood):
         #  multiplied by 0. In short, that summation equals to retrieve the
         #  mean and var on the true label for each sample
         # Shape (num_samples, 1)
-        mu_selected = torch.sum(oh_on * mu, 1).reshape(-1, 1)
-        var_selected = torch.sum(oh_on * var, 1).reshape(-1, 1)
+        mu_selected = torch.sum(oh_on * Fmu, 1).reshape(-1, 1)
+        var_selected = torch.sum(oh_on * Fvar, 1).reshape(-1, 1)
 
         sqrt_selected = torch.sqrt(torch.clip(2.0 * var_selected, min=1e-10))
 
@@ -387,8 +387,8 @@ class MultiClass(Likelihood):
         # Compute the CDF of the Gaussian between the latent functions and the grid,
         # (including the selected function).
         # Shape (num_samples, num_classes, num_hermite)
-        dist = (torch.unsqueeze(X, 1) - torch.unsqueeze(mu, 2)) / torch.unsqueeze(
-            var, 2
+        dist = (torch.unsqueeze(X, 1) - torch.unsqueeze(Fmu, 2)) / torch.unsqueeze(
+            Fvar, 2
         )
         cdfs = 0.5 * (1.0 + torch.erf(dist / np.sqrt(2.0)))
         cdfs = cdfs * (1 - 2e-6) + 1e-6
@@ -411,7 +411,7 @@ class MultiClass(Likelihood):
         distribution for the function values.
         We implement a Gauss-Hermite quadrature routine.
         """
-        p = self.prob_is_largest(Y, Fmu, Fvar, gh_x, gh_w)
+        p = self.prob_is_largest(Y, Fmu, Fvar)
         ve = p * torch.log(1.0 - self.epsilon) + (1.0 - p) * torch.log(self.K1)
         return torch.sum(ve, dim=-1)
 
@@ -459,11 +459,7 @@ class Bernoulli(Likelihood):
         p = \int\int y p(y|f)q(f) df dy
 
         """
-        y = torch.ones_like(Fmu)
-        p = ndiagquad(
-            self.p, self.num_gauss_hermite_points, Fmu, Fvar, dtype=self.dtype, Y=y
-        )
-        # p = self.inv_probit(Fmu / torch.sqrt(1 + Fvar))
+        p = self.inv_probit(Fmu / torch.sqrt(1 + Fvar))
         return p, p - torch.square(p)
 
     def conditional_mean(self, F):
@@ -474,7 +470,7 @@ class Bernoulli(Likelihood):
         return p - torch.square(p)
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
-        return ndiagquad(
+        return hermgaussquadrature(
             self.logp, self.num_gauss_hermite_points, Fmu, Fvar, dtype=self.dtype, Y=Y
         )
 
