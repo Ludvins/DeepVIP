@@ -431,12 +431,13 @@ class Rectangles_Dataset(DVIPDataset):
 
         train_data = np.loadtxt("data/rectangles/rectangles_im_train.amat")
         test_data = np.loadtxt("data/rectangles/rectangles_im_test.amat")
+
         self.len_data = train_data.shape[0] + test_data.shape[0]
         self.train = Training_Dataset(
             train_data[:, :-1],
             train_data[:, -1].reshape(-1, 1),
             normalize_targets=False,
-            normalize_inputs=True,
+            normalize_inputs=False,
         )
 
         self.train_test = Test_Dataset(
