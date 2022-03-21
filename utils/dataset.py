@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from sklearn.model_selection import train_test_split
+from scipy.ndimage import gaussian_filter as blur
 
 
 class Training_Dataset(Dataset):
@@ -322,11 +323,15 @@ class MNIST_Dataset(DVIPDataset):
             root="./data", train=True, download=True, transform=transforms.ToTensor()
         )
         test = datasets.MNIST(
-            root="./data", train=False, download=True, transform=transforms.ToTensor()
+            root="./data",
+            train=False,
+            download=True,
+            transform=transforms.ToTensor(),
         )
 
         train_data = train.data.reshape(60000, -1) / 255.0
         test_data = test.data.reshape(10000, -1) / 255.0
+
         train_targets = train.targets.reshape(-1, 1)
         test_targets = test.targets.reshape(-1, 1)
 
@@ -360,6 +365,20 @@ class MNIST_Dataset(DVIPDataset):
         return 60000
 
 
+class CMNIST_Dataset(MNIST_Dataset):
+    def __init__(self, corrupted=True):
+        super().__init__()
+        test_data = self.test.inputs.reshape(10000, 28, 28)
+
+        test_data = np.array([blur(img, 2) for img in test_data])
+        self.test = Test_Dataset(
+            test_data.reshape(10000, -1),
+            self.test.targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+
 class Iris_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "multiclass"
@@ -380,8 +399,8 @@ class SolarIrradiance_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
-        data = np.loadtxt("data/Solar/solar_data.txt", delimiter=",", dtype = float)
-        #print(data)
+        data = np.loadtxt("data/Solar/solar_data.txt", delimiter=",", dtype=float)
+        # print(data)
 
         X = data[:, 0:1]
         Y = data[:, 2:3]
@@ -389,7 +408,13 @@ class SolarIrradiance_Dataset(DVIPDataset):
         # remove some chunks of data
         X_test, Y_test = [], []
 
-        intervals = ((1620, 1650), (1700, 1720), (1780, 1800), (1850, 1870), (1930, 1950))
+        intervals = (
+            (1620, 1650),
+            (1700, 1720),
+            (1780, 1800),
+            (1850, 1870),
+            (1930, 1950),
+        )
         for low, up in intervals:
             ind = np.logical_and(X.flatten() > low, X.flatten() < up)
             X_test.append(X[ind])
@@ -542,6 +567,8 @@ def get_dataset(dataset_name):
         return SolarIrradiance_Dataset()
     elif dataset_name == "MNIST":
         return MNIST_Dataset()
+    elif dataset_name == "CMNIST":
+        return CMNIST_Dataset()
     elif dataset_name == "Iris":
         return Iris_Dataset()
     elif dataset_name == "Rectangles":
