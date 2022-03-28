@@ -111,7 +111,7 @@ class BayesLinear(GenerativeFunction):
 
         self.zero_mean_prior = zero_mean_prior
         # Instantiate Standard Gaussian sampler
-        self.gaussian_sampler = GaussianSampler(seed)
+        self.gaussian_sampler = GaussianSampler(seed, device)
 
         # If the BNN has zero mean, no parameters are considered for the
         # mean values the weights and bias variable
@@ -119,11 +119,19 @@ class BayesLinear(GenerativeFunction):
             self.weight_mu = 0
             self.bias_mu = 0
         else:
-            self.weight_mu = torch.nn.Parameter(torch.zeros([input_dim, output_dim], dtype = dtype))
-            self.bias_mu = torch.nn.Parameter(torch.zeros([1, output_dim], dtype = dtype))
+            self.weight_mu = torch.nn.Parameter(
+                torch.zeros([input_dim, output_dim], dtype=dtype, device = device)
+            )
+            self.bias_mu = torch.nn.Parameter(torch.zeros([1, output_dim],
+                                                          dtype=dtype,
+                                                          device = device))
 
-        self.weight_log_sigma = torch.nn.Parameter(torch.zeros([input_dim, output_dim], dtype = dtype))
-        self.bias_log_sigma = torch.nn.Parameter(torch.zeros([1, output_dim], dtype = dtype))
+        self.weight_log_sigma = torch.nn.Parameter(
+            torch.zeros([input_dim, output_dim], dtype=dtype, device = device)
+        )
+        self.bias_log_sigma = torch.nn.Parameter(
+            torch.zeros([1, output_dim], dtype=dtype, device = device)
+        )
 
         # Reset the generator's seed if fixed noise.
         self.gaussian_sampler.reset_seed()
@@ -164,7 +172,7 @@ class BayesLinear(GenerativeFunction):
         z_w, z_b = self.get_noise()
 
         # Perform reparameterization trick
-        w = self.weight_mu + z_w * torch.exp(self.weight_log_sigma) 
+        w = self.weight_mu + z_w * torch.exp(self.weight_log_sigma)
         b = self.bias_mu + z_b * torch.exp(self.bias_log_sigma)
 
         # Apply linear transformation.
@@ -198,6 +206,7 @@ class BayesLinear(GenerativeFunction):
 
         # Re-escale
         return KL / 2
+
 
 class SimplerBayesLinear(BayesLinear):
     def __init__(
@@ -260,6 +269,7 @@ class SimplerBayesLinear(BayesLinear):
         self.weight_log_sigma = torch.nn.Parameter(torch.tensor(0.0))
         self.bias_log_sigma = torch.nn.Parameter(torch.tensor(0.0))
 
+
 class BayesianNN(GenerativeFunction):
     def __init__(
         self,
@@ -271,7 +281,7 @@ class BayesianNN(GenerativeFunction):
         layer_model,
         dropout=0.0,
         seed=2147483647,
-        fix_random_noise=False,
+        fix_random_noise=True,
         zero_mean_prior=False,
         device=None,
         dtype=torch.float64,
@@ -291,8 +301,8 @@ class BayesianNN(GenerativeFunction):
                     Dimensionality of the input values `x`.
         output_dim : int
                      Dimensionality of the function output.
-        layer_model :              
-                     
+        layer_model :
+
         dropout : float between 0 and 1
                   The degree of dropout used after each activation layer
         device : torch.device
@@ -317,9 +327,9 @@ class BayesianNN(GenerativeFunction):
             seed=seed,
             dtype=dtype,
         )
-        
+
         self.input_dim = input_dim
-        
+
         # Store parameters
         self.structure = structure
         self.activation = activation
@@ -328,7 +338,7 @@ class BayesianNN(GenerativeFunction):
         self.dropout = torch.nn.Dropout(dropout)
         # Create an array symbolizing the dimensionality of the data at
         # each inner layer.
-        dims = [self.input_dim] + structure + [1]
+        dims = [self.input_dim] + structure + [output_dim]
         layers = []
 
         # Loop over the input and output dimension of each sub-layer.
@@ -391,10 +401,12 @@ class BayesianNN(GenerativeFunction):
         KL divergences of its sub-models."""
         return torch.stack([layer.KL() for layer in self.layers]).sum()
 
-class BayesianConv(torch.nn.Module):
+
+class BayesianConvLayer(torch.nn.Module):
     def __init__(
         self,
-        in_channels,  
+        num_samples,
+        in_channels,
         out_channels,
         kernel_size,
         seed=2147483647,
@@ -402,22 +414,37 @@ class BayesianConv(torch.nn.Module):
         device=None,
         dtype=torch.float64,
     ):
-        super(BayesianConv, self).__init__()
-        
-        self.fix_random_noise  = fix_random_noise
-        self.gaussian_sampler = GaussianSampler(seed)
+        super(BayesianConvLayer, self).__init__()
+
+        self.num_samples = num_samples
+        self.fix_random_noise = fix_random_noise
+        self.gaussian_sampler = GaussianSampler(seed, device)
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.device = device
         self.dtype = dtype
-        
-        self.kernel_size = kernel_size if isinstance(kernel_size, tuple)\
+
+        self.kernel_size = (
+            kernel_size
+            if isinstance(kernel_size, tuple)
             else (kernel_size, kernel_size)
-        
-        self.W_mu = torch.nn.Parameter(torch.zeros(self.kernel_size, device=self.device))
-        self.W_log_std = torch.nn.Parameter(torch.zeros(self.kernel_size, device=self.device))
-        self.bias_mu = torch.nn.Parameter(torch.zeros([1], device=self.device))
-        self.bias_log_std = torch.nn.Parameter(torch.zeros([1], device=self.device))
+        )
+
+        weights_shape = (self.out_channels, self.in_channels, *self.kernel_size)
+        self.W_mu = torch.nn.Parameter(torch.zeros(weights_shape, device=self.device))
+        #self.W_mu = torch.nn.Parameter(torch.tensor(0.0))
+        self.W_log_std = torch.nn.Parameter(
+            torch.zeros(weights_shape, device=self.device)
+        )
+        #self.W_log_std = torch.nn.Parameter(torch.tensor(0.0))
+        self.bias_mu = torch.nn.Parameter(
+            torch.zeros([self.out_channels], device=self.device)
+        )
+        #self.bias_mu = torch.nn.Parameter(torch.tensor(0.0))
+        self.bias_log_std = torch.nn.Parameter(
+            torch.zeros([self.out_channels], device=self.device)
+        )
+        #self.bias_log_std = torch.nn.Parameter(torch.tensor(0.0))
 
         # Reset the generator's seed if fixed noise.
         self.gaussian_sampler.reset_seed()
@@ -429,12 +456,11 @@ class BayesianConv(torch.nn.Module):
             return self.noise
         else:
             # Compute the shape of the noise to generate
-            z_w_shape = (self.out_channels, 1, *self.W_mu.size())
-            z_b_shape = (self.out_channels)
+            z_w_shape = (self.num_samples, self.out_channels, self.in_channels, *self.kernel_size)
+            z_b_shape = (self.num_samples, self.out_channels)
 
             # Generate Gaussian values
             z_w = self.gaussian_sampler(z_w_shape)
-            z_w = torch.tile(z_w, (1, self.in_channels, 1, 1))
             z_b = self.gaussian_sampler(z_b_shape)
 
             return (z_w, z_b)
@@ -443,13 +469,19 @@ class BayesianConv(torch.nn.Module):
 
         # Generate Gaussian values
         z_w, z_b = self.get_noise()
-        
-        W = self.W_mu + z_w * torch.exp(self.W_log_std) 
-        b = self.bias_mu + z_b * torch.exp(self.bias_log_std) 
 
-        x = torch.nn.functional.conv2d(input, W, b)
+        W = self.W_mu + z_w * torch.exp(self.W_log_std)
+        b = self.bias_mu + z_b * torch.exp(self.bias_log_std)
+
+        x = torch.stack(
+            [
+                torch.nn.functional.conv2d(input=x, weight=weight, bias=bias)
+                for x, weight, bias in zip(input, W, b)
+            ]
+        )
         return x
-    
+
+
 class BayesianConvNN(GenerativeFunction):
     def __init__(
         self,
@@ -472,41 +504,180 @@ class BayesianConvNN(GenerativeFunction):
             dtype=dtype,
         )
         self.activation = activation
+        self.conv1 = BayesianConvLayer(num_samples, 1, 8, 3, device = device)
+        self.conv2 = BayesianConvLayer(num_samples, 4, 16, 3, device = device)
 
-        self.conv1 = BayesianConv(1, num_samples, 3,
-            seed=2147483647,
-            fix_random_noise=False,
+        self.fc = BayesLinear(
+            num_samples=20,
+            input_dim=16*5*5,
+            output_dim=output_dim,
             device=device,
+            seed=0,
             dtype=dtype,
         )
-        self.conv2 = BayesianConv(num_samples, num_samples, 3,
-            seed=2147483647,
-            fix_random_noise=False,
-            device=device,
-            dtype=dtype,
-        )
-        self.conv3 = BayesianConv(num_samples, num_samples, 5,
-            seed=2147483647,
-            fix_random_noise=False,
-            device=device,
-            dtype=dtype,
-        )
-    
+
     def forward(self, input):
         # in_channel dimension as 1
+        N = input.shape[0]
+        S = self.num_samples
+
+        # Tile num samples and set input channels as 1
         x = input.reshape((input.shape[0], 1, *self.input_dim))
+        x = torch.tile(
+            x.unsqueeze(0),
+            (self.num_samples, *np.ones(x.ndim, dtype=int)),
+        )
         
-        # Shape (N, num_samples, ...)
+        # First convolution
         x = self.conv1(x)
         x = self.activation(x)
+
+        # MaxPooling 2D
+        x = x.reshape((-1, *x.size()[2:]))
         x = torch.nn.functional.max_pool2d(x, 2)
+        x = x.reshape((S, N, *x.size()[1:]))
+        
+        # Second convolution
+        x = self.conv2(x)
+        
+        # MaxPooling 2D
+        x = x.reshape((-1, *x.size()[2:]))
+        x = torch.nn.functional.max_pool2d(x, 2)
+        x = x.reshape((S, N, *x.size()[1:]))
+
+        # Flatten
+        x = x.reshape((S, N, -1))
+
+        # Fully connected
+        x = self.fc(x)
+
+        return x
+
+
+
+class BayesianConvNN2(GenerativeFunction):
+    def __init__(
+        self,
+        num_samples,
+        input_dim,
+        output_dim,
+        activation,
+        seed=2147483647,
+        fix_random_noise=False,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__(
+            num_samples,
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
+        self.activation = activation
+        _in = 4
+        _out = 2 * _in
+        self.conv1 = torch.nn.Conv2d(1, _in, 3, device = device, dtype = dtype)
+        self.conv2 = torch.nn.Conv2d(_in, _out, 3, device = device, dtype = dtype)
+
+        self.fc = BayesLinear(
+            num_samples=num_samples,
+            input_dim=_out*5*5,
+            output_dim=output_dim,
+            device=device,
+            seed=0,
+            dtype=dtype,
+        )
+
+    def forward(self, input):
+        # in_channel dimension as 1
+        N = input.shape[0]
+
+        # Tile num samples and set input channels as 1
+        x = input.reshape((N, 1, *self.input_dim))
+        # First convolution
+        x = self.conv1(x)
+        x = self.activation(x)
+
+        # MaxPooling 2D
+        x = torch.nn.functional.max_pool2d(x, 2)
+        
+        # Second convolution
         x = self.conv2(x)
         x = self.activation(x)
+        
+        # MaxPooling 2D
         x = torch.nn.functional.max_pool2d(x, 2)
-        x = self.conv3(x)
-        x = x.transpose(0, 1)
-        x = x.reshape((x.shape[0], x.shape[1], -1))
-        return x  
+
+        # Flatten
+        x = x.reshape((N, -1))
+        x = torch.tile(
+            x.unsqueeze(0),
+            (self.num_samples, *np.ones(x.ndim, dtype=int)),
+        )
+
+        # Fully connected
+        x = self.fc(x)
+
+        return x
+    
+
+class BayesianLSTM(GenerativeFunction):
+    def __init__(
+        self,
+        num_samples,
+        input_dim,
+        output_dim,
+        activation,
+        seed=2147483647,
+        fix_random_noise=False,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__(
+            num_samples,
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
+        self.activation = activation
+        h = 100
+        self.lstm = torch.nn.LSTM(input_dim, h, dropout = 0,device = device, dtype = dtype)
+
+        self.fc = BayesLinear(
+            num_samples=20,
+            input_dim=h,
+            output_dim=output_dim,
+            device=device,
+            seed=0,
+            dtype=dtype,
+        )
+
+    def forward(self, input):
+        # in_channel dimension as 1
+        N = input.shape[0]
+
+        # Tile num samples and set input channels as 1
+        x = input.reshape((N, 1, -1))
+        # First convolution
+        x = self.lstm(x)[0]
+                
+        # Flatten
+        x = x.reshape((N, -1))
+        x = torch.tile(
+            x.unsqueeze(0),
+            (self.num_samples, *np.ones(x.ndim, dtype=int)),
+        )
+
+        # Fully connected
+        x = self.fc(x)
+
+        return x
 
 
 class GP(GenerativeFunction):

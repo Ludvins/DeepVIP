@@ -45,7 +45,7 @@ dvip = DVIP_Base(
     device=args.device,
 )
 
-# dvip.print_variables()
+dvip.print_variables()
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
@@ -64,7 +64,7 @@ train_hist, val_hist = fit_with_metrics(
 )
 
 
-# dvip.print_variables()
+dvip.print_variables()
 
 dvip.num_samples = args.num_samples_test
 test_metrics = score(dvip, val_loader, args.metrics, device=args.device)

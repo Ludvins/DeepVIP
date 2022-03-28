@@ -366,7 +366,7 @@ class MNIST_Dataset(DVIPDataset):
 
 
 class CMNIST_Dataset(MNIST_Dataset):
-    def __init__(self, corrupted=True):
+    def __init__(self):
         super().__init__()
         test_data = self.test.inputs.reshape(10000, 28, 28)
 
@@ -455,7 +455,7 @@ class Rectangles_Dataset(DVIPDataset):
         self.output_dim = 1
 
         train_data = np.loadtxt("data/rectangles/rectangles_im_train.amat")
-        test_data = np.loadtxt("data/rectangles/rectangles_im_test.amat")
+        test_data = np.loadtxt("data/rectangles/rectangles_im_test.amat")[:2000]
 
         self.len_data = train_data.shape[0] + test_data.shape[0]
         self.train = Training_Dataset(
@@ -499,6 +499,7 @@ class Banknote_Dataset(DVIPDataset):
         self.split_data(data)
 
 
+
 class Bimodal_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
@@ -534,8 +535,48 @@ class Heterocedastic_Dataset(DVIPDataset):
         y = 7 * sin + epsilon * sin + 10
         self.inputs = x[..., np.newaxis]
         self.targets = y[..., np.newaxis]
+        
+class Year_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+        try:
+            data = np.loadtxt("/tmp/YearPredictionMSD.txt" ,delimiter = ",")
+        except:
+            url = "{}{}".format(uci_base, "00203/YearPredictionMSD.txt.zip")
+            with urlopen(url) as zipresp:
+                with ZipFile(BytesIO(zipresp.read())) as zfile:
+                    zfile.extractall("/tmp/")
 
+            data = np.loadtxt("/tmp/YearPredictionMSD.txt" ,delimiter = ",")
+            
+        self.len_data = data.shape[0]
+        X = data[:, 1:]
+        Y = data[:, 0].reshape(-1, 1)
+        
+        self.n_train = 463715 
+        self.train = Training_Dataset(X[:self.n_train//3], Y[:self.n_train])
 
+        self.train_test = Test_Dataset(
+            X, Y,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            X[self.n_train:], Y[:self.n_train:],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        
+    def __len__(self):
+        return self.len_data
+
+    def len_train(self, test_size):
+        return self.n_train
+
+    def get_split(self, split, *args):
+        return self.train, self.train_test, self.test
+    
 def get_dataset(dataset_name):
     if dataset_name == "boston":
         return Boston_Dataset()
@@ -579,5 +620,9 @@ def get_dataset(dataset_name):
         return Heterocedastic_Dataset()
     elif dataset_name == "Banknote":
         return Banknote_Dataset()
+    elif dataset_name == "credit":
+        return CreditCard_Dataset()
+    elif dataset_name == "Year":
+        return Year_Dataset()
     else:
         raise RuntimeError("No available dataset selected.")

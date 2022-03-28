@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from src.generative_functions import GP, BayesianNN, CosFunctions
+from src.generative_functions import *
 from src.layers import VIPLayer
 
 
@@ -31,13 +31,13 @@ def init_layers(
     genf,
     regression_coeffs,
     bnn_structure,
-    bnn_inner_dim,
     bnn_layer,
     activation,
     seed,
     device,
     dtype,
     fix_prior_noise,
+    genf_full_output,
     final_layer_mu,
     final_layer_sqrt,
     final_layer_noise,
@@ -47,6 +47,7 @@ def init_layers(
     dropout,
     prior_kl,
     zero_mean_prior,
+    input_prop,
     **kwargs
 ):
     """
@@ -183,40 +184,47 @@ def init_layers(
             raise NotImplementedError(
                 "Dimensionality augmentation is not handled currently."
             )
+            
+        if not input_prop:
+            mf = None
 
+        out = dim_out if genf_full_output else 1
         # Create the Generation function
-        if genf == "BNN":
+        if genf == "conv" and i == 0:
+            f = BayesianConvNN2(
+                num_samples=regression_coeffs,
+                input_dim=(28, 28),
+                activation=activation,
+                output_dim=out,
+                fix_random_noise=fix_prior_noise,
+                device=device,
+                seed=seed,
+                dtype=dtype,
+            )
+        
+        elif genf == "lstm" and i == 0:
+            f = BayesianLSTM(
+                num_samples=regression_coeffs,
+                input_dim=dim_in,
+                activation=activation,
+                output_dim=out,
+                fix_random_noise=fix_prior_noise,
+                device=device,
+                seed=seed,
+                dtype=dtype,
+            )
+            
+        else: 
             f = BayesianNN(
                 num_samples=regression_coeffs,
                 input_dim=dim_in,
                 structure=bnn_structure,
                 activation=activation,
-                output_dim=dim_out,
+                output_dim=out,
                 layer_model = bnn_layer,
                 dropout=dropout,
                 fix_random_noise=fix_prior_noise,
                 zero_mean_prior=zero_mean_prior,
-                device=device,
-                seed=seed,
-                dtype=dtype,
-            )
-        elif genf == "GP":
-            f = GP(
-                num_samples=regression_coeffs,
-                input_dim=dim_in,
-                output_dim=dim_out,
-                inner_layer_dim=bnn_inner_dim,
-                fix_random_noise=fix_prior_noise,
-                device=device,
-                seed=seed,
-                dtype=dtype,
-            )
-        elif genf == "cos":
-            f = CosFunctions(
-                num_samples=regression_coeffs,
-                input_dim=dim_in,
-                output_dim=dim_out,
-                fix_random_noise=fix_prior_noise,
                 device=device,
                 seed=seed,
                 dtype=dtype,
@@ -256,8 +264,8 @@ def init_layers2(
     """
     """
     
-    dims = [genf.input_shape for genf in generative_functions]
-
+    dims = [np.prod(genf.input_dim) for genf in generative_functions] + [generative_functions[-1].output_dim]
+    print(dims)
     # Initialize layers array
     layers = []
     # We maintain a copy of X, where each projection is applied. That is,
@@ -265,7 +273,7 @@ def init_layers2(
     # using the projected (from the first projection) data.
     X_running = np.copy(X)
     for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
-
+        print(i)
         # Last layer has no transformation
         if i == len(dims) - 2:
             mf = None

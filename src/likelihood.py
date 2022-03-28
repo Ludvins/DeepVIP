@@ -368,11 +368,12 @@ class MultiClass(Likelihood):
               correct class.
         """
 
-        gh_x, gh_w = hermgauss(self.num_gauss_hermite_points, self.dtype)
+        gh_x, gh_w = hermgauss(self.num_gauss_hermite_points, self.dtype, self.device)
 
         # Work out what the mean and variance is of the indicated latent function.
         # Shape (num_samples, num_classes)
-        oh_on = one_hot(Y.long().flatten(), self.num_classes).type(self.dtype)
+        oh_on = one_hot(Y.long().flatten(), self.num_classes)
+        oh_on = oh_on.type(self.dtype).to(self.device)
         # Only mean and var values corresponging to true label remain. The rest are
         #  multiplied by 0. In short, that summation equals to retrieve the
         #  mean and var on the true label for each sample
@@ -471,7 +472,7 @@ class Bernoulli(Likelihood):
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         return hermgaussquadrature(
-            self.logp, self.num_gauss_hermite_points, Fmu, Fvar, dtype=self.dtype, Y=Y
+            self.logp, self.num_gauss_hermite_points, Fmu, Fvar, Y, self.dtype, self.device
         )
 
 

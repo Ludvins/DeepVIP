@@ -5,13 +5,14 @@ import numpy as np
 import itertools
 
 
-def hermgauss(n, dtype):
+def hermgauss(n, dtype, device):
     # Return the locations and weights of GH quadrature
     x, w = np.polynomial.hermite.hermgauss(n)
-    return torch.tensor(x, dtype=dtype), torch.tensor(w, dtype=dtype)
+    return (torch.tensor(x, dtype=dtype, device = device),
+            torch.tensor(w, dtype=dtype, device = device))
 
 
-def mvhermgauss(H, D, dtype):
+def mvhermgauss(H, D, dtype, device):
     """
     Return the evaluation locations 'xn', and weights 'wn' for a multivariate
     Gauss-Hermite quadrature.
@@ -29,13 +30,14 @@ def mvhermgauss(H, D, dtype):
     gh_x, gh_w = np.polynomial.hermite.hermgauss(H)
     x = np.array(list(itertools.product(*(gh_x,) * D)))  # H**DxD
     w = np.prod(np.array(list(itertools.product(*(gh_w,) * D))), 1)  # H**D
-    return torch.tensor(x, dtype=dtype), torch.tensor(w, dtype=dtype)
+    return (torch.tensor(x, dtype=dtype, device = device), 
+            torch.tensor(w, dtype=dtype, device = device))
 
 
-def hermgaussquadrature(f, num_gh, Fmu, Fvar, Y, dtype):
+def hermgaussquadrature(f, num_gh, Fmu, Fvar, Y, dtype, device):
 
     # Shape (num hermite)
-    xn, wn = hermgauss(num_gh, dtype)
+    xn, wn = hermgauss(num_gh, dtype, device)
 
     # Shape (1, num_hermite)
     gh_x = xn.reshape(1, -1)

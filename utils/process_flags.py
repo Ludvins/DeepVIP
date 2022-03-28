@@ -45,33 +45,33 @@ def manage_experiment_configuration(args=None):
         args.metrics = MetricsClassification
 
     FLAGS["activation_str"] = args.activation
+    
     # Manage Generative function
-    if args.genf == "BNN":
+    if args.bnn_structure == [0]:
+        args.bnn_structure = []
+    FLAGS["bnn_structure"] = args.bnn_structure
 
-        if args.bnn_structure == [0]:
-            args.bnn_structure = []
-        FLAGS["bnn_structure"] = args.bnn_structure
+    FLAGS["bnn_layer_str"] = args.bnn_layer
+    if args.bnn_layer == "BayesLinear":
+        FLAGS["bnn_layer"] = BayesLinear
+    elif args.bnn_layer == "SimplerBayesLinear":
+        FLAGS["bnn_layer"] = SimplerBayesLinear
+    else:
+        raise ValueError("Invalid BNN layer type.")
+    
+    if args.activation == "tanh":
+        FLAGS["activation"] = torch.tanh
+    elif args.activation == "relu":
+        FLAGS["activation"] = torch.relu
+    elif args.activation == "softplus":
+        FLAGS["activation"] = torch.nn.Softplus()
+    elif args.activation == "sigmoid":
+        FLAGS["activation"] = torch.sigmoid
+    elif args.activation == "cos":
+        FLAGS["activation"] = torch.cos
+    else:
+        raise ValueError("Invalid BNN activation type.")
 
-        if args.activation == "tanh":
-            FLAGS["activation"] = torch.tanh
-        elif args.activation == "relu":
-            FLAGS["activation"] = torch.relu
-        elif args.activation == "softplus":
-            FLAGS["activation"] = torch.nn.Softplus()
-        elif args.activation == "sigmoid":
-            FLAGS["activation"] = torch.sigmoid
-        elif args.activation == "cos":
-            FLAGS["activation"] = torch.cos
-        else:
-            raise ValueError("Invalid BNN activation type.")
-
-        FLAGS["bnn_layer_str"] = args.bnn_layer
-        if args.bnn_layer == "BayesLinear":
-            FLAGS["bnn_layer"] = BayesLinear
-        elif args.bnn_layer == "SimplerBayesLinear":
-            FLAGS["bnn_layer"] = SimplerBayesLinear
-        else:
-            raise ValueError("Invalid BNN layer type.")
 
     if args.dtype == "float64":
         FLAGS["dtype"] = torch.float64
@@ -86,28 +86,6 @@ def manage_experiment_configuration(args=None):
         )
 
     return args
-
-
-def check_data(X_train, y_train, verbose=1):
-    if X_train.shape[0] != y_train.shape[0]:
-        print("Labels and features differ in the number of samples")
-        return
-
-    # Compute data information
-    n_samples = X_train.shape[0]
-    input_dim = X_train.shape[1]
-    output_dim = y_train.shape[1]
-    y_mean = np.mean(y_train, axis=0)
-    y_std = np.std(y_train, axis=0)
-
-    if verbose > 0:
-        print("Number of samples: ", n_samples)
-        print("Input dimension: ", input_dim)
-        print("Label dimension: ", output_dim)
-        print("Labels mean value: ", y_mean)
-        print("Labels standard deviation: ", y_std)
-
-    return n_samples, input_dim, output_dim, y_mean, y_std
 
 
 def get_parser():
@@ -304,5 +282,10 @@ def get_parser():
         type=int,
     )
     parser.add_argument("--name_flag", default="", type=str)
+    
+    parser.add_argument("--no_input_prop", dest="input_prop", action="store_false")
+    parser.set_defaults(input_prop = True)
+    parser.add_argument("--genf_full_output", dest="genf_full_output", action="store_true")
+    parser.set_defaults(genf_full_output = False)
 
     return parser

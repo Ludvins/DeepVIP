@@ -3,7 +3,7 @@ import numpy as np
 
 
 class NoiseSampler:
-    def __init__(self, seed):
+    def __init__(self, seed, device):
         """
         Generates noise samples.
 
@@ -15,6 +15,7 @@ class NoiseSampler:
                 The dtype of the layer's computations and weights.
         """
         self.seed = seed
+        self.device = device
         self.rng = np.random.default_rng(self.seed)
 
     def reset_seed(self):
@@ -45,7 +46,7 @@ class GaussianSampler(NoiseSampler):
 
         """
 
-        return torch.tensor(self.rng.standard_normal(size=size))
+        return torch.tensor(self.rng.standard_normal(size=size)).to(self.device)
 
 
 class UniformSampler(NoiseSampler):
