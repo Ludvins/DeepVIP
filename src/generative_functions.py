@@ -598,17 +598,21 @@ class BayesianConvNN2(GenerativeFunction):
         # Tile num samples and set input channels as 1
         x = input.reshape((N, 1, *self.input_dim))
         # First convolution
+        # Shape (N, 26, 26, 4)
         x = self.conv1(x)
         x = self.activation(x)
 
         # MaxPooling 2D
+        # Shape (N, 13, 13, 4)
         x = torch.nn.functional.max_pool2d(x, 2)
         
         # Second convolution
+        # Shape (N, 11, 11, 8)
         x = self.conv2(x)
         x = self.activation(x)
         
         # MaxPooling 2D
+        # Shape (N, 5, 5, 8)
         x = torch.nn.functional.max_pool2d(x, 2)
 
         # Flatten
@@ -619,10 +623,8 @@ class BayesianConvNN2(GenerativeFunction):
         )
 
         # Fully connected
-        x = self.fc(x)
-
-        return x
-    
+        return self.fc(x)
+        
 
 class BayesianLSTM(GenerativeFunction):
     def __init__(

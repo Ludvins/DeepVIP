@@ -4,7 +4,8 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
-import torch
+import gzip
+import shutil
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from sklearn.model_selection import train_test_split
@@ -76,6 +77,7 @@ class Test_Dataset(Dataset):
 
 
 uci_base = "https://archive.ics.uci.edu/ml/machine-learning-databases/"
+data_base = "./data"
 
 
 class DVIPDataset(Dataset):
@@ -163,6 +165,7 @@ class Boston_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
+
         data_url = "{}{}".format(uci_base, "housing/housing.data")
         raw_df = pd.read_fwf(data_url, header=None).to_numpy()
         self.split_data(raw_df)
@@ -257,16 +260,7 @@ class WineRed_Dataset(DVIPDataset):
         self.split_data(data)
 
 
-class WineWhite_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        url = "{}{}".format(uci_base, "wine-quality/winequality-white.csv")
-        data = pd.read_csv(url, delimiter=";").values
-        self.split_data(data)
-
-
-class C02_Dataset(DVIPDataset):
+class CO2_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
@@ -364,37 +358,6 @@ class MNIST_Dataset(DVIPDataset):
     def len_train(self, test_size):
         return 60000
 
-
-class CMNIST_Dataset(MNIST_Dataset):
-    def __init__(self):
-        super().__init__()
-        test_data = self.test.inputs.reshape(10000, 28, 28)
-
-        test_data = np.array([blur(img, 2) for img in test_data])
-        self.test = Test_Dataset(
-            test_data.reshape(10000, -1),
-            self.test.targets,
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-
-class Iris_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "multiclass"
-        self.classes = 3
-        self.output_dim = 3
-        url = "{}{}".format(uci_base, "iris/iris.data")
-
-        data = pd.read_csv(url, header=None)
-        data[4].replace(
-            ["Iris-setosa", "Iris-versicolor", "Iris-virginica"],
-            [0, 1, 2],
-            inplace=True,
-        )
-        self.split_data(data.values)
-
-
 class SolarIrradiance_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
@@ -487,83 +450,35 @@ class Rectangles_Dataset(DVIPDataset):
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
 
-
-class Banknote_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "binaryclass"
-        self.classes = 2
-        self.output_dim = 1
-
-        url = "{}{}".format(uci_base, "00267/data_banknote_authentication.txt")
-        data = np.loadtxt(url, delimiter=",")
-        self.split_data(data)
-
-
-
-class Bimodal_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-
-        rng = np.random.default_rng(seed=0)
-
-        x = rng.uniform(size=2000) * 8 - 4
-        epsilon = rng.normal(size=2000)
-
-        c = rng.normal(size=2000)
-        y = np.zeros_like(x)
-        y[c >= 0.5] = 10 * np.cos(x[c >= 0.5] - 0.5) + epsilon[c >= 0.5]
-
-        y[c < 0.5] = 10 * np.sin(x[c < 0.5] - 0.5) + epsilon[c < 0.5]
-
-        self.inputs = x[..., np.newaxis]
-        self.targets = y[..., np.newaxis]
-
-
-class Heterocedastic_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-
-        rng = np.random.default_rng(seed=0)
-
-        x = rng.uniform(size=2000) * 8 - 4
-        epsilon = rng.normal(size=2000) * 2
-
-        sin = np.sin(x)
-
-        y = 7 * sin + epsilon * sin + 10
-        self.inputs = x[..., np.newaxis]
-        self.targets = y[..., np.newaxis]
         
 class Year_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
         try:
-            data = np.loadtxt("/tmp/YearPredictionMSD.txt" ,delimiter = ",")
+            data = pd.read_csv("/tmp/YearPredictionMSD.txt" ,delimiter = ",").values
         except:
             url = "{}{}".format(uci_base, "00203/YearPredictionMSD.txt.zip")
             with urlopen(url) as zipresp:
                 with ZipFile(BytesIO(zipresp.read())) as zfile:
                     zfile.extractall("/tmp/")
 
-            data = np.loadtxt("/tmp/YearPredictionMSD.txt" ,delimiter = ",")
+            data = pd.read_csv("/tmp/YearPredictionMSD.txt" ,delimiter = ",").values
             
         self.len_data = data.shape[0]
         X = data[:, 1:]
         Y = data[:, 0].reshape(-1, 1)
         
         self.n_train = 463715 
-        self.train = Training_Dataset(X[:self.n_train//3], Y[:self.n_train])
+        self.train = Training_Dataset(X[:self.n_train], Y[:self.n_train])
 
         self.train_test = Test_Dataset(
-            X, Y,
+            X[:self.n_train],  Y[:self.n_train],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            X[self.n_train:], Y[:self.n_train:],
+            X[self.n_train:], Y[self.n_train:],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
@@ -577,52 +492,120 @@ class Year_Dataset(DVIPDataset):
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
     
+class Airline_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+        
+        data = pd.read_csv("./data/airline.csv")          
+            
+        # Convert time of day from hhmm to minutes since midnight
+        data.ArrTime = 60*np.floor(data.ArrTime/100)+np.mod(data.ArrTime, 100)
+        data.DepTime = 60*np.floor(data.DepTime/100)+np.mod(data.DepTime, 100)
+
+        # Pick out the data
+        Y = data['ArrDelay'].values[:800000].reshape(-1, 1)
+        names = [
+            'Month', 'DayofMonth', 
+            'DayOfWeek', 'plane_age',
+            'AirTime', 'Distance',
+            'ArrTime', 'DepTime'
+        ]
+        X = data[names].values[:800000]
+        
+        self.n_train = 700000 
+        self.train = Training_Dataset(X[:self.n_train], Y[:self.n_train])
+
+        self.train_test = Test_Dataset(
+            X[:self.n_train], Y[:self.n_train],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            X[self.n_train:], Y[self.n_train:],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        
+    def __len__(self):
+        return self.len_data
+
+    def len_train(self, test_size):
+        return self.n_train
+
+    def get_split(self, split, *args):
+        return self.train, self.train_test, self.test
+    
+class HIGGS_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "binaryclass"
+        self.classes = 2
+        self.output_dim = 1
+
+        try:
+            data = pd.read_excel("./data/HIGGS.csv").values
+        except:
+            from requests import get
+            url = "{}{}".format(uci_base, "00280/HIGGS.csv.gz")
+            with gzip.open(get(url).content, 'rb') as f_in:
+                with open('./data/HIGGS.csv', 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+
+            data = pd.read_excel("./data/HIGGS.csv").values
+
+        print(data.shape)
+        X = data[:, 1:]
+        Y = data[:, 0].reshape(-1, 1)
+
+        self.len_data = 11000000
+        test_size = 500000
+        self.train = Training_Dataset(
+            X[:self.len_data - test_size],
+            Y[:self.len_data - test_size],
+            normalize_targets=False,
+            normalize_inputs=True,
+        )
+
+        self.train_test = Test_Dataset(
+            X[:self.len_data - test_size],
+            Y[:self.len_data - test_size],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            X[self.len_data - test_size:],
+            Y[self.len_data - test_size:],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return self.len_data
+
+    def len_train(self, test_size):
+        return len(self.train)
+
+    def get_split(self, split, *args):
+        return self.train, self.train_test, self.test
+
+    
 def get_dataset(dataset_name):
-    if dataset_name == "boston":
-        return Boston_Dataset()
-    elif dataset_name == "energy":
-        return Energy_Dataset()
-    elif dataset_name == "concrete":
-        return Concrete_Dataset()
-    elif dataset_name == "naval":
-        return Naval_Dataset()
-    elif dataset_name == "kin8nm":
-        return Kin8nm_Dataset()
-    elif dataset_name == "yatch":
-        return Yatch_Dataset()
-    elif dataset_name == "power":
-        return Power_Dataset()
-    elif dataset_name == "protein":
-        return Protein_Dataset()
-    elif dataset_name == "winered":
-        return WineRed_Dataset()
-    elif dataset_name == "winewhite":
-        return WineWhite_Dataset()
-    elif dataset_name == "synthetic":
-        return Synthetic_Dataset()
-    elif dataset_name == "SPGP":
-        return SPGP_Dataset()
-    elif dataset_name == "CO2":
-        return C02_Dataset()
-    elif dataset_name == "Solar":
-        return SolarIrradiance_Dataset()
-    elif dataset_name == "MNIST":
-        return MNIST_Dataset()
-    elif dataset_name == "CMNIST":
-        return CMNIST_Dataset()
-    elif dataset_name == "Iris":
-        return Iris_Dataset()
-    elif dataset_name == "Rectangles":
-        return Rectangles_Dataset()
-    elif dataset_name == "Bimodal":
-        return Bimodal_Dataset()
-    elif dataset_name == "Heterocedastic":
-        return Heterocedastic_Dataset()
-    elif dataset_name == "Banknote":
-        return Banknote_Dataset()
-    elif dataset_name == "credit":
-        return CreditCard_Dataset()
-    elif dataset_name == "Year":
-        return Year_Dataset()
-    else:
-        raise RuntimeError("No available dataset selected.")
+    d = {
+        "boston": Boston_Dataset,
+        "energy": Energy_Dataset,
+        "concrete": Concrete_Dataset,
+        "naval": Naval_Dataset,
+        "kin8nm": Kin8nm_Dataset,
+        "yatch": Yatch_Dataset,
+        "power": Power_Dataset,
+        "protein": Protein_Dataset,
+        "winered": WineRed_Dataset,
+        "CO2": CO2_Dataset,
+        "MNIST": MNIST_Dataset,
+        "Rectangles": Rectangles_Dataset,
+        "Year": Year_Dataset,
+        "Airline": Airline_Dataset,
+        "HIGGS": HIGGS_Dataset,
+    }
+
+    return d[dataset_name]()

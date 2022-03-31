@@ -154,6 +154,7 @@ def init_layers(
     # using the projected (from the first projection) data.
     X_running = np.copy(X)
     for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
+        print("Layer {}: {}->{}".format(i, dim_in, dim_out), end = " ")
 
         # Last layer has no transformation
         if i == len(dims) - 2:
@@ -161,10 +162,13 @@ def init_layers(
             q_mu_initial_value = final_layer_mu
             q_sqrt_initial_value = final_layer_sqrt
             log_layer_noise = final_layer_noise
+            print("MF: None")
+
 
         # No dimension change, identity matrix
         elif dim_in == dim_out:
             mf = LinearProjection(np.identity(n=dim_in), device=device)
+            print("MF: Identity")
             q_mu_initial_value = inner_layers_mu
             q_sqrt_initial_value = inner_layers_sqrt
             log_layer_noise = inner_layers_noise
@@ -177,6 +181,8 @@ def init_layers(
             _, _, V = np.linalg.svd(X_running, full_matrices=False)
 
             mf = LinearProjection(V[:dim_out, :].T, device=device)
+            print("MF: Proyection")
+
             # Apply the projection to the running data,
             X_running = X_running @ V[:dim_out].T
 
@@ -187,6 +193,8 @@ def init_layers(
             
         if not input_prop:
             mf = None
+            print("MF: None")
+
 
         out = dim_out if genf_full_output else 1
         # Create the Generation function
@@ -194,18 +202,6 @@ def init_layers(
             f = BayesianConvNN2(
                 num_samples=regression_coeffs,
                 input_dim=(28, 28),
-                activation=activation,
-                output_dim=out,
-                fix_random_noise=fix_prior_noise,
-                device=device,
-                seed=seed,
-                dtype=dtype,
-            )
-        
-        elif genf == "lstm" and i == 0:
-            f = BayesianLSTM(
-                num_samples=regression_coeffs,
-                input_dim=dim_in,
                 activation=activation,
                 output_dim=out,
                 fix_random_noise=fix_prior_noise,
