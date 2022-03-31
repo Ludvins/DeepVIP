@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import numpy as np
 import torch
+from sklearn.metrics import roc_auc_score
 
 
 class Metrics:
@@ -98,7 +99,7 @@ class MetricsRegression(Metrics):
 
         # Define the auxiliary function to help with the calculations
         def A(mu, sigma_2):
-            
+
             norm = torch.distributions.normal.Normal(
                 torch.zeros_like(mu), torch.ones_like(mu)
             )
@@ -166,6 +167,7 @@ class MetricsClassification(Metrics):
         """Ressets all the metrics to zero."""
         super().reset()
         self.acc = torch.tensor(0.0, device=self.device)
+        self.auc = torch.tensor(0.0, device=self.device)
 
     def update(self, y, loss, mean_pred, std_pred, likelihood, light=True):
         """Updates all the metrics given the results in the parameters.
@@ -191,6 +193,11 @@ class MetricsClassification(Metrics):
         self.loss += scale * loss
         self.acc += scale * self.compute_acc(y, mean_pred)
         self.nll += scale * self.compute_nll(y, mean_pred, std_pred, likelihood)
+        self.auc += scale * self.compute_auc(y, mean_pred)
+
+    def compute_auc(self, y_true, prediction):
+        pred = torch.mean(prediction, 0)
+        return roc_auc_score(y_true, pred)
 
     def compute_acc(self, y, prediction):
         """"""
@@ -205,4 +212,5 @@ class MetricsClassification(Metrics):
             "LOSS": float(self.loss.detach().cpu().numpy()),
             "NLL": float(self.nll.detach().cpu().numpy()),
             "Error": 1 - float(self.acc.detach().cpu().numpy()),
+            "AUC": float(self.auc.detach().cpu().numpy()),
         }

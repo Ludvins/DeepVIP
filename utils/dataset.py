@@ -2,6 +2,7 @@ from io import BytesIO
 from urllib.request import urlopen
 from zipfile import ZipFile
 
+import os
 import numpy as np
 import pandas as pd
 import gzip
@@ -358,6 +359,7 @@ class MNIST_Dataset(DVIPDataset):
     def len_train(self, test_size):
         return 60000
 
+
 class SolarIrradiance_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
@@ -450,39 +452,41 @@ class Rectangles_Dataset(DVIPDataset):
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
 
-        
+
 class Year_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
         try:
-            data = pd.read_csv("/tmp/YearPredictionMSD.txt" ,delimiter = ",").values
+            data = pd.read_csv("/tmp/YearPredictionMSD.txt", delimiter=",").values
         except:
             url = "{}{}".format(uci_base, "00203/YearPredictionMSD.txt.zip")
             with urlopen(url) as zipresp:
                 with ZipFile(BytesIO(zipresp.read())) as zfile:
                     zfile.extractall("/tmp/")
 
-            data = pd.read_csv("/tmp/YearPredictionMSD.txt" ,delimiter = ",").values
-            
+            data = pd.read_csv("/tmp/YearPredictionMSD.txt", delimiter=",").values
+
         self.len_data = data.shape[0]
         X = data[:, 1:]
         Y = data[:, 0].reshape(-1, 1)
-        
-        self.n_train = 463715 
-        self.train = Training_Dataset(X[:self.n_train], Y[:self.n_train])
+
+        self.n_train = 463715
+        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
 
         self.train_test = Test_Dataset(
-            X[:self.n_train],  Y[:self.n_train],
+            X[: self.n_train],
+            Y[: self.n_train],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            X[self.n_train:], Y[self.n_train:],
+            X[self.n_train :],
+            Y[self.n_train :],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
-        
+
     def __len__(self):
         return self.len_data
 
@@ -491,42 +495,49 @@ class Year_Dataset(DVIPDataset):
 
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
-    
+
+
 class Airline_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
-        
-        data = pd.read_csv("./data/airline.csv")          
-            
+
+        data = pd.read_csv("./data/airline.csv")
+
         # Convert time of day from hhmm to minutes since midnight
-        data.ArrTime = 60*np.floor(data.ArrTime/100)+np.mod(data.ArrTime, 100)
-        data.DepTime = 60*np.floor(data.DepTime/100)+np.mod(data.DepTime, 100)
+        data.ArrTime = 60 * np.floor(data.ArrTime / 100) + np.mod(data.ArrTime, 100)
+        data.DepTime = 60 * np.floor(data.DepTime / 100) + np.mod(data.DepTime, 100)
 
         # Pick out the data
-        Y = data['ArrDelay'].values[:800000].reshape(-1, 1)
+        Y = data["ArrDelay"].values[:800000].reshape(-1, 1)
         names = [
-            'Month', 'DayofMonth', 
-            'DayOfWeek', 'plane_age',
-            'AirTime', 'Distance',
-            'ArrTime', 'DepTime'
+            "Month",
+            "DayofMonth",
+            "DayOfWeek",
+            "plane_age",
+            "AirTime",
+            "Distance",
+            "ArrTime",
+            "DepTime",
         ]
         X = data[names].values[:800000]
-        
-        self.n_train = 700000 
-        self.train = Training_Dataset(X[:self.n_train], Y[:self.n_train])
+
+        self.n_train = 700000
+        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
 
         self.train_test = Test_Dataset(
-            X[:self.n_train], Y[:self.n_train],
+            X[: self.n_train],
+            Y[: self.n_train],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            X[self.n_train:], Y[self.n_train:],
+            X[self.n_train :],
+            Y[self.n_train :],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
-        
+
     def __len__(self):
         return self.len_data
 
@@ -535,24 +546,33 @@ class Airline_Dataset(DVIPDataset):
 
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
-    
+
+
 class HIGGS_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "binaryclass"
         self.classes = 2
         self.output_dim = 1
 
-        try:
-            data = pd.read_excel("./data/HIGGS.csv").values
-        except:
-            from requests import get
+        if os.path.exists("data/HIGGS.csv"):
+            print("HIGGS csv file found.")
+            data = pd.read_csv("data/HIGGS.csv", header=None).values
+        elif os.path.exists("data/HIGGS.csv.gz"):
+            print("HIGGS gzip file found.")
+            data = pd.read_csv(
+                "data/HIGGS.csv.gz", header=None, compression="gzip"
+            ).values
+        else:
+            print("Downloading HIGGS Dataset...")
             url = "{}{}".format(uci_base, "00280/HIGGS.csv.gz")
-            with gzip.open(get(url).content, 'rb') as f_in:
-                with open('./data/HIGGS.csv', 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+            import wget
 
-            data = pd.read_excel("./data/HIGGS.csv").values
+            wget.download(url, out="data/" + url.split("/")[-1])
+            data = pd.read_csv(
+                "data/HIGGS.csv.gz", header=None, compression="gzip"
+            ).values
 
+        print("HIGGS data loaded. Data shape: ", end="")
         print(data.shape)
         X = data[:, 1:]
         Y = data[:, 0].reshape(-1, 1)
@@ -560,21 +580,21 @@ class HIGGS_Dataset(DVIPDataset):
         self.len_data = 11000000
         test_size = 500000
         self.train = Training_Dataset(
-            X[:self.len_data - test_size],
-            Y[:self.len_data - test_size],
+            X[: self.len_data - test_size],
+            Y[: self.len_data - test_size],
             normalize_targets=False,
             normalize_inputs=True,
         )
 
         self.train_test = Test_Dataset(
-            X[:self.len_data - test_size],
-            Y[:self.len_data - test_size],
+            X[: self.len_data - test_size],
+            Y[: self.len_data - test_size],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            X[self.len_data - test_size:],
-            Y[self.len_data - test_size:],
+            X[self.len_data - test_size :],
+            Y[self.len_data - test_size :],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
@@ -588,7 +608,68 @@ class HIGGS_Dataset(DVIPDataset):
     def get_split(self, split, *args):
         return self.train, self.train_test, self.test
 
-    
+
+class SUSY_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "binaryclass"
+        self.classes = 2
+        self.output_dim = 1
+
+        if os.path.exists("data/SUSY.csv"):
+            print("SUSSY csv file found.")
+            data = pd.read_csv("data/SUSY.csv", header=None).values
+        elif os.path.exists("data/SUSY.csv.gz"):
+            print("SUSY gzip file found.")
+            data = pd.read_csv(
+                "data/SUSY.csv.gz", header=None, compression="gzip"
+            ).values
+        else:
+            print("Downloading SUSY Dataset...")
+            url = "{}{}".format(uci_base, "00279/SUSY.csv.gz")
+            import wget
+
+            wget.download(url, out="data/" + url.split("/")[-1])
+            data = pd.read_csv(
+                "data/SUSY.csv.gz", header=None, compression="gzip"
+            ).values
+
+        print("SUSY data loaded. Data shape: ", end="")
+        print(data.shape)
+        X = data[:, 1:]
+        Y = data[:, 0].reshape(-1, 1)
+
+        self.len_data = 5000000
+        test_size = 500000
+        self.train = Training_Dataset(
+            X[: self.len_data - test_size],
+            Y[: self.len_data - test_size],
+            normalize_targets=False,
+            normalize_inputs=True,
+        )
+
+        self.train_test = Test_Dataset(
+            X[: self.len_data - test_size],
+            Y[: self.len_data - test_size],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            X[self.len_data - test_size :],
+            Y[self.len_data - test_size :],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return self.len_data
+
+    def len_train(self, test_size):
+        return len(self.train)
+
+    def get_split(self, split, *args):
+        return self.train, self.train_test, self.test
+
+
 def get_dataset(dataset_name):
     d = {
         "boston": Boston_Dataset,
@@ -606,6 +687,7 @@ def get_dataset(dataset_name):
         "Year": Year_Dataset,
         "Airline": Airline_Dataset,
         "HIGGS": HIGGS_Dataset,
+        "SUSY": SUSY_Dataset,
     }
 
     return d[dataset_name]()

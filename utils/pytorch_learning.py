@@ -9,7 +9,8 @@ def fit(
     training_generator,
     optimizer,
     scheduler=None,
-    epochs=2000,
+    epochs=None,
+    iterations=None,
     device=None,
 ):
     """
@@ -32,8 +33,14 @@ def fit(
              Device in which to perform all computations.
     """
     # Set model in training mode
-    
+
     model.train()
+
+    if epochs is None and iterations is None:
+        raise ValueError("Either epochs or iterations must be set.")
+
+    current_iteration = 0
+
     for _ in range(epochs):
         # Mini-batch training
         for inputs, target in training_generator:
@@ -41,6 +48,10 @@ def fit(
             target = target.to(device)
             model.train_step(optimizer, inputs, target)
 
+            current_iteration += 1
+
+            if iterations is not None and current_iteration == iterations:
+                return
         # Update learning rate using scheduler if available
         if scheduler is not None:
             scheduler.step()
@@ -76,10 +87,11 @@ def score(model, generator, metrics, device=None):
             data = data.to(device)
             target = target.to(device)
             loss, mean_pred, std_pred = model.test_step(data, target)
-            #log_likelihood = model.predict_logdensity(data, target)
+            # log_likelihood = model.predict_logdensity(data, target)
             # Update mertics using this batch
-            metrics.update(target, loss, mean_pred, std_pred, 
-                    model.likelihood, light=False)
+            metrics.update(
+                target, loss, mean_pred, std_pred, model.likelihood, light=False
+            )
     # Return metrics as a dictionary
     return metrics.get_dict()
 
@@ -229,10 +241,10 @@ def fit_with_metrics(
             with torch.no_grad():
                 # Make predictions
                 mean_pred, std_pred = model(data)
-                
+
                 # Compute metrics using the original data scaled.
-                scaled_target = target* model.y_std + model.y_mean
-                #log_likelihood = model.predict_logdensity(data, scaled_target)
+                scaled_target = target * model.y_std + model.y_mean
+                # log_likelihood = model.predict_logdensity(data, scaled_target)
                 metrics.update(
                     scaled_target,
                     loss,
@@ -264,16 +276,14 @@ def fit_with_metrics(
                     # Send to device
                     data = data.to(device)
                     target = target.to(device)
-                    
+
                     # Get loss and predictions.
                     loss, mean_pred, std_pred = model.test_step(data, target)
-                    #log_likelihood = model.predict_logdensity(data, target)
+                    # log_likelihood = model.predict_logdensity(data, target)
                     # Compute validation metrics
-                    metrics_val.update(target, 
-                                       loss,
-                                       mean_pred, 
-                                       std_pred,
-                                       model.likelihood)
+                    metrics_val.update(
+                        target, loss, mean_pred, std_pred, model.likelihood
+                    )
 
             # Store metrics and reset them
             metrics_val_dict = metrics_val.get_dict()
@@ -282,13 +292,15 @@ def fit_with_metrics(
 
             # Handle Validation metrics in TQDM
             if verbose == 1:
-                val_postfix = {k.lower()+'_val': v for k, v in metrics_val_dict.items()}
+                val_postfix = {
+                    k.lower() + "_val": v for k, v in metrics_val_dict.items()
+                }
 
         # Show metrics in TQDM
         if verbose == 1:
             tepoch.set_postfix(
                 {
-                    **{k.lower()+'_train': v for k, v in metrics_dict.items()},
+                    **{k.lower() + "_train": v for k, v in metrics_dict.items()},
                     **val_postfix,
                 }
             )
