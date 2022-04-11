@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-from .metrics import MetricsRegression, MetricsClassification
 from tqdm import tqdm
 
 
@@ -11,6 +10,8 @@ def fit(
     scheduler=None,
     epochs=None,
     iterations=None,
+    use_tqdm = False,
+    return_loss = False,
     device=None,
 ):
     """
@@ -34,30 +35,59 @@ def fit(
     """
     # Set model in training mode
 
+    losses = []
+
     model.train()
 
     if epochs is None and iterations is None:
         raise ValueError("Either epochs or iterations must be set.")
+    
+    if epochs is not None:
 
-    current_iteration = 0
+        if use_tqdm:
+            # Initialize TQDM bar
+            tepoch = tqdm(range(epochs), unit=" epoch")
+            tepoch.set_description("Training ")
+        else:
+            tepoch = range(epochs)
 
-    for _ in range(epochs):
-        # Mini-batch training
-        for inputs, target in training_generator:
-            inputs = inputs.to(device)
-            target = target.to(device)
-            model.train_step(optimizer, inputs, target)
+        for _ in tepoch:
+            # Mini-batch training
+            for inputs, target in training_generator:
+                inputs = inputs.to(device)
+                target = target.to(device)
+                loss = model.train_step(optimizer, inputs, target)
+                if return_loss:
+                    losses.append(loss.detach().numpy())
+            # Update learning rate using scheduler if available
+            if scheduler is not None:
+                scheduler.step()
+    
+    if use_tqdm:
+        # Initialize TQDM bar
+        iters = tqdm(range(iterations), unit=" iteration")
+        iters.set_description("Training ")
+    else:
+        iters = range(iterations)
+    data_iter = iter(training_generator) 
+    
+    for _ in iters:
+        try:
+            inputs, target = next(data_iter) 
+        except StopIteration:
+            # StopIteration is thrown if dataset ends
+            # reinitialize data loader 
+            data_iter = iter(training_generator)
+            inputs, target = next(data_iter) 
+        inputs = inputs.to(device)
+        target = target.to(device)
+        loss = model.train_step(optimizer, inputs, target)
+        if return_loss:
+            losses.append(loss.detach().numpy())
+        
+    return losses
 
-            current_iteration += 1
-
-            if iterations is not None and current_iteration == iterations:
-                return
-        # Update learning rate using scheduler if available
-        if scheduler is not None:
-            scheduler.step()
-
-
-def score(model, generator, metrics, device=None):
+def score(model, generator, metrics, use_tqdm = False, device=None):
     """
     Evaluates the given model using the arguments provided.
 
@@ -81,9 +111,20 @@ def score(model, generator, metrics, device=None):
     model.eval()
     # Initialize metrics
     metrics = metrics(len(generator.dataset), device=device)
+    
+    if use_tqdm:
+        # Initialize TQDM bar
+        iters = tqdm(range(len(generator)), unit="iteration")
+        iters.set_description("Evaluating ")
+    else:
+        iters = range(len(generator))
+    data_iter = iter(generator) 
+    
+    
     with torch.no_grad():
         # Batches evaluation
-        for data, target in generator:
+        for _ in iters:
+            data, target = next(data_iter)
             data = data.to(device)
             target = target.to(device)
             loss, mean_pred, std_pred = model.test_step(data, target)

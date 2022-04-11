@@ -26,6 +26,7 @@ train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
 )
 
+print(train_dataset.inputs)
 
 # Get VIP layers
 layers = init_layers(train_dataset.inputs, args.dataset.output_dim, **vars(args))
@@ -55,11 +56,13 @@ opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 dvip.num_samples = args.num_samples_train
 # Train the model
 start = timer()
-fit(
+losses = fit(
     dvip,
     train_loader,
     opt,
-    epochs=args.epochs,
+    use_tqdm = True,
+    return_loss=True,
+    iterations=args.iterations,
     device=args.device,
 )
 end = timer()
@@ -68,8 +71,8 @@ end = timer()
 dvip.num_samples = args.num_samples_test
 
 # Test the model
-train_metrics = score(dvip, train_test_loader, args.metrics, device=args.device)
-test_metrics = score(dvip, test_loader, args.metrics, device=args.device)
+#train_metrics = score(dvip, train_test_loader, args.metrics, use_tqdm = True, device=args.device)
+test_metrics = score(dvip, test_loader, args.metrics, use_tqdm = True, device=args.device)
 
 print("TEST RESULTS: ")
 for k, v in test_metrics.items():
@@ -79,7 +82,7 @@ for k, v in test_metrics.items():
 d = {
     **vars(args),
     **{"time": end - start},
-    **{k + "_train": v for k, v in train_metrics.items()},
+    #**{k + "_train": v for k, v in train_metrics.items()},
     **test_metrics,
 }
 
@@ -88,3 +91,9 @@ df.to_csv(
     path_or_buf="results/" + create_file_name(args) + ".csv",
     encoding="utf-8",
 )
+
+import matplotlib.pyplot as plt
+plt.figure(figsize=(16,9))
+plt.plot(np.arange(len(losses)), losses)
+plt.yscale('log')
+plt.savefig("plots/" + create_file_name(args) + ".pdf")

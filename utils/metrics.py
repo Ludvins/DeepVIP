@@ -196,8 +196,11 @@ class MetricsClassification(Metrics):
         self.auc += scale * self.compute_auc(y, mean_pred)
 
     def compute_auc(self, y_true, prediction):
-        pred = torch.mean(prediction, 0)
-        return roc_auc_score(y_true, pred)
+        if prediction.shape[-1] == 1:
+            pred = torch.mean(prediction, 0)
+        else:
+            return 0
+        return roc_auc_score(y_true, pred, multi_class="ovr")
 
     def compute_acc(self, y, prediction):
         """"""

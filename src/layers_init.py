@@ -191,7 +191,7 @@ def init_layers(
                 "Dimensionality augmentation is not handled currently."
             )
             
-        if not input_prop:
+        if not input_prop and i < 1:
             mf = None
             print("MF: None")
 
@@ -199,7 +199,7 @@ def init_layers(
         out = dim_out if genf_full_output else 1
         # Create the Generation function
         if genf == "conv" and i == 0:
-            f = BayesianConvNN2(
+            f = BayesianConvNN(
                 num_samples=regression_coeffs,
                 input_dim=(28, 28),
                 activation=activation,

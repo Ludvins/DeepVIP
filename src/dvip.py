@@ -239,7 +239,6 @@ class DVIP_Base(torch.nn.Module):
         # The first input values are the original ones
         F = sX
         for layer in self.vip_layers:
-
             # Get input shape, S = MC resamples, N = num data, D 0 data dim
             S, N = F.shape[:2]
             D = F.shape[2:]

@@ -670,6 +670,46 @@ class SUSY_Dataset(DVIPDataset):
         return self.train, self.train_test, self.test
 
 
+class Taxi_Dataset(DVIPDataset):
+    def __init__(self, year = 2020):
+        self.type = "regression"
+        self.output_dim = 1
+        
+        if os.path.exists("data/taxi.csv"):
+            print("Taxi csv file found.")
+            data = pd.read_csv("data/taxi.csv")
+        elif os.path.exists("data/taxi.zip"):
+            print("Taxi zip file found.")
+            data = pd.read_csv(
+                "data/taxi.zip", compression="zip", dtype = object
+            )
+        else:
+            print("Downloading Taxi Dataset...")
+            url = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2015-01.csv"
+            data = pd.read_csv(url)
+            data.to_csv("data/taxi.csv")
+            
+        print(data.columns)
+        data["tpep_pickup_datetime"] = pd.to_datetime(data["tpep_pickup_datetime"])
+        data["tpep_dropoff_datetime"] = pd.to_datetime(data["tpep_dropoff_datetime"])
+        print(data)
+        data["day_of_week"] = data["tpep_pickup_datetime"].dt.dayofweek
+        data["day_of_month"] = data["tpep_pickup_datetime"].dt.day
+        data["month"] = data["tpep_pickup_datetime"].dt.month
+        data["time_of_day"] = (data["tpep_pickup_datetime"] - data["tpep_pickup_datetime"].dt.normalize()) / pd.Timedelta(seconds=1)
+        data["trip_duration"] = (data["tpep_dropoff_datetime"] - data["tpep_pickup_datetime"]).dt.total_seconds()
+        data = data[["time_of_day", "day_of_week", "day_of_month", "month", 
+                    "pickup_latitude", "pickup_longitude", 'dropoff_longitude', 
+                    'dropoff_latitude', 'trip_distance', 'trip_duration']]
+        data = data[data["trip_duration"] >= 10]
+        data = data[data["trip_duration"] <= 5 * 3600]
+        data = data.astype(float)
+        print(data)
+        data = data.values
+        self.split_data(data)
+
+
+
 def get_dataset(dataset_name):
     d = {
         "boston": Boston_Dataset,
@@ -688,6 +728,7 @@ def get_dataset(dataset_name):
         "Airline": Airline_Dataset,
         "HIGGS": HIGGS_Dataset,
         "SUSY": SUSY_Dataset,
+        "taxi": Taxi_Dataset,
     }
 
     return d[dataset_name]()

@@ -102,7 +102,7 @@ def get_parser():
     parser.add_argument(
         "--num_samples_test",
         type=int,
-        default=200,
+        default=100,
         help="Number of Monte Carlo samples of the posterior to "
         "use during inference",
     )

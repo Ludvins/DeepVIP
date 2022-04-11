@@ -3,7 +3,7 @@ def create_file_name(args):
 
     filename += "dataset=" + args.dataset_name
     filename += "_vip-layers=" + "-".join(str(i) for i in args.vip_layers)
-    filename += "_epochs=" + str(args.epochs)
+    filename += "_iterations=" + str(args.iterations)
     filename += "_batch=" + str(args.batch_size)
     if args.lr != 0.001:
         filename += "_lr=" + str(args.lr)
