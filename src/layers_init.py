@@ -32,6 +32,7 @@ def init_layers(
     regression_coeffs,
     bnn_structure,
     bnn_layer,
+    bnn_inner_dim,
     activation,
     seed,
     device,
@@ -209,6 +210,18 @@ def init_layers(
                 seed=seed,
                 dtype=dtype,
             )
+        elif genf == "GP":
+            f = GP(
+                num_samples = regression_coeffs,
+                input_dim=dim_in,
+                output_dim=out,
+                inner_layer_dim=bnn_inner_dim,
+                kernel_amp=1.0,
+                kernel_length=1.0,
+                seed=seed,
+                fix_random_noise=fix_prior_noise,
+                device=device,
+                dtype=dtype)
             
         else: 
             f = BayesianNN(

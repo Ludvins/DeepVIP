@@ -26,8 +26,6 @@ train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
 )
 
-print(train_dataset.inputs)
-
 # Get VIP layers
 layers = init_layers(train_dataset.inputs, args.dataset.output_dim, **vars(args))
 
@@ -48,6 +46,7 @@ dvip = DVIP_Base(
     dtype=args.dtype,
     device=args.device,
 )
+dvip.print_variables()
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)

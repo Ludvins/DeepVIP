@@ -47,13 +47,13 @@ opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
 
 # Train the model
-train_hist, val_hist = fit_with_metrics(
+losses = fit(
     dvip,
     train_loader,
     opt,
-    args.metrics,
-    val_generator=test_loader,
-    epochs=args.epochs,
+    use_tqdm = True,
+    return_loss=True,
+    iterations=args.iterations,
     device=args.device,
 )
 
@@ -89,7 +89,9 @@ prior_samples = predict_prior_samples(dvip, train_test_loader).T[0, :, :, -1]
 fig_title, path = build_plot_name(**vars(args))
 
 import matplotlib.pyplot as plt
-
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 f, (ax0, ax1) = plt.subplots(2, 1, gridspec_kw={'height_ratios': [3, 1]}, figsize=(16, 9))
 
 ax0.scatter(train_d.inputs * train_d.inputs_std + train_d.inputs_mean, 
@@ -116,29 +118,30 @@ ax0.fill_between(X.flatten(),
 
 ymin, ymax = ax0.get_ylim()
 
-ax0.plot(X.flatten(), prior_samples[:, :-1], color = "red", alpha = 0.05)
-ax0.plot(X.flatten(), prior_samples[:, -1], color = "red", alpha = 0.05, label = "Prior samples")
+ax0.plot(X.flatten(), prior_samples[:, :-1], color = "red", alpha = 0.1)
+ax0.plot(X.flatten(), prior_samples[:, -1], color = "red", alpha = 0.1, label = "Prior samples")
 ax0.set_ylim([ymin, ymax])
-ax0.legend()
-
+ax0.tick_params(axis='y', labelsize=16)
+ax0.tick_params(axis='x', labelsize=16)
+lgnd = ax0.legend(fontsize=18, loc = "upper left")
+#change the marker size manually for both lines
+lgnd.legendHandles[0]._sizes = [30]
+lgnd.legendHandles[1]._sizes = [30]
+lgnd.legendHandles[4].set_alpha(0.5)
 ax1.fill_between(X.flatten(),
                  np.zeros_like(X.flatten()),
                  (np.sqrt(test_prediction_var)).flatten(),
                  color = "orange",
                  alpha = 0.3,
                  label = "Predictive std")
-ax1.legend()
-
-plt.savefig("plots/extrapolate_" + create_file_name(args) + ".pdf")
+ax1.legend(fontsize=18)
+ax1.tick_params(axis='y', labelsize=16)
+ax1.tick_params(axis='x', labelsize=16)
+plt.savefig("plots/extrapolate_" + create_file_name(args) + ".pdf", bbox_inches='tight')
 
 
 test_metrics_names = list(test_metrics.keys())
 num_metrics = len(test_metrics_names)
-
-df = pd.DataFrame.from_dict(train_hist)
-df_val = pd.DataFrame.from_dict(val_hist)
-
-learning_curve(df, df_val, test_metrics_names, num_metrics, args)
 
 d = {
     **vars(args),

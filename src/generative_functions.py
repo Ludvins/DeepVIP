@@ -115,6 +115,7 @@ class BayesLinear(GenerativeFunction):
 
         # If the BNN has zero mean, no parameters are considered for the
         # mean values the weights and bias variable
+        
         if zero_mean_prior:
             self.weight_mu = 0
             self.bias_mu = 0
@@ -619,7 +620,7 @@ class GP(GenerativeFunction):
         kernel_amp=1.0,
         kernel_length=1.0,
         seed=2147483647,
-        fix_random_noise=False,
+        fix_random_noise=True,
         device=None,
         dtype=torch.float64,
     ):
@@ -686,8 +687,8 @@ class GP(GenerativeFunction):
         # Initialize variables and noise generators
         self.inner_layer_dim = inner_layer_dim
         self.inner_layer_dim_inv = 1 / self.inner_layer_dim
-        self.gaussian_sampler = GaussianSampler(seed)
-        self.uniform_sampler = UniformSampler(seed)
+        self.gaussian_sampler = GaussianSampler(seed, device)
+        self.uniform_sampler = UniformSampler(seed, device)
 
         # Initialize parameters, logarithms are used in order to avoid
         #  constraining to positive values.

@@ -360,59 +360,6 @@ class MNIST_Dataset(DVIPDataset):
         return 60000
 
 
-class SolarIrradiance_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        data = np.loadtxt("data/Solar/solar_data.txt", delimiter=",", dtype=float)
-        # print(data)
-
-        X = data[:, 0:1]
-        Y = data[:, 2:3]
-
-        # remove some chunks of data
-        X_test, Y_test = [], []
-
-        intervals = (
-            (1620, 1650),
-            (1700, 1720),
-            (1780, 1800),
-            (1850, 1870),
-            (1930, 1950),
-        )
-        for low, up in intervals:
-            ind = np.logical_and(X.flatten() > low, X.flatten() < up)
-            X_test.append(X[ind])
-            Y_test.append(Y[ind])
-            X = np.delete(X, np.where(ind)[0], axis=0)
-            Y = np.delete(Y, np.where(ind)[0], axis=0)
-        X_test, Y_test = np.vstack(X_test), np.vstack(Y_test)
-
-        self.train = Training_Dataset(X, Y)
-
-        self.train_test = Test_Dataset(
-            data[:, 0:1],
-            data[:, 2:3],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            X_test,
-            Y_test,
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return self.len_data
-
-    def len_train(self, test_size):
-        return len(self.train)
-
-    def get_split(self, split, *args):
-        return self.train, self.train_test, self.test
-
-
 class Rectangles_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "binaryclass"
@@ -458,22 +405,22 @@ class Year_Dataset(DVIPDataset):
         self.type = "regression"
         self.output_dim = 1
         try:
-            data = pd.read_csv("/tmp/YearPredictionMSD.txt", delimiter=",").values
+            data = pd.read_csv("/tmp/YearPredictionMSD.txt", header = None, delimiter=",").values
         except:
             url = "{}{}".format(uci_base, "00203/YearPredictionMSD.txt.zip")
             with urlopen(url) as zipresp:
                 with ZipFile(BytesIO(zipresp.read())) as zfile:
                     zfile.extractall("/tmp/")
 
-            data = pd.read_csv("/tmp/YearPredictionMSD.txt", delimiter=",").values
+            data = pd.read_csv("/tmp/YearPredictionMSD.txt", header = None, delimiter=",").values
 
         self.len_data = data.shape[0]
+
         X = data[:, 1:]
         Y = data[:, 0].reshape(-1, 1)
 
         self.n_train = 463715
         self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
-
         self.train_test = Test_Dataset(
             X[: self.n_train],
             Y[: self.n_train],
@@ -503,7 +450,7 @@ class Airline_Dataset(DVIPDataset):
         self.output_dim = 1
 
         data = pd.read_csv("./data/airline.csv")
-
+        print(data)
         # Convert time of day from hhmm to minutes since midnight
         data.ArrTime = 60 * np.floor(data.ArrTime / 100) + np.mod(data.ArrTime, 100)
         data.DepTime = 60 * np.floor(data.DepTime / 100) + np.mod(data.DepTime, 100)
@@ -583,7 +530,7 @@ class HIGGS_Dataset(DVIPDataset):
             X[: self.len_data - test_size],
             Y[: self.len_data - test_size],
             normalize_targets=False,
-            normalize_inputs=True,
+            normalize_inputs=False,
         )
 
         self.train_test = Test_Dataset(
@@ -671,24 +618,24 @@ class SUSY_Dataset(DVIPDataset):
 
 
 class Taxi_Dataset(DVIPDataset):
-    def __init__(self, year = 2020):
+    def __init__(self, year=2020):
         self.type = "regression"
         self.output_dim = 1
-        
+
         if os.path.exists("data/taxi.csv"):
             print("Taxi csv file found.")
             data = pd.read_csv("data/taxi.csv")
         elif os.path.exists("data/taxi.zip"):
             print("Taxi zip file found.")
-            data = pd.read_csv(
-                "data/taxi.zip", compression="zip", dtype = object
-            )
+            data = pd.read_csv("data/taxi.zip", compression="zip", dtype=object)
         else:
             print("Downloading Taxi Dataset...")
-            url = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2015-01.csv"
+            url = (
+                "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2015-01.csv"
+            )
             data = pd.read_csv(url)
             data.to_csv("data/taxi.csv")
-            
+
         print(data.columns)
         data["tpep_pickup_datetime"] = pd.to_datetime(data["tpep_pickup_datetime"])
         data["tpep_dropoff_datetime"] = pd.to_datetime(data["tpep_dropoff_datetime"])
@@ -696,18 +643,32 @@ class Taxi_Dataset(DVIPDataset):
         data["day_of_week"] = data["tpep_pickup_datetime"].dt.dayofweek
         data["day_of_month"] = data["tpep_pickup_datetime"].dt.day
         data["month"] = data["tpep_pickup_datetime"].dt.month
-        data["time_of_day"] = (data["tpep_pickup_datetime"] - data["tpep_pickup_datetime"].dt.normalize()) / pd.Timedelta(seconds=1)
-        data["trip_duration"] = (data["tpep_dropoff_datetime"] - data["tpep_pickup_datetime"]).dt.total_seconds()
-        data = data[["time_of_day", "day_of_week", "day_of_month", "month", 
-                    "pickup_latitude", "pickup_longitude", 'dropoff_longitude', 
-                    'dropoff_latitude', 'trip_distance', 'trip_duration']]
+        data["time_of_day"] = (
+            data["tpep_pickup_datetime"] - data["tpep_pickup_datetime"].dt.normalize()
+        ) / pd.Timedelta(seconds=1)
+        data["trip_duration"] = (
+            data["tpep_dropoff_datetime"] - data["tpep_pickup_datetime"]
+        ).dt.total_seconds()
+        data = data[
+            [
+                "time_of_day",
+                "day_of_week",
+                "day_of_month",
+                "month",
+                "pickup_latitude",
+                "pickup_longitude",
+                "dropoff_longitude",
+                "dropoff_latitude",
+                "trip_distance",
+                "trip_duration",
+            ]
+        ]
         data = data[data["trip_duration"] >= 10]
         data = data[data["trip_duration"] <= 5 * 3600]
         data = data.astype(float)
         print(data)
         data = data.values
         self.split_data(data)
-
 
 
 def get_dataset(dataset_name):
