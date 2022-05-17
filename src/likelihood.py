@@ -1,10 +1,8 @@
 # Based on GPflow's likelihood
 
-from itertools import product
 import numpy as np
 import torch
 from torch.nn.functional import one_hot
-from torch.distributions import bernoulli, normal
 from .quadrature import hermgauss, hermgaussquadrature
 
 
@@ -472,7 +470,13 @@ class Bernoulli(Likelihood):
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         return hermgaussquadrature(
-            self.logp, self.num_gauss_hermite_points, Fmu, Fvar, Y, self.dtype, self.device
+            self.logp,
+            self.num_gauss_hermite_points,
+            Fmu,
+            Fvar,
+            Y,
+            self.dtype,
+            self.device,
         )
 
 

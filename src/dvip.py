@@ -1,6 +1,5 @@
 import torch
 from .utils import reparameterize
-import numpy as np
 
 class DVIP_Base(torch.nn.Module):
     def name(self):
@@ -192,13 +191,12 @@ class DVIP_Base(torch.nn.Module):
 
         Returns
         -------
-        The predicted labels using the model's likelihood
-        and the predicted mean and standard deviation.
+        The predicted mean and standard deviation.
         """
-         # Cast types if needed.
+        # Cast types if needed.
         if self.dtype != predict_at.dtype:
-            predict_at = predict_at.to(self.dtype)       
-        
+            predict_at = predict_at.to(self.dtype)
+
         mean, var = self.predict_y(predict_at, self.num_samples)
         # Return predictions scaled to the original scale.
         return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
@@ -215,6 +213,8 @@ class DVIP_Base(torch.nn.Module):
             Contains the input features.
         num_samples : int
                       Number of MonteCarlo resamples to use
+        return_prior_samples : bool
+                               Wether to return the learned prior samples or not.
 
         Returns
         -------
@@ -291,9 +291,6 @@ class DVIP_Base(torch.nn.Module):
                      Contains the input features.
         num_samples : int
                       Number of MonteCarlo resamples to propagate.
-        full_cov : boolean
-                   Whether to use the full covariance matrix or just
-                   the diagonal values.
         Returns
         -------
         Fmeans : torch tensor of shape (num_layers, batch_size, output_dim)
@@ -332,20 +329,35 @@ class DVIP_Base(torch.nn.Module):
         """
         Fmean, Fvar = self.predict_f(predict_at, num_samples=num_samples)
         return self.likelihood.predict_mean_and_var(Fmean, Fvar)
-    
-    def predict_logdensity(self, Xnew, Ynew):
-    
-         # Cast types if needed.
-        if self.dtype != Xnew.dtype:
-            Xnew = Xnew.to(self.dtype)    
-        
-        Fmean, Fvar = self.predict_f(Xnew, num_samples=self.num_samples)
-        l = self.likelihood.predict_logdensity(Fmean * self.y_std + self.y_mean,
-                                               Fvar * self.y_std**2,
-                                               Ynew)
+
+    def predict_logdensity(self, X, Y):
+        """
+        Computes the model log likelihood on the given inputs and targets.
+
+        Parameters
+        ----------
+        X : torch tensor of shape (N, data_dim)
+            Contains the new input features.
+        Y : torch tensor of shape (N, output_dim)
+            Contains the new input targets.
+
+        Returns
+        -------
+        The lof likelihood of the predictions for the given input values.
+        """
+
+        # Cast types if needed.
+        if self.dtype != X.dtype:
+            X = X.to(self.dtype)
+
+        Fmean, Fvar = self.predict_f(X, num_samples=self.num_samples)
+        l = self.likelihood.predict_logdensity(
+            Fmean * self.y_std + self.y_mean, Fvar * self.y_std ** 2, Y
+        )
         l = torch.sum(l, -1)
         log_num_samples = torch.log(torch.tensor(self.num_samples))
-        return torch.mean(torch.logsumexp(l , axis=0) - log_num_samples)
+
+        return torch.mean(torch.logsumexp(l, axis=0) - log_num_samples)
 
     def get_prior_samples(self, X):
         """
@@ -363,9 +375,7 @@ class DVIP_Base(torch.nn.Module):
                  Contains the S prior samples for each layer at each data
                  point.
         """
-        _, _, _, Fpriors = self.propagate(
-            X, num_samples=self.num_samples, return_prior_samples=True
-        )
+        _, _, _, Fpriors = self.propagate(X, num_samples=1, return_prior_samples=True)
 
         # Squeeze the MonteCarlo dimension
         Fpriors = torch.stack(Fpriors)[:, :, 0, :, :]
@@ -468,7 +478,9 @@ class DVIP_Base(torch.nn.Module):
                 padding,
                 "{}: ({})".format(name[-1], str(list(param.data.size()))[1:-1]),
             )
-            print(padding+ " "*(len(name[-1]) + 2), param.data.detach().cpu().numpy().flatten()
-                  )
+            print(
+                padding + " " * (len(name[-1]) + 2),
+                param.data.detach().cpu().numpy().flatten(),
+            )
 
         print("\n---------------------------\n\n")

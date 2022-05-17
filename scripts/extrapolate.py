@@ -10,21 +10,26 @@ from scripts.filename import create_file_name
 
 from src.dvip import DVIP_Base
 from src.layers_init import init_layers
-from utils.plotting_utils import build_plot_name, learning_curve, plot_train_test
+from utils.plotting_utils import build_plot_name
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit, fit_with_metrics, predict, predict_prior_samples, score
+from utils.pytorch_learning import (
+    fit,
+    predict,
+    predict_prior_samples,
+    score,
+)
 
 args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
 
-train_d, train_test_d, test_d = args.dataset.get_split(split = args.split)
+train_d, train_test_d, test_d = args.dataset.get_split(args.split, args.test_size)
 
 
 # Get VIP layers
 layers = init_layers(train_d.inputs, args.dataset.output_dim, **vars(args))
 
-train_loader = DataLoader(train_d, batch_size=args.batch_size, shuffle = True)
+train_loader = DataLoader(train_d, batch_size=args.batch_size, shuffle=True)
 train_test_loader = DataLoader(train_test_d, batch_size=args.batch_size)
 test_loader = DataLoader(test_d, batch_size=args.batch_size)
 
@@ -51,13 +56,14 @@ losses = fit(
     dvip,
     train_loader,
     opt,
-    use_tqdm = True,
+    use_tqdm=True,
     return_loss=True,
     iterations=args.iterations,
     device=args.device,
 )
 
 dvip.print_variables()
+
 
 def get_predictive_results(mean, var):
 
@@ -77,10 +83,12 @@ num_metrics = len(test_metrics_names)
 print("TEST RESULTS: ")
 for k, v in test_metrics.items():
     print("\t - {}: {}".format(k, v))
-    
-    
+
+
 test_mean, test_std = predict(dvip, train_test_loader, device=args.device)
-test_prediction_mean, test_prediction_var = get_predictive_results(test_mean, test_std**2)
+test_prediction_mean, test_prediction_var = get_predictive_results(
+    test_mean, test_std ** 2
+)
 
 dvip.eval()
 prior_samples = predict_prior_samples(dvip, train_test_loader).T[0, :, :, -1]
@@ -90,54 +98,72 @@ fig_title, path = build_plot_name(**vars(args))
 
 import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.rcParams['pdf.fonttype'] = 42
-matplotlib.rcParams['ps.fonttype'] = 42
-f, (ax0, ax1) = plt.subplots(2, 1, gridspec_kw={'height_ratios': [3, 1]}, figsize=(16, 9))
 
-ax0.scatter(train_d.inputs * train_d.inputs_std + train_d.inputs_mean, 
-            train_d.targets* train_d.targets_std + train_d.targets_mean,
-            s = 0.2,
-            label = "Training set")
-ax0.scatter(test_d.inputs * train_d.inputs_std + train_d.inputs_mean, 
-            test_d.targets,
-            s = 0.2,
-            color = "purple",
-            label = "Test set")
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+f, (ax0, ax1) = plt.subplots(
+    2, 1, gridspec_kw={"height_ratios": [3, 1]}, figsize=(16, 9)
+)
 
-X = train_test_d.inputs* train_d.inputs_std + train_d.inputs_mean
-ax0.plot(X,
-         test_prediction_mean,
-         color = "orange",
-         label = "Predictive mean")
-ax0.fill_between(X.flatten(),
-                 (test_prediction_mean - 2*np.sqrt(test_prediction_var)).flatten(),
-                 (test_prediction_mean + 2*np.sqrt(test_prediction_var)).flatten(),
-                 color = "orange",
-                 alpha = 0.3,
-                 label = "Predictive std")
+ax0.scatter(
+    train_d.inputs * train_d.inputs_std + train_d.inputs_mean,
+    train_d.targets * train_d.targets_std + train_d.targets_mean,
+    s=0.2,
+    label="Training set",
+)
+ax0.scatter(
+    test_d.inputs * train_d.inputs_std + train_d.inputs_mean,
+    test_d.targets,
+    s=0.2,
+    color="purple",
+    label="Test set",
+)
+
+X = train_test_d.inputs * train_d.inputs_std + train_d.inputs_mean
+
+sort = np.argsort(X.flatten())
+ax0.plot(X[sort], test_prediction_mean[sort], color="orange", label="Predictive mean")
+ax0.fill_between(
+    X.flatten()[sort],
+    (test_prediction_mean - 2 * np.sqrt(test_prediction_var)).flatten()[sort],
+    (test_prediction_mean + 2 * np.sqrt(test_prediction_var)).flatten()[sort],
+    color="orange",
+    alpha=0.3,
+    label="Predictive std",
+)
 
 ymin, ymax = ax0.get_ylim()
 
-ax0.plot(X.flatten(), prior_samples[:, :-1], color = "red", alpha = 0.1)
-ax0.plot(X.flatten(), prior_samples[:, -1], color = "red", alpha = 0.1, label = "Prior samples")
+# ax0.plot(X.flatten()[sort], np.mean(prior_samples,axis = 1)[sort], color = "red", alpha = 0.5)
+ax0.plot(X.flatten()[sort], prior_samples[sort, :-1], color="red", alpha=0.1)
+ax0.plot(
+    X.flatten()[sort],
+    prior_samples[sort, -1],
+    color="red",
+    alpha=0.1,
+    label="Prior samples",
+)
+
 ax0.set_ylim([ymin, ymax])
-ax0.tick_params(axis='y', labelsize=16)
-ax0.tick_params(axis='x', labelsize=16)
-lgnd = ax0.legend(fontsize=18, loc = "upper left")
-#change the marker size manually for both lines
-lgnd.legendHandles[0]._sizes = [30]
-lgnd.legendHandles[1]._sizes = [30]
+ax0.tick_params(axis="y", labelsize=24)
+ax0.tick_params(axis="x", labelsize=24)
+lgnd = ax0.legend(fontsize=24, loc="upper left")
+# change the marker size manually for both lines
+lgnd.legendHandles[0]._sizes = [40]
+lgnd.legendHandles[1]._sizes = [40]
 lgnd.legendHandles[4].set_alpha(0.5)
-ax1.fill_between(X.flatten(),
-                 np.zeros_like(X.flatten()),
-                 (np.sqrt(test_prediction_var)).flatten(),
-                 color = "orange",
-                 alpha = 0.3,
-                 label = "Predictive std")
-ax1.legend(fontsize=18)
-ax1.tick_params(axis='y', labelsize=16)
-ax1.tick_params(axis='x', labelsize=16)
-plt.savefig("plots/extrapolate_" + create_file_name(args) + ".pdf", bbox_inches='tight')
+ax1.fill_between(
+    X.flatten()[sort],
+    np.zeros_like(X.flatten())[sort],
+    (np.sqrt(test_prediction_var)).flatten()[sort],
+    color="orange",
+    alpha=0.3,
+    label="Predictive std",
+)
+ax1.legend(fontsize=24)
+ax1.tick_params(axis="y", labelsize=24)
+ax1.tick_params(axis="x", labelsize=24)
+ax0.savefig("plots/extrapolate_" + create_file_name(args) + ".pdf", bbox_inches="tight")
 
 
 test_metrics_names = list(test_metrics.keys())

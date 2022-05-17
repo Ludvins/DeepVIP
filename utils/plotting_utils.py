@@ -257,7 +257,7 @@ def learning_curve(df, df_val, test_metrics_names, num_metrics, args):
     ax4.set_title("Loss evolution in last half of epochs")
 
     for i, m in enumerate(test_metrics_names[1:]):
-        ax = fig.add_subplot(num_metrics - 1, 2, 2*i + 1)
+        ax = fig.add_subplot(num_metrics - 1, 2, 2 * i + 1)
         ax.plot(df[[m]].to_numpy(), label="Training {}".format(m))
         ax.plot(df_val[[m]].to_numpy(), label="Validation {}".format(m))
         ymin, ymax = ax.get_ylim()
@@ -276,11 +276,9 @@ def learning_curve(df, df_val, test_metrics_names, num_metrics, args):
             color="black",
         )
         if m == "RMSE":
-            ax.set_yscale('log')
+            ax.set_yscale("log")
         ax.legend()
         ax.set_title("{} evolution".format(m))
-
-
 
     plt.savefig("plots/" + create_file_name(args) + ".png")
     # open file for writing

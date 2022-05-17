@@ -2,30 +2,32 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import sys
-from sklearn.model_selection import train_test_split
 
 sys.path.append(".")
 
 from src.dvip import DVIP_Base
 from src.layers_init import init_layers
-from src.likelihood import Gaussian
-from utils.dataset import (
-    Test_Dataset,
-    Training_Dataset,
-)
+
 from utils.plotting_utils import build_plot_name, plot_train_test
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit, fit_with_metrics, predict, predict_prior_samples, score
+from utils.pytorch_learning import (
+    fit_with_metrics,
+    predict,
+    predict_prior_samples,
+)
+
 args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
 
-train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(0.1, args.seed + args.split)
+train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
+    0.1, args.seed + args.split
+)
 
 # Get VIP layers
 layers = init_layers(train_dataset.inputs, args.dataset.output_dim, **vars(args))
 
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle = True)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 

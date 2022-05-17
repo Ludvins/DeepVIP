@@ -66,7 +66,7 @@ train_hist, val_hist = fit_with_metrics(
 
 dvip.print_variables()
 
-#dvip.num_samples = args.num_samples_test
+# dvip.num_samples = args.num_samples_test
 test_metrics = score(dvip, val_loader, args.metrics, device=args.device)
 train_metrics = score(dvip, train_test_loader, args.metrics, device=args.device)
 

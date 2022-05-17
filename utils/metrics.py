@@ -65,6 +65,8 @@ class MetricsRegression(Metrics):
         std_pred : torch tensor of shape (S, batch_size, output_dim)
                    Contains the std predictions for each sample
                    in the batch.
+        likelihood : instance of Likelihood
+                     Usable to compute the log likelihood metric.
         light : boolean
                 Wether to compute only the lighter (computationally) metrics.
         """
@@ -179,9 +181,14 @@ class MetricsClassification(Metrics):
             Contains the true targets of the data.
         loss : torch tensor of shape ()
                Contains the loss value for the given batch.
-        pred : torch tensor of shape (S, batch_size, output_dim)
-               Contains the predictions for each sample
-               in the batch.
+        mean_pred : torch tensor of shape (S, batch_size, output_dim)
+                    Contains the mean predictions for each sample
+                    in the batch.
+        std_pred : torch tensor of shape (S, batch_size, output_dim)
+                   Contains the std predictions for each sample
+                   in the batch.
+        likelihood : instance of Likelihood
+                     Usable to compute the log likelihood metric.
         """
         # Conmpute the scale value using the batch_size
         batch_size = y.shape[0]

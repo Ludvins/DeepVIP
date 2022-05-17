@@ -2,7 +2,6 @@ from datetime import datetime
 import numpy as np
 import torch
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
@@ -11,11 +10,9 @@ sys.path.append(".")
 
 from src.dvip import DVIP_Base
 from src.layers_init import init_layers
-from src.likelihood import Gaussian
-from utils.dataset import Test_Dataset, Training_Dataset
-from utils.metrics import Metrics
-from utils.process_flags import get_parser, manage_experiment_configuration
-from utils.pytorch_learning import fit, score, fit_with_metrics
+
+from utils.process_flags import manage_experiment_configuration
+from utils.pytorch_learning import fit, score
 from scripts.filename import create_file_name
 
 args = manage_experiment_configuration()
@@ -55,11 +52,11 @@ opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 dvip.num_samples = args.num_samples_train
 # Train the model
 start = timer()
-losses = fit(
+_ = fit(
     dvip,
     train_loader,
     opt,
-    use_tqdm = True,
+    use_tqdm=True,
     return_loss=True,
     iterations=args.iterations,
     device=args.device,
@@ -70,8 +67,8 @@ end = timer()
 dvip.num_samples = args.num_samples_test
 
 # Test the model
-#train_metrics = score(dvip, train_test_loader, args.metrics, use_tqdm = True, device=args.device)
-test_metrics = score(dvip, test_loader, args.metrics, use_tqdm = True, device=args.device)
+train_metrics = score(dvip, train_test_loader, args.metrics, use_tqdm = True, device=args.device)
+test_metrics = score(dvip, test_loader, args.metrics, use_tqdm=True, device=args.device)
 
 print("TEST RESULTS: ")
 for k, v in test_metrics.items():
@@ -81,7 +78,7 @@ for k, v in test_metrics.items():
 d = {
     **vars(args),
     **{"time": end - start},
-    #**{k + "_train": v for k, v in train_metrics.items()},
+    **{k + "_train": v for k, v in train_metrics.items()},
     **test_metrics,
 }
 
@@ -90,9 +87,3 @@ df.to_csv(
     path_or_buf="results/" + create_file_name(args) + ".csv",
     encoding="utf-8",
 )
-
-import matplotlib.pyplot as plt
-plt.figure(figsize=(16,9))
-plt.plot(np.arange(len(losses)), losses)
-plt.yscale('log')
-plt.savefig("plots/" + create_file_name(args) + ".pdf")

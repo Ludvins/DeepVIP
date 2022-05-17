@@ -88,8 +88,8 @@ def init_layers(
     bnn_inner_dims : int
                      Number of inner dimensions for the BNN-GP model.
                      Number of samples to approximate the RBF kernel.
-    bnn_layer : 
-                     
+    bnn_layer :
+
     activation : callable
                  Non-linear function to apply at each inner
                  dimension of the Bayesian Network.
@@ -155,7 +155,7 @@ def init_layers(
     # using the projected (from the first projection) data.
     X_running = np.copy(X)
     for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
-        print("Layer {}: {}->{}".format(i, dim_in, dim_out), end = " ")
+        print("Layer {}: {}->{}".format(i, dim_in, dim_out), end=" ")
 
         # Last layer has no transformation
         if i == len(dims) - 2:
@@ -164,7 +164,6 @@ def init_layers(
             q_sqrt_initial_value = final_layer_sqrt
             log_layer_noise = final_layer_noise
             print("MF: None")
-
 
         # No dimension change, identity matrix
         elif dim_in == dim_out:
@@ -191,11 +190,10 @@ def init_layers(
             raise NotImplementedError(
                 "Dimensionality augmentation is not handled currently."
             )
-            
+
         if not input_prop and i < 1:
             mf = None
             print("MF: None")
-
 
         out = dim_out if genf_full_output else 1
         # Create the Generation function
@@ -212,7 +210,7 @@ def init_layers(
             )
         elif genf == "GP":
             f = GP(
-                num_samples = regression_coeffs,
+                num_samples=regression_coeffs,
                 input_dim=dim_in,
                 output_dim=out,
                 inner_layer_dim=bnn_inner_dim,
@@ -221,16 +219,17 @@ def init_layers(
                 seed=seed,
                 fix_random_noise=fix_prior_noise,
                 device=device,
-                dtype=dtype)
-            
-        else: 
+                dtype=dtype,
+            )
+
+        else:
             f = BayesianNN(
                 num_samples=regression_coeffs,
                 input_dim=dim_in,
                 structure=bnn_structure,
                 activation=activation,
                 output_dim=out,
-                layer_model = bnn_layer,
+                layer_model=bnn_layer,
                 dropout=dropout,
                 fix_random_noise=fix_prior_noise,
                 zero_mean_prior=zero_mean_prior,
@@ -251,68 +250,6 @@ def init_layers(
                 q_mu_initial_value=q_mu_initial_value,
                 log_layer_noise=log_layer_noise,
                 q_sqrt_initial_value=q_sqrt_initial_value,
-                seed=seed,
-                dtype=dtype,
-                device=device,
-            )
-        )
-
-    return layers
-
-
-
-def init_layers2(
-    X,
-    generative_functions,
-    regression_coeffs,
-    seed,
-    device,
-    dtype,
-    **kwargs
-):
-    """
-    """
-    
-    dims = [np.prod(genf.input_dim) for genf in generative_functions] + [generative_functions[-1].output_dim]
-    print(dims)
-    # Initialize layers array
-    layers = []
-    # We maintain a copy of X, where each projection is applied. That is,
-    # if two data reductions are made, the matrix of the second is computed
-    # using the projected (from the first projection) data.
-    X_running = np.copy(X)
-    for (i, (dim_in, dim_out)) in enumerate(zip(dims[:-1], dims[1:])):
-        print(i)
-        # Last layer has no transformation
-        if i == len(dims) - 2:
-            mf = None
-
-        # No dimension change, identity matrix
-        elif dim_in == dim_out:
-            mf = LinearProjection(np.identity(n=dim_in), device=device)
-
-        # Dimensionality reduction, PCA using svd decomposition
-        elif dim_in > dim_out:
-            _, _, V = np.linalg.svd(X_running, full_matrices=False)
-
-            mf = LinearProjection(V[:dim_out, :].T, device=device)
-            # Apply the projection to the running data,
-            X_running = X_running @ V[:dim_out].T
-
-        else:
-            raise NotImplementedError(
-                "Dimensionality augmentation is not handled currently."
-            )
-
-        # Create layer
-        layers.append(
-            VIPLayer(
-                generative_functions[i],
-                num_regression_coeffs=regression_coeffs,
-                input_dim=dim_in,
-                output_dim=dim_out,
-                mean_function=mf,
-                seed=seed,
                 dtype=dtype,
                 device=device,
             )

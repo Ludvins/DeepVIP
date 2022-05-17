@@ -3,7 +3,7 @@ import torch
 
 
 class Layer(torch.nn.Module):
-    def __init__(self, input_dim=None, dtype=None, device=None, seed=0):
+    def __init__(self, input_dim=None, dtype=None, device=None):
         """
         A base class for VIP layers. Basic functionality for multisample
         conditional.
@@ -16,18 +16,12 @@ class Layer(torch.nn.Module):
                 The dtype of the layer's computations and weights.
         device : torch.device
                  The device in which the computations are made.
-        seed : int
-               integer to use as seed for randomness.
         """
         super().__init__()
-        self.seed = seed
         self.dtype = dtype
         self.device = device
         self.input_dim = input_dim
         self.freeze = False
-
-        self.generator = torch.Generator(device)
-        self.generator.manual_seed(seed)
 
     def KL(self):
         raise NotImplementedError
@@ -48,7 +42,6 @@ class VIPLayer(Layer):
         q_sqrt_initial_value=1,
         q_mu_initial_value=0,
         mean_function=None,
-        seed=0,
         dtype=torch.float64,
         device=None,
     ):
@@ -69,10 +62,9 @@ class VIPLayer(Layer):
 
         The variational distribution over the regression coefficients is
 
-            Q(a) = N(a_mu, a_sqrt a_sqrt^T)
+            Q(a) = N(q_mu, q_sqrt q_sqrt^T)
 
-        The layer holds D_out independent VIPs with the same kernel
-        and regression coefficients.
+        The layer holds D_out independent VIPs.
 
         Parameters
         ----------
@@ -102,13 +94,12 @@ class VIPLayer(Layer):
         mean_function : callable
                         Mean function added to the model. If no mean function
                         is specified, no value is added.
+        device : torch.device
+                 The device in which the computations are made.
         dtype : data-type
                 The dtype of the layer's computations and weights.
-                Refer to tf.keras.layers.Layer for more information.
-        seed : int
-               integer to use as seed for randomness.
         """
-        super().__init__(dtype=dtype, input_dim=input_dim, seed=seed, device=device)
+        super().__init__(dtype=dtype, input_dim=input_dim, device=device)
         self.add_prior_regularization = add_prior_regularization
         self.num_coeffs = num_regression_coeffs
 
@@ -196,12 +187,11 @@ class VIPLayer(Layer):
         Returns:
         --------
         mean : torch tensor of shape (N, self.output_dim)
-               Mean values from conditional_ND applied to X.
+               Mean values of the marginal distribution.
         var : torch tensor of shape (N , self.output_dim)
-              Variance values from conditional_ND applied to X.
-        prior_samples : torch tensor of shape (self.num_coeffs,
-                        N, self.output_dim)
-                        Prior samples from conditional_ND applied to X.
+              Variance values of the marginal distribution.
+        prior_samples : torch tensor of shape (self.num_coeffs, N, self.output_dim)
+                        Learned prior samples applied to X.
         """
 
         # Let S = num_coeffs, D = output_dim and N = num_samples

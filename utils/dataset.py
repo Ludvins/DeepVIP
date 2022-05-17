@@ -5,13 +5,9 @@ from zipfile import ZipFile
 import os
 import numpy as np
 import pandas as pd
-import gzip
-import shutil
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from sklearn.model_selection import train_test_split
-from scipy.ndimage import gaussian_filter as blur
-
 
 class Training_Dataset(Dataset):
     def __init__(
@@ -162,6 +158,41 @@ class Synthetic_Dataset(DVIPDataset):
         self.targets = targets[..., np.newaxis]
 
 
+class Bimodal_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+        rng = np.random.default_rng(0)
+
+        x = rng.uniform(size=2000) * 8 - 4
+        epsilon = rng.normal(size=2000)
+
+        c = rng.normal(size=2000)
+        y = np.zeros_like(x)
+        y[c >= 0.5] = 10 * np.cos(x[c >= 0.5] - 0.5) + epsilon[c >= 0.5]
+
+        y[c < 0.5] = 10 * np.sin(x[c < 0.5] - 0.5) + epsilon[c < 0.5]
+        self.inputs = x[..., np.newaxis]
+        self.targets = y[..., np.newaxis]
+
+
+class Heterocedastic_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+        rng = np.random.default_rng(0)
+
+        x = rng.uniform(size=2000) * 8 - 4
+        epsilon = rng.normal(size=2000) * 2
+
+        sin = np.sin(x)
+
+        y = 7 * sin + epsilon * sin + 10
+
+        self.inputs = x[..., np.newaxis]
+        self.targets = y[..., np.newaxis]
+
+
 class Boston_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
@@ -196,14 +227,14 @@ class Naval_Dataset(DVIPDataset):
         self.type = "regression"
         self.output_dim = 1
         try:
-            data = pd.read_fwf("/tmp/UCI CBM Dataset/data.txt", header=None).values
+            data = pd.read_fwf("./data/UCI CBM Dataset/data.txt", header=None).values
         except:
             url = "{}{}".format(uci_base, "00316/UCI%20CBM%20Dataset.zip")
             with urlopen(url) as zipresp:
                 with ZipFile(BytesIO(zipresp.read())) as zfile:
-                    zfile.extractall("/tmp/")
+                    zfile.extractall("./data/")
 
-            data = pd.read_fwf("/tmp/UCI CBM Dataset/data.txt", header=None).values
+            data = pd.read_fwf("./data/UCI CBM Dataset/data.txt", header=None).values
         data = data[:, :-1]
         self.split_data(data)
 
@@ -213,14 +244,14 @@ class Power_Dataset(DVIPDataset):
         self.type = "regression"
         self.output_dim = 1
         try:
-            data = pd.read_excel("/tmp/CCPP//Folds5x2_pp.xlsx").values
+            data = pd.read_excel("./data/CCPP//Folds5x2_pp.xlsx").values
         except:
             url = "{}{}".format(uci_base, "00294/CCPP.zip")
             with urlopen(url) as zipresp:
                 with ZipFile(BytesIO(zipresp.read())) as zfile:
-                    zfile.extractall("/tmp/")
+                    zfile.extractall("./data/")
 
-            data = pd.read_excel("/tmp/CCPP//Folds5x2_pp.xlsx").values
+            data = pd.read_excel("./data/CCPP//Folds5x2_pp.xlsx").values
         self.split_data(data)
 
 
@@ -305,7 +336,7 @@ class CO2_Dataset(DVIPDataset):
     def len_train(self, test_size):
         return len(self.train)
 
-    def get_split(self, split, *args):
+    def get_split(self, seed, *args):
         return self.train, self.train_test, self.test
 
 
@@ -405,14 +436,18 @@ class Year_Dataset(DVIPDataset):
         self.type = "regression"
         self.output_dim = 1
         try:
-            data = pd.read_csv("/tmp/YearPredictionMSD.txt", header = None, delimiter=",").values
+            data = pd.read_csv(
+                "./data/YearPredictionMSD.txt", header=None, delimiter=","
+            ).values
         except:
             url = "{}{}".format(uci_base, "00203/YearPredictionMSD.txt.zip")
             with urlopen(url) as zipresp:
                 with ZipFile(BytesIO(zipresp.read())) as zfile:
-                    zfile.extractall("/tmp/")
+                    zfile.extractall("./data/")
 
-            data = pd.read_csv("/tmp/YearPredictionMSD.txt", header = None, delimiter=",").values
+            data = pd.read_csv(
+                "/data/YearPredictionMSD.txt", header=None, delimiter=","
+            ).values
 
         self.len_data = data.shape[0]
 
@@ -450,7 +485,6 @@ class Airline_Dataset(DVIPDataset):
         self.output_dim = 1
 
         data = pd.read_csv("./data/airline.csv")
-        print(data)
         # Convert time of day from hhmm to minutes since midnight
         data.ArrTime = 60 * np.floor(data.ArrTime / 100) + np.mod(data.ArrTime, 100)
         data.DepTime = 60 * np.floor(data.DepTime / 100) + np.mod(data.DepTime, 100)
@@ -673,6 +707,9 @@ class Taxi_Dataset(DVIPDataset):
 
 def get_dataset(dataset_name):
     d = {
+        "SPGP": SPGP_Dataset,
+        "bimodal": Bimodal_Dataset,
+        "heterocedastic": Heterocedastic_Dataset,
         "boston": Boston_Dataset,
         "energy": Energy_Dataset,
         "concrete": Concrete_Dataset,

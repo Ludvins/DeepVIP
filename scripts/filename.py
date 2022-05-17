@@ -13,10 +13,9 @@ def create_file_name(args):
         filename += "_genf=BNN_bnn-structure=" + dims
         if args.dropout != 0:
             filename += "_dropout=" + str(args.dropout)
-        filename += "_act=" + str(args.activation_str)   
-        filename += "_layer=" + args.bnn_layer_str    
- 
-        
+        filename += "_act=" + str(args.activation_str)
+        filename += "_layer=" + args.bnn_layer_str
+
     elif args.genf == "GP":
         filename += "_genf=GP_inner-dim=" + str(args.bnn_inner_dim)
     else:
@@ -40,5 +39,7 @@ def create_file_name(args):
 
     if args.split is not None:
         filename += "_split=" + str(args.split)
+
+    filename += args.name_flag
 
     return filename
