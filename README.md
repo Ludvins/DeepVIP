@@ -13,7 +13,7 @@ The code is divided in several folders that contains Python files of different p
     - `quadrature.py`: Includes the necesarry functions to estimate likelihoods using quadrature.
     - `utils.py`: Contains general purpose functions, such as the reparameterization trick for Gaussians.
 - scripts: Contains Python scripts that perform different experiments.
-    - `split.py`: Runs the necesarry code to run an experiment with a precise data split. Saving the obtained metrics.
+    - `split.py`: Runs the necessary code to run an experiment with a precise data split. Saving the obtained metrics.
     - `single_experiment.py`: Performs a single experiment, plotting the convergence curve and showing the obtained metrics.
     - `plotting_experiment.py`: Performs an experiment with 1D data and shows the obtained predictive distribution.
     - `extrapolate.py`: Performs an experiment with 1D data, used for the CO2 experiment.
@@ -21,7 +21,7 @@ The code is divided in several folders that contains Python files of different p
 - utils: Contains Python functions that support the execution of experiments.
     - `dataset.py`: Contains a class for every dataset, automatizing their usage.
     - `metrics.py`: Contains classes to handle metrics.
-    - `process_flags.py`: Contains the necesarry functions to use argparse to handle th experiments parameters as flags of the python call.
+    - `process_flags.py`: Contains the necessary functions to use argparse to handle the experiments' parameters as flags of the python call.
     - `pytorch_learning.py`: Contains loops for training, testing and evaluating a Pytorch model.
 
 
@@ -36,6 +36,7 @@ CO2 experiments can be done using the specific script:
 ```
 python scripts\extrapolate.py --dataset CO2 --iterations 100000 --vip_layers 2 --show --bnn_layer SimplerBayesLinear
 ```
+
 MNIST and Rectangles experiments are done using the same split file, but the split flag has no effect:
 ```
 python scripts/split.py --dataset MNIST --iterations 150000  --split 0 --bnn_layer SimplerBayesLinear --vip_layers 1 --no_input_prop --genf_full_output --genf conv     
