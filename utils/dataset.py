@@ -398,7 +398,7 @@ class Rectangles_Dataset(DVIPDataset):
         self.output_dim = 1
 
         train_data = np.loadtxt("data/rectangles/rectangles_im_train.amat")
-        test_data = np.loadtxt("data/rectangles/rectangles_im_test.amat")[:2000]
+        test_data = np.loadtxt("data/rectangles/rectangles_im_test.amat")
 
         self.len_data = train_data.shape[0] + test_data.shape[0]
         self.train = Training_Dataset(

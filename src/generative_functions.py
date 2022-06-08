@@ -130,7 +130,7 @@ class BayesLinear(GenerativeFunction):
         )
         self.bias_log_sigma = torch.nn.Parameter(
             torch.zeros([1, output_dim], dtype=dtype, device=device)
-        )
+        ) 
 
         # Reset the generator's seed if fixed noise.
         self.gaussian_sampler.reset_seed()

@@ -16,7 +16,7 @@ The code is divided in several folders that contains Python files of different p
     - `split.py`: Runs the necessary code to run an experiment with a precise data split. Saving the obtained metrics.
     - `single_experiment.py`: Performs a single experiment, plotting the convergence curve and showing the obtained metrics.
     - `plotting_experiment.py`: Performs an experiment with 1D data and shows the obtained predictive distribution.
-    - `extrapolate.py`: Performs an experiment with 1D data, used for the CO2 experiment.
+    - `missing_gaps.py`: Performs an experiment with 1D data, used for the CO2 experiment.
     - `filename.py`: Contains a function to create a filename given the parameters of the experiment.
 - utils: Contains Python functions that support the execution of experiments.
     - `dataset.py`: Contains a class for every dataset, automatizing their usage.
@@ -34,7 +34,7 @@ python scripts/split.py --dataset boston  --iterations 150000  --split 0 --bnn_l
 
 CO2 experiments can be done using the specific script:
 ```
-python scripts\extrapolate.py --dataset CO2 --iterations 100000 --vip_layers 2 --show --bnn_layer SimplerBayesLinear
+python scripts/missing_gaps.py --dataset CO2 --iterations 100000 --vip_layers 2 --show --bnn_layer SimplerBayesLinear
 ```
 
 MNIST and Rectangles experiments are done using the same split file, but the split flag has no effect:

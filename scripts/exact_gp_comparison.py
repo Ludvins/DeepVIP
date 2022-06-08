@@ -22,7 +22,7 @@ from scripts.filename import create_file_name
 
 args = manage_experiment_configuration()
 
-torch.manual_seed(2147483647)
+torch.manual_seed(args.seed)
 
 device = "cpu"  # torch.device("cuda:0" if use_cuda else "cpu")
 vars(args)["device"] = device
@@ -31,26 +31,14 @@ vars(args)["device"] = device
 ################## DATASET ###################
 
 # Generate train/test partition using split number
-train_indexes, test_indexes = train_test_split(
-    np.arange(len(args.dataset)),
-    test_size=0.1,
-    random_state=2147483647,
+train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
+    args.test_size, args.seed + args.split
 )
 
-train_dataset = Training_Dataset(
-    args.dataset.inputs[train_indexes],
-    args.dataset.targets[train_indexes],
-    verbose=False,
-)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
+val_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-# inputs = rng.standard_normal(300)
-inputs = np.loadtxt("data/SPGP_dist/test_inputs")
-
-test_dataset = Test_Dataset(
-    inputs[..., np.newaxis],
-    inputs_mean=train_dataset.inputs_mean,
-    inputs_std=train_dataset.inputs_std,
-)
 
 from matplotlib import pyplot as plt
 
@@ -100,18 +88,13 @@ def get_exact_GP_predictions(
 
 ################ DVIP TRAINING ##############
 
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size)
-test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
-
 # Get VIP layers
 layers = init_layers(train_dataset.inputs, train_dataset.output_dim, **vars(args))
 
 
-# Instantiate Likelihood
-ll = args.likelihood(device=args.device, dtype=args.dtype)
-
+# Create DVIP object
 dvip = DVIP_Base(
-    ll,
+    args.likelihood,
     layers,
     len(train_dataset),
     bb_alpha=args.bb_alpha,
@@ -121,7 +104,6 @@ dvip = DVIP_Base(
     dtype=args.dtype,
     device=args.device,
 )
-# dvip.freeze_prior()
 
 dvip.print_variables()
 
@@ -129,14 +111,16 @@ dvip.print_variables()
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
 
-# Train the model
-fit_with_metrics(
+train_hist, val_hist = fit_with_metrics(
     dvip,
     train_loader,
     opt,
+    args.metrics,
+    val_generator=val_loader,
     epochs=args.epochs,
     device=args.device,
 )
+
 
 dvip.print_variables()
 
@@ -205,11 +189,11 @@ def get_predictive_results(mean, sqrt):
 
 # Change MC samples for test
 dvip.num_samples = args.num_samples_test
-test_mean, test_sqrt = predict(dvip, test_loader, device=args.device)
+test_mean, test_sqrt = predict(dvip, val_loader, device=args.device)
 test_prediction_mean, test_prediction_sqrt = get_predictive_results(
     test_mean, test_sqrt
 )
-test_prior_samples = predict_prior_samples(dvip, test_loader)[0]
+test_prior_samples = predict_prior_samples(dvip, val_loader)[0]
 
 sort = np.argsort(test_dataset.inputs.flatten())
 

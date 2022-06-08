@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import sys
 
@@ -10,11 +9,8 @@ sys.path.append(".")
 
 from src.dvip import DVIP_Base
 from src.layers_init import init_layers
-from src.likelihood import Gaussian
-from utils.dataset import Test_Dataset, Training_Dataset
-from utils.metrics import MetricsRegression, MetricsClassification
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit, fit_with_metrics, score
+from utils.pytorch_learning import fit_with_metrics, score
 from scripts.filename import create_file_name
 
 args = manage_experiment_configuration()
