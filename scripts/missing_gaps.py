@@ -163,7 +163,7 @@ ax1.fill_between(
 ax1.legend(fontsize=24)
 ax1.tick_params(axis="y", labelsize=24)
 ax1.tick_params(axis="x", labelsize=24)
-ax0.savefig("plots/extrapolate_" + create_file_name(args) + ".pdf", bbox_inches="tight")
+plt.savefig("plots/extrapolate_" + create_file_name(args) + ".pdf", bbox_inches="tight")
 
 
 test_metrics_names = list(test_metrics.keys())
