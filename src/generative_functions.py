@@ -164,6 +164,7 @@ class BayesLinear(GenerativeFunction):
         """
 
         # Check the given input is valid
+
         if inputs.shape[-1] != self.input_dim:
             raise RuntimeError("Input shape does not match stored data dimension")
 
@@ -423,14 +424,14 @@ class BayesianConvNN(GenerativeFunction):
             dtype=dtype,
         )
         self.activation = activation
-        _in = 4
-        _out = 2 * _in
-        self.conv1 = torch.nn.Conv2d(1, _in, 3, device=device, dtype=dtype)
-        self.conv2 = torch.nn.Conv2d(_in, _out, 3, device=device, dtype=dtype)
+        self.channels = 32
+
+        self.conv1 = torch.nn.Conv2d(1, self.channels, 3, device=device, dtype=dtype)
+        self.conv2 = torch.nn.Conv2d(self.channels, self.channels*2, 3, device=device, dtype=dtype)
 
         self.fc = BayesLinear(
             num_samples=num_samples,
-            input_dim=_out * 5 * 5,
+            input_dim=self.channels*2 * 5 * 5,
             output_dim=output_dim,
             device=device,
             seed=0,
@@ -470,159 +471,16 @@ class BayesianConvNN(GenerativeFunction):
 
         # Fully connected
         return self.fc(x)
+    
+    
 
-
-class GP(GenerativeFunction):
+class BayesianTConvNN(GenerativeFunction):
     def __init__(
         self,
         num_samples,
-        input_dim=1,
-        output_dim=1,
-        inner_layer_dim=10,
-        kernel_amp=1.0,
-        kernel_length=1.0,
-        seed=2147483647,
-        fix_random_noise=True,
-        device=None,
-        dtype=torch.float64,
-    ):
-        """Generates samples from a Bayesian Neural Network that
-        approximates a GP with 0 mean and RBF kernel. More precisely,
-        the RBF kernel is approximated by
-
-        RBF(x1, x2) = E_w,b [(cos wx_1 + b)cos(wx_2 + b)]
-
-        where w ~ N(0, 1) and b ~ U(0, 2pi). This implies that
-
-        phi(x) = cos(wx + b)
-
-        can be used as kernel function to aproximate the kernel
-
-        RBF(x1, x2) ~ phi(x1) phi(x2)
-
-        Samples from the process can be generated using the
-        reparameterization trick, samples = phi * N(0, 1).
-
-        Using this information, a network with two layers is used,
-        the inner one computes phi and the last one the samples.
-
-        Source: Random Features for Large-Scale Kernel Machines
-                by Ali Rahimi and Ben Recht
-        https://people.eecs.berkeley.edu/~brecht/papers/07.rah.rec.nips.pdf
-
-        Parameters
-        ----------
-
-        input_dim : int
-                    Dimensionality of the input data.
-        output_dim : int
-                     Dimensionality of the output targets.
-        inner_layer_dim : int
-                          Dimensionality of the hidden layer, i.e,
-                          number of samples of w and b to aproximate
-                          the expectation.
-        kernel_amp : float
-                     Amplitude of the RBF kernel that is being
-                     approximated.
-        kernel_length : float
-                        Length of the RBF kernel that is being
-                        approximated.
-        seed : int
-               Random number seed.
-        fix_random_noise : Wether to fix the generated noise to be
-                           the same on each call.
-        device : torch device
-                 Device in which computations are made.
-        dtype : data dtype
-                Data type to use (precision).
-        """
-        super().__init__(
-            num_samples,
-            input_dim,
-            output_dim,
-            device=device,
-            fix_random_noise=fix_random_noise,
-            seed=seed,
-            dtype=dtype,
-        )
-
-        # Initialize variables and noise generators
-        self.inner_layer_dim = inner_layer_dim
-        self.inner_layer_dim_inv = 1 / self.inner_layer_dim
-        self.gaussian_sampler = GaussianSampler(seed, device)
-        self.uniform_sampler = UniformSampler(seed, device)
-
-        # Initialize parameters, logarithms are used in order to avoid
-        #  constraining to positive values.
-        self.log_kernel_amp = torch.nn.Parameter(
-            torch.log(torch.tensor(kernel_amp, dtype=self.dtype))
-        )
-        self.log_kernel_length = torch.nn.Parameter(
-            torch.log(torch.tensor(kernel_length, dtype=self.dtype))
-        )
-
-        # Sample noise values from Gaussian and uniform in order to
-        # approximate the kernel
-        self.z = self.gaussian_sampler((self.input_dim, self.inner_layer_dim))
-        self.b = 2 * np.pi * self.uniform_sampler((1, self.inner_layer_dim))
-
-        if self.fix_random_noise:
-            self.noise = self.get_noise(first_call=True)
-
-    def get_noise(self, first_call=False):
-        if self.fix_random_noise and not first_call:
-            return self.noise
-        else:
-            # Compute the shape of the noise to generate
-            w = self.gaussian_sampler((self.num_samples, self.inner_layer_dim, 1))
-
-            return w
-
-    def forward(self, inputs):
-        """Computes aproximated samples of a Gaussian process prior
-        with kernel RBF and mean 0.
-
-        Parameters
-        ----------
-        inputs : torch tensor of shape (N, D)
-                 Contains the minibatch of N points with dimensionality D.
-
-        num_samples: int
-                     Number of samples to generate from the BNN.
-                     Equivalently, inputs is propagated through the BNN
-                     as many times as indicated by this variable. All
-                     results are returned.
-
-        Returns
-        -------
-        samples : torch tensor of shape (num_samples, N, D)
-                  All the samples from the approximated GP prior.
-        """
-
-        # Compute kernel function, start by scaling the inputs by the kernel length
-        x = inputs / torch.exp(self.log_kernel_length)
-        # Compute the normalizing factor
-        scale_factor = torch.sqrt(
-            2.0 * torch.exp(self.log_kernel_amp) * self.inner_layer_dim_inv
-        )
-        # Compute phi, shape [N, inner_dim]
-        phi = scale_factor * torch.cos(x @ self.z + self.b)
-
-        # Once the kernel is approximated, generate the desired number
-        # of samples from the approximate GP.
-        w = self.get_noise()
-
-        return phi @ w
-
-
-class CosFunctions(GenerativeFunction):
-    def __init__(
-        self,
-        num_samples,
-        input_dim=1,
-        output_dim=1,
-        kernel_amp=1.0,
-        kernel_length=1.0,
+        input_dim,
+        output_dim,
+        activation,
         seed=2147483647,
         fix_random_noise=False,
         device=None,
@@ -637,64 +495,48 @@ class CosFunctions(GenerativeFunction):
             seed=seed,
             dtype=dtype,
         )
-
-        # Initialize variables and noise generators
-        self.gaussian_sampler = GaussianSampler(seed)
-        self.uniform_sampler = UniformSampler(seed)
-
-        # Initialize parameters, logarithms are used in order to avoid
-        #  constraining to positive values.
-        self.log_kernel_amp = torch.nn.Parameter(
-            torch.log(torch.tensor(kernel_amp, dtype=self.dtype))
+        self.activation = activation
+        self.channels = 32
+        
+        self.fc = BayesLinear(
+            num_samples=num_samples,
+            input_dim=input_dim,
+            output_dim=5*5*self.channels*2,
+            device=device,
+            seed=0,
+            dtype=dtype,
         )
-        self.log_kernel_length = torch.nn.Parameter(
-            torch.log(torch.tensor(kernel_length, dtype=self.dtype))
-        )
-        self.gaussian_sampler.reset_seed()
-        if self.fix_random_noise:
-            self.noise = self.get_noise(first_call=True)
+        
+        self.m = torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
-    def get_noise(self, first_call=False):
-        if self.fix_random_noise and not first_call:
-            return self.noise
-        else:
-            # Sample noise values from Gaussian and uniform in order to
-            # approximate the kernel
-            w = self.gaussian_sampler((self.num_samples, self.input_dim, 1))
-            b = 2 * np.pi * self.uniform_sampler((self.num_samples, 1, 1))
-            return (w, b)
+        self.deconv1 = torch.nn.ConvTranspose2d(self.channels*2, self.channels, 4, device=device, dtype=dtype)
+        self.deconv2 = torch.nn.ConvTranspose2d(self.channels, 1, 3, device=device, dtype=dtype)
 
-    def forward(self, inputs):
-        """Computes aproximated samples of a Gaussian process prior
-        with kernel RBF and mean 0.
 
-        Parameters
-        ----------
-        inputs : torch tensor of shape (N, D)
-                 Contains the minibatch of N points with dimensionality D.
 
-        Returns
-        -------
-        samples : torch tensor of shape (num_samples, N, D)
-                  All the samples from the approximated GP prior.
-        """
+    def forward(self, input):
+        # Input shape (batch_size, inner_dim)
+        N = input.shape[0]
+        x = self.fc(input)
+        x = self.activation(x)
+        # Shape (num_samples, batch_size, 200)
+        # 5 5 8
+        x = x.reshape((-1, self.channels*2, 5, 5))
+        # 10 10 8
+        x = self.m(x)
+        # 13 13 8
+        x = self.deconv1(x)
+        x = self.activation(x)
 
-        # Compute kernel function, start by scaling the inputs by the length
-        x = inputs / torch.exp(self.log_kernel_length)
+        # MaxPooling 2D
+        # 26 26 4
+        x = self.m(x)
+        # Second convolution
+        # Shape (N, 11, 11, 8)
+        x = self.deconv2(x)
+        x = self.activation(x)
 
-        # Compute the normalizing factor
-        scale_factor = torch.sqrt(
-            2.0 * torch.exp(self.log_kernel_amp) / self.output_dim
-        )
-
-        # Get noise values:
-        # w comes from a standard Gaussian with shape
-        #   (num_samples, input_dim, output_dim)
-        # b comes from a uniform (0, 2pi) with shape
-        #   (num_samples, 1, output_dim)
-        w, b = self.get_noise()
-
-        # Compute phi, shape (num_samples, batch_size, output_dim)
-        phi = scale_factor * torch.cos(x @ w + b)
-
-        return phi
+        # Flatten
+        x = x.reshape((self.num_samples, N, *self.output_dim))
+        # Fully connected
+        return x

@@ -94,7 +94,7 @@ class MetricsRegression(Metrics):
 
         if mean_pred.shape[-1] != 1:
             # Multidimensional output not implemented yet
-            raise NotImplementedError
+            return 0
 
         mean_pred = mean_pred.squeeze(-1)
         std_pred = std_pred.squeeze(-1)

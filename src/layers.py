@@ -195,19 +195,17 @@ class VIPLayer(Layer):
         """
 
         # Let S = num_coeffs, D = output_dim and N = num_samples
-        # Shape (S, N, 1)
+        # Shape (S, N, ...)
         f = self.generative_function(X)
-        # Compute mean value, shape (1 , N, 1)
+        # Compute mean value, shape (1 , N, ...)
         m = torch.mean(f, dim=0, keepdims=True)
 
-        # Compute regresion function, shape (S , N, 1)
+        # Compute regresion function, shape (S , N, ...)
         phi = (f - m) / torch.sqrt(torch.tensor(self.num_coeffs - 1).type(self.dtype))
-
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, N, 1)
-        mean = m.squeeze(axis=0) + torch.einsum("snd,sd->nd", phi, self.q_mu)
-
+        mean = m.squeeze(axis=0) + torch.einsum("sn...,s...->n...", phi, self.q_mu)
         # Shape (S, S, D)
         q_sqrt = (
             torch.zeros((self.num_coeffs, self.num_coeffs, self.output_dim))
@@ -219,7 +217,7 @@ class VIPLayer(Layer):
 
         # Compute the diagonal of the predictive covariance matrix
         # K = diag(phi^T q_sqrt^T q_sqrt phi)
-        K = torch.einsum("ind, sid -> snd", phi, q_sqrt)
+        K = torch.einsum("in..., si... -> sn...", phi, q_sqrt)
         K = torch.sum(K * K, dim=0)
 
         # Add layer noise to variance

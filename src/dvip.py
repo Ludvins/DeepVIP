@@ -248,11 +248,10 @@ class DVIP_Base(torch.nn.Module):
             # Get the layer's predictive distribution and
             # prior samples if required.
             results = layer(F_flat, return_prior_samples)
-
             # Reshape predictions to the original shape
-            D_out = results[0].shape[-1]
-            Fmean = torch.reshape(results[0], [S, N, D_out])
-            Fvar = torch.reshape(results[1], [S, N, D_out])
+            D_out = results[0].shape[1:]
+            Fmean = torch.reshape(results[0], [S, N, *D_out])
+            Fvar = torch.reshape(results[1], [S, N, *D_out])
 
             # Use Gaussian re-parameterization trick to create samples.
             z = torch.randn(

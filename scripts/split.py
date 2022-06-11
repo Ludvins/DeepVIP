@@ -9,7 +9,7 @@ from time import process_time as timer
 sys.path.append(".")
 
 from src.dvip import DVIP_Base
-from src.layers_init import init_layers
+from src.layers_init import init_layers_vae
 
 from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit, score
@@ -17,6 +17,8 @@ from scripts.filename import create_file_name
 
 args = manage_experiment_configuration()
 
+args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+print(args.device)
 torch.manual_seed(args.seed)
 
 train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
@@ -24,7 +26,7 @@ train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
 )
 
 # Get VIP layers
-layers = init_layers(train_dataset.inputs, args.dataset.output_dim, **vars(args))
+layers = init_layers_vae(train_dataset.inputs, args.dataset.output_dim, **vars(args))
 
 # Initialize DataLoader
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
@@ -63,12 +65,28 @@ _ = fit(
 )
 end = timer()
 
+dvip.print_variables()
+
+import matplotlib.pyplot as plt
+
+img = train_dataset.inputs[0]
+f, axis = plt.subplots(1,2) 
+axis[0].imshow(img.reshape(28, 28))
+#plt.show()
+pred = dvip.predict_y(torch.tensor(img, dtype = args.dtype,device = args.device).unsqueeze(0), 1)
+axis[1].imshow(pred[0].cpu().reshape(28,28).detach().numpy())
+
+
 # Set the number of test samples to generate
 dvip.num_samples = args.num_samples_test
 
 # Test the model
 train_metrics = score(dvip, train_test_loader, args.metrics, use_tqdm = True, device=args.device)
 test_metrics = score(dvip, test_loader, args.metrics, use_tqdm=True, device=args.device)
+
+print("TRAIN RESULTS: ")
+for k, v in train_metrics.items():
+    print("\t - {}: {}".format(k, v))
 
 print("TEST RESULTS: ")
 for k, v in test_metrics.items():
@@ -87,3 +105,7 @@ df.to_csv(
     path_or_buf="results/" + create_file_name(args) + ".csv",
     encoding="utf-8",
 )
+
+
+
+plt.show()

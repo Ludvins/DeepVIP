@@ -389,7 +389,59 @@ class MNIST_Dataset(DVIPDataset):
 
     def len_train(self, test_size):
         return 60000
+    
+    
+class MNIST_regression_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+        train = datasets.MNIST(
+            root="./data", train=True, download=True, transform=transforms.ToTensor()
+        )
+        test = datasets.MNIST(
+            root="./data",
+            train=False,
+            download=True,
+            transform=transforms.ToTensor(),
+        )
 
+        train_data = train.data / 255.0
+        test_data = test.data / 255.0
+        
+        #train_data = train.data.reshape(60000, -1) / 255.0
+        #test_data = test.data.reshape(10000, -1) / 255.0
+
+        train_targets = train_data
+        test_targets = test_data
+
+        self.train = Training_Dataset(
+            train_data.numpy(),
+            train_targets.numpy(),
+            normalize_targets=False,
+            normalize_inputs=False,
+        )
+
+        self.train_test = Test_Dataset(
+            train_data.numpy(),
+            train_targets.numpy(),
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_data.numpy(),
+            test_targets.numpy(),
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return 70000
+
+    def get_split(self, *args):
+        return self.train, self.train_test, self.test
+
+    def len_train(self, test_size):
+        return 60000
 
 class Rectangles_Dataset(DVIPDataset):
     def __init__(self):
@@ -721,6 +773,7 @@ def get_dataset(dataset_name):
         "winered": WineRed_Dataset,
         "CO2": CO2_Dataset,
         "MNIST": MNIST_Dataset,
+        "MNIST2": MNIST_regression_Dataset,
         "Rectangles": Rectangles_Dataset,
         "Year": Year_Dataset,
         "Airline": Airline_Dataset,

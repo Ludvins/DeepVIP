@@ -260,7 +260,6 @@ class Gaussian(Likelihood):
 
         As both distributions are Gaussian this can be computed in closed form.
         """
-
         if alpha == 0:
             logpdf = (
                 -0.5 * np.log(2 * np.pi)
