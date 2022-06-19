@@ -245,8 +245,6 @@ def init_layers(
     return layers
 
 
-
-
 def init_layers_vae(
     X,
     output_dim,
@@ -368,83 +366,85 @@ def init_layers_vae(
     # using the projected (from the first projection) data.
 
     print(dims)
-    
-    bnn_encoder = BayesianNN(
-                num_samples=regression_coeffs,
-                input_dim=X.shape[1],
-                structure=bnn_structure,
-                activation=activation,
-                output_dim=inner_dim,
-                layer_model=bnn_layer,
-                dropout=dropout,
-                fix_random_noise=fix_prior_noise,
-                zero_mean_prior=zero_mean_prior,
-                device=device,
-                seed=seed,
-                dtype=dtype,
-            )
-    bnn_decoder = BayesianNN(
-                num_samples=regression_coeffs,
-                input_dim=inner_dim,
-                structure=bnn_structure,
-                activation=activation,
-                output_dim=X.shape[1],
-                layer_model=bnn_layer,
-                dropout=dropout,
-                fix_random_noise=fix_prior_noise,
-                zero_mean_prior=zero_mean_prior,
-                device=device,
-                seed=seed,
-                dtype=dtype,
-            )
-    
-    conv_encoder = BayesianConvNN(
-                num_samples=regression_coeffs,
-                input_dim=(28, 28),
-                activation=activation,
-                output_dim=inner_dim,
-                fix_random_noise=fix_prior_noise,
-                device=device,
-                seed=seed,
-                dtype=dtype,
-            )
-    conv_decoder = BayesianTConvNN(
-                num_samples=regression_coeffs,
-                input_dim=inner_dim,
-                activation=activation,
-                output_dim=(28, 28),
-                fix_random_noise=fix_prior_noise,
-                device=device,
-                seed=seed,
-                dtype=dtype,
-            )
-    
+    conv = True
+
+    if conv:
+        encoder = BayesianConvNN(
+            num_samples=regression_coeffs,
+            input_dim=(28, 28),
+            activation=activation,
+            output_dim=inner_dim,
+            fix_random_noise=fix_prior_noise,
+            device=device,
+            seed=seed,
+            dtype=dtype,
+        )
+        decoder = BayesianTConvNN(
+            num_samples=regression_coeffs,
+            input_dim=inner_dim,
+            activation=activation,
+            output_dim=(28, 28),
+            fix_random_noise=fix_prior_noise,
+            device=device,
+            seed=seed,
+            dtype=dtype,
+        )
+    else:
+        encoder = BayesianNN(
+            num_samples=regression_coeffs,
+            input_dim=X.shape[1],
+            structure=bnn_structure,
+            activation=activation,
+            output_dim=inner_dim,
+            layer_model=bnn_layer,
+            dropout=dropout,
+            fix_random_noise=fix_prior_noise,
+            zero_mean_prior=zero_mean_prior,
+            device=device,
+            seed=seed,
+            dtype=dtype,
+        )
+        decoder = BayesianNN(
+            num_samples=regression_coeffs,
+            input_dim=inner_dim,
+            structure=bnn_structure,
+            activation=activation,
+            output_dim=X.shape[1],
+            layer_model=bnn_layer,
+            dropout=dropout,
+            fix_random_noise=fix_prior_noise,
+            zero_mean_prior=zero_mean_prior,
+            device=device,
+            seed=seed,
+            dtype=dtype,
+        )
+
     encoder = VIPLayer(
-                conv_encoder,
-                num_regression_coeffs=regression_coeffs,
-                input_dim=X.shape[1],
-                output_dim=1,
-                add_prior_regularization=prior_kl,
-                mean_function=None,
-                q_mu_initial_value=inner_layers_mu,
-                log_layer_noise=inner_layers_noise,
-                q_sqrt_initial_value=inner_layers_sqrt,
-                dtype=dtype,
-                device=device,
-            )
-    
+        encoder,
+        num_regression_coeffs=regression_coeffs,
+        input_dim=X.shape[1],
+        output_dim=1,
+        add_prior_regularization=prior_kl,
+        mean_function=None,
+        q_mu_initial_value=inner_layers_mu,
+        log_layer_noise=inner_layers_noise,
+        q_sqrt_initial_value=inner_layers_sqrt,
+        dtype=dtype,
+        device=device,
+    )
+
     decoder = VIPLayer(
-                conv_decoder,
-                num_regression_coeffs=regression_coeffs,
-                input_dim=inner_dim,
-                output_dim=1,
-                add_prior_regularization=prior_kl,
-                mean_function=None,
-                q_mu_initial_value=final_layer_mu,
-                log_layer_noise=final_layer_noise,
-                q_sqrt_initial_value=final_layer_sqrt,
-                dtype=dtype,
-                device=device,
-            )
+        decoder,
+        num_regression_coeffs=regression_coeffs,
+        input_dim=inner_dim,
+        output_dim=1,
+        add_prior_regularization=prior_kl,
+        mean_function=None,
+        q_mu_initial_value=final_layer_mu,
+        log_layer_noise=final_layer_noise,
+        q_sqrt_initial_value=final_layer_sqrt,
+        dtype=dtype,
+        device=device,
+    )
 
     return [encoder, decoder]

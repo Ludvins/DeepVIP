@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from sklearn.model_selection import train_test_split
 
+
 class Training_Dataset(Dataset):
     def __init__(
         self,
@@ -164,14 +165,14 @@ class Bimodal_Dataset(DVIPDataset):
         self.output_dim = 1
         rng = np.random.default_rng(0)
 
-        x = rng.uniform(size=2000) * 8 - 4
-        epsilon = rng.normal(size=2000)
+        n = 2000
+        x = rng.uniform(size=n) * 8 - 4
+        epsilon = rng.normal(size=n)
 
-        c = rng.normal(size=2000)
         y = np.zeros_like(x)
-        y[c >= 0.5] = 10 * np.cos(x[c >= 0.5] - 0.5) + epsilon[c >= 0.5]
+        y[: n // 2] = 20 * np.cos(x[: n // 2] - 0.5) + epsilon[: n // 2]
 
-        y[c < 0.5] = 10 * np.sin(x[c < 0.5] - 0.5) + epsilon[c < 0.5]
+        y[n // 2 :] = 20 * np.sin(x[n // 2 :] - 0.5) + epsilon[n // 2 :]
         self.inputs = x[..., np.newaxis]
         self.targets = y[..., np.newaxis]
 
@@ -389,8 +390,8 @@ class MNIST_Dataset(DVIPDataset):
 
     def len_train(self, test_size):
         return 60000
-    
-    
+
+
 class MNIST_regression_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
@@ -407,9 +408,9 @@ class MNIST_regression_Dataset(DVIPDataset):
 
         train_data = train.data / 255.0
         test_data = test.data / 255.0
-        
-        #train_data = train.data.reshape(60000, -1) / 255.0
-        #test_data = test.data.reshape(10000, -1) / 255.0
+
+        # train_data = train.data.reshape(60000, -1)
+        # test_data = test.data.reshape(10000, -1)
 
         train_targets = train_data
         test_targets = test_data
@@ -442,6 +443,7 @@ class MNIST_regression_Dataset(DVIPDataset):
 
     def len_train(self, test_size):
         return 60000
+
 
 class Rectangles_Dataset(DVIPDataset):
     def __init__(self):

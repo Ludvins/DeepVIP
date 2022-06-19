@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from .noise_samplers import GaussianSampler, UniformSampler
 
+
 class GenerativeFunction(torch.nn.Module):
     def __init__(
         self,
@@ -130,7 +131,7 @@ class BayesLinear(GenerativeFunction):
         )
         self.bias_log_sigma = torch.nn.Parameter(
             torch.zeros([1, output_dim], dtype=dtype, device=device)
-        ) 
+        )
 
         # Reset the generator's seed if fixed noise.
         self.gaussian_sampler.reset_seed()
@@ -427,11 +428,13 @@ class BayesianConvNN(GenerativeFunction):
         self.channels = 32
 
         self.conv1 = torch.nn.Conv2d(1, self.channels, 3, device=device, dtype=dtype)
-        self.conv2 = torch.nn.Conv2d(self.channels, self.channels*2, 3, device=device, dtype=dtype)
+        self.conv2 = torch.nn.Conv2d(
+            self.channels, self.channels * 2, 3, device=device, dtype=dtype
+        )
 
         self.fc = BayesLinear(
             num_samples=num_samples,
-            input_dim=self.channels*2 * 5 * 5,
+            input_dim=self.channels * 2 * 5 * 5,
             output_dim=output_dim,
             device=device,
             seed=0,
@@ -471,8 +474,7 @@ class BayesianConvNN(GenerativeFunction):
 
         # Fully connected
         return self.fc(x)
-    
-    
+
 
 class BayesianTConvNN(GenerativeFunction):
     def __init__(
@@ -497,22 +499,24 @@ class BayesianTConvNN(GenerativeFunction):
         )
         self.activation = activation
         self.channels = 32
-        
+
         self.fc = BayesLinear(
             num_samples=num_samples,
             input_dim=input_dim,
-            output_dim=5*5*self.channels*2,
+            output_dim=5 * 5 * self.channels * 2,
             device=device,
             seed=0,
             dtype=dtype,
         )
-        
-        self.m = torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
-        self.deconv1 = torch.nn.ConvTranspose2d(self.channels*2, self.channels, 4, device=device, dtype=dtype)
-        self.deconv2 = torch.nn.ConvTranspose2d(self.channels, 1, 3, device=device, dtype=dtype)
+        self.m = torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
 
-
+        self.deconv1 = torch.nn.ConvTranspose2d(
+            self.channels * 2, self.channels, 4, device=device, dtype=dtype
+        )
+        self.deconv2 = torch.nn.ConvTranspose2d(
+            self.channels, 1, 3, device=device, dtype=dtype
+        )
 
     def forward(self, input):
         # Input shape (batch_size, inner_dim)
@@ -521,7 +525,7 @@ class BayesianTConvNN(GenerativeFunction):
         x = self.activation(x)
         # Shape (num_samples, batch_size, 200)
         # 5 5 8
-        x = x.reshape((-1, self.channels*2, 5, 5))
+        x = x.reshape((-1, self.channels * 2, 5, 5))
         # 10 10 8
         x = self.m(x)
         # 13 13 8

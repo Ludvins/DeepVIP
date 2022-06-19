@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from .flows import *
 
 
 class Layer(torch.nn.Module):
@@ -150,7 +151,7 @@ class VIPLayer(Layer):
         )
         self.q_sqrt_tri = torch.nn.Parameter(self.q_sqrt_tri)
 
-    def forward(self, X, return_prior_samples=False):
+    def forward(self, X, return_prior_samples=False, full_cov=False):
         """
         Computes Q*(y|x, a) using the linear regression approximation.
         Given that this distribution is Gaussian and Q(a) is also Gaussian
@@ -215,10 +216,14 @@ class VIPLayer(Layer):
         li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
         q_sqrt[li, lj] = self.q_sqrt_tri
 
-        # Compute the diagonal of the predictive covariance matrix
-        # K = diag(phi^T q_sqrt^T q_sqrt phi)
-        K = torch.einsum("in..., si... -> sn...", phi, q_sqrt)
-        K = torch.sum(K * K, dim=0)
+        if full_cov:
+            K = torch.einsum("in..., is... -> sn...", phi, q_sqrt)
+            K = torch.einsum("sn...,sm...->nm...", K, K)
+        else:
+            # Compute the diagonal of the predictive covariance matrix
+            # K = diag(phi^T q_sqrt^T q_sqrt phi)
+            K = torch.einsum("in..., si... -> sn...", phi, q_sqrt)
+            K = torch.sum(K * K, dim=0)
 
         # Add layer noise to variance
         if self.log_layer_noise is not None:
@@ -281,3 +286,97 @@ class VIPLayer(Layer):
     def freeze_prior(self):
         """Sets the prior parameters of this layer as non trainable."""
         self.generative_function.freeze_parameters()
+
+
+class TVIPLayer(VIPLayer):
+    def __init__(
+        self,
+        generative_function,
+        num_regression_coeffs,
+        input_dim,
+        output_dim,
+        add_prior_regularization=False,
+        log_layer_noise=None,
+        q_sqrt_initial_value=1,
+        q_mu_initial_value=0,
+        mean_function=None,
+        dtype=torch.float64,
+        device=None,
+    ):
+        super().__init__(
+            generative_function,
+            num_regression_coeffs,
+            input_dim,
+            output_dim,
+            add_prior_regularization,
+            log_layer_noise,
+            q_sqrt_initial_value,
+            q_mu_initial_value,
+            mean_function,
+            dtype,
+            device,
+        )
+        self.generator = torch.Generator(device)
+        self.generator.manual_seed(000)
+
+        self.flow = InputDependentFlow2(1, self.output_dim, device, dtype, seed=0)
+
+    def forward(self, x, S):
+        # Let S = num_coeffs, D = output_dim and N = num_samples
+        # Shape (S, N, ...)
+        z = torch.randn(
+            [S, self.num_coeffs, self.output_dim],
+            generator=self.generator,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        L = (
+            torch.zeros((self.num_coeffs, self.num_coeffs, self.output_dim))
+            .to(self.dtype)
+            .to(self.device)
+        )
+
+        li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
+        L[li, lj] = self.q_sqrt_tri
+
+        coeffs = self.q_mu + torch.einsum("...sd, sad->...ad", z, L)
+        a = self.flow(coeffs.reshape(-1, self.output_dim)).reshape(
+            S, self.num_coeffs, self.output_dim
+        )
+        f = self.generative_function(x)
+
+        m = torch.mean(f, dim=0, keepdims=True)
+
+        # Compute regresion function, shape (S , N, ...)
+        phi = (f - m) / torch.sqrt(torch.tensor(self.num_coeffs - 1).type(self.dtype))
+        # Compute mean value as m + q_mu^T phi per point and output dim
+        # q_mu has shape (S, D)
+        # phi has shape (S, N, 1)
+        return m.squeeze(axis=0) + torch.einsum("sn...,as...->an...", phi, a)
+
+        return torch.einsum("snd, asd->and", f, a)
+
+    def get_samples(self, S):
+        z = torch.randn(
+            [S, self.num_coeffs, self.output_dim],
+            generator=self.generator,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        L = (
+            torch.zeros((self.num_coeffs, self.num_coeffs, self.output_dim))
+            .to(self.dtype)
+            .to(self.device)
+        )
+
+        li, lj = torch.tril_indices(self.num_coeffs, self.num_coeffs)
+        L[li, lj] = self.q_sqrt_tri
+
+        coeffs = self.q_mu + torch.einsum("...sd, sad->...ad", z, L)
+        a = self.flow(coeffs.reshape(-1, self.output_dim)).reshape(
+            S, self.num_coeffs, self.output_dim
+        )
+        return coeffs, a
+
+    def KL(self):
+        return super().KL()  # + self.flow.KL()

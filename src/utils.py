@@ -39,4 +39,9 @@ def reparameterize(mean, var, z, full_cov=False):
         return mean + z * torch.sqrt(var + default_jitter)
     # Full covariance matrix
     else:
-        raise NotImplementedError
+
+        var = torch.transpose(var, 0, 2)
+        # Shape (..., N, N)
+        L = torch.linalg.cholesky(var + default_jitter * torch.eye(var.shape[-1]))
+        ret = torch.einsum("...nm,am...->an...", L, z)
+        return mean + ret

@@ -8,7 +8,7 @@ from time import process_time as timer
 
 sys.path.append(".")
 
-from src.dvip import DVIP_Base
+from src.dvip import DVIP_Base, IVAE
 from src.layers_init import init_layers_vae
 
 from utils.process_flags import manage_experiment_configuration
@@ -34,9 +34,10 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 # Create DVIP object
-dvip = DVIP_Base(
+dvip = IVAE(
     args.likelihood,
-    layers,
+    layers[0],
+    layers[1],
     len(train_dataset),
     bb_alpha=args.bb_alpha,
     num_samples=args.num_samples_train,
@@ -54,7 +55,7 @@ opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 dvip.num_samples = args.num_samples_train
 # Train the model
 start = timer()
-_ = fit(
+loss = fit(
     dvip,
     train_loader,
     opt,
@@ -65,28 +66,44 @@ _ = fit(
 )
 end = timer()
 
+
 dvip.print_variables()
 
 import matplotlib.pyplot as plt
 
-img = train_dataset.inputs[0]
-f, axis = plt.subplots(1,2) 
-axis[0].imshow(img.reshape(28, 28))
-#plt.show()
-pred = dvip.predict_y(torch.tensor(img, dtype = args.dtype,device = args.device).unsqueeze(0), 1)
-axis[1].imshow(pred[0].cpu().reshape(28,28).detach().numpy())
+plt.plot(loss[(2 * len(loss) // 3) :])
+plt.savefig("plots/ev_" + create_file_name(args) + ".pdf", format="pdf")
 
+
+n = 10
+imgs = train_dataset.inputs[0:n]
+f, axis = plt.subplots(n // 2, 4)
+# f.tight_layout()  # Or equivalently,  "plt.tight_layout()"
+for i in range(n):
+    axis[i % (n // 2)][2 * (i // (n // 2))].imshow(imgs[i].reshape(28, 28))
+    # plt.show()
+    pred = dvip.predict_y(
+        torch.tensor(imgs[i], dtype=args.dtype, device=args.device).unsqueeze(0), 1
+    )
+    pred = pred[0].cpu().reshape(28, 28).detach().numpy()
+    # pred = 1 / (1 + np.exp(-pred))
+    axis[i % (n // 2)][2 * (i // (n // 2)) + 1].imshow(pred)
+
+
+plt.savefig("plots/" + create_file_name(args) + ".pdf", format="pdf")
 
 # Set the number of test samples to generate
 dvip.num_samples = args.num_samples_test
 
 # Test the model
-train_metrics = score(dvip, train_test_loader, args.metrics, use_tqdm = True, device=args.device)
+# train_metrics = score(
+#     dvip, train_test_loader, args.metrics, use_tqdm=True, device=args.device
+# )
 test_metrics = score(dvip, test_loader, args.metrics, use_tqdm=True, device=args.device)
 
-print("TRAIN RESULTS: ")
-for k, v in train_metrics.items():
-    print("\t - {}: {}".format(k, v))
+# print("TRAIN RESULTS: ")
+# for k, v in train_metrics.items():
+#     print("\t - {}: {}".format(k, v))
 
 print("TEST RESULTS: ")
 for k, v in test_metrics.items():
@@ -96,7 +113,7 @@ for k, v in test_metrics.items():
 d = {
     **vars(args),
     **{"time": end - start},
-    **{k + "_train": v for k, v in train_metrics.items()},
+    # **{k + "_train": v for k, v in train_metrics.items()},
     **test_metrics,
 }
 
@@ -105,7 +122,3 @@ df.to_csv(
     path_or_buf="results/" + create_file_name(args) + ".csv",
     encoding="utf-8",
 )
-
-
-
-plt.show()

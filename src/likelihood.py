@@ -5,6 +5,8 @@ import torch
 from torch.nn.functional import one_hot
 from .quadrature import hermgauss, hermgaussquadrature
 
+from .utils import reparameterize
+
 
 class Likelihood(torch.nn.Module):
     def __init__(self, dtype=torch.float64, device=None):
@@ -247,7 +249,7 @@ class Gaussian(Likelihood):
     def logp(self, F, Y):
         """Computes the log likelihood of the targets Y under the predictions F,
         using the likelihood variance."""
-        return self.logdensity(Y, F, self.log_variance.exp())
+        return self.logdensity(F, self.log_variance.exp(), Y)
 
     def predict_mean_and_var(self, Fmu, Fvar):
         """Returns the predictive mean and variance using the likelihood distribution.
@@ -282,6 +284,81 @@ class Gaussian(Likelihood):
         logpdf = self.logdensity(Fmu, Fvar + variance / alpha, Y)
         logpdf = torch.logsumexp(logpdf, dim=0) + torch.log(C) - torch.log(S)
         return logpdf / alpha
+
+
+class QuadratureGaussian(Gaussian):
+    def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None):
+        """Gaussian Likelihood. Encapsulates the likelihood noise
+        as a parameter.
+
+        Arguments
+        ---------
+        log_variance : float of type self.dtype
+                       Initial value for the logarithm of the variance.
+        dtype : data-type
+                Type of the log-variance parameter.
+        device : torch device
+                 Device in which to store the parameter.
+
+        """
+        self.generator = torch.Generator(device)
+        self.generator.manual_seed(123)
+
+        self.num_gauss_hermite_points = 200
+        super().__init__(log_variance, dtype, device)
+
+    def forward(self, x):
+        z = torch.randn(
+            x.shape,
+            generator=self.generator,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        return reparameterize(x, torch.sqrt(torch.exp(self.log_variance)), z)
+
+    def variational_expectations(self, Fmu, Fvar, Y, alpha, func):
+        if Fvar.dim() == 3:
+            Fvar = torch.diagonal(Fvar, dim1=0, dim2=1).T
+
+        # logpdf = (
+        #     -0.5 * np.log(2 * np.pi)
+        #     - 0.5 * self.log_variance
+        #     - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
+        # )
+
+        # # print(logpdf)
+        # S = torch.tensor(Fmu.shape[0])
+
+        # variance = torch.exp(self.log_variance)
+        # # Proportionality constant
+        # C = (
+        #     torch.sqrt(2 * torch.pi * variance / alpha)
+        #     / torch.sqrt(2 * torch.pi * variance) ** alpha
+        # )
+
+        # logpdf = self.logdensity(Fmu, Fvar + variance / alpha, Y) + torch.log(C)
+        if alpha == 0:
+            logpdf = hermgaussquadrature(
+                lambda x, y: self.logp(func(x), y),
+                self.num_gauss_hermite_points,
+                Fmu,
+                Fvar,
+                Y,
+                self.dtype,
+                self.device,
+            )
+            return logpdf
+        pdf = hermgaussquadrature(
+            lambda x, y: torch.exp(alpha * self.logp(func(x), y)),
+            self.num_gauss_hermite_points,
+            Fmu,
+            Fvar,
+            Y,
+            self.dtype,
+            self.device,
+        )
+        logpdf = torch.log(pdf) / alpha
+        return logpdf
 
 
 class MultiClass(Likelihood):

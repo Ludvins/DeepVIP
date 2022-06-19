@@ -8,7 +8,7 @@ import itertools
 def hermgauss(n, dtype, device):
     """
     Return the locations and weights of GH quadrature.
-    
+
     Parameters:
     n : integer
         Number of Gauss-Hermite evaluation points.
@@ -54,9 +54,9 @@ def mvhermgauss(H, D, dtype, device):
 
 def hermgaussquadrature(f, num_gh, Fmu, Fvar, Y, dtype, device):
     """
-    Computes the quadrature of the given function f under the variational Gaussian 
+    Computes the quadrature of the given function f under the variational Gaussian
     distribution indicated with Fmu and Fvar.
-    
+
     Parameters
     ----------
     f : callable
@@ -71,27 +71,22 @@ def hermgaussquadrature(f, num_gh, Fmu, Fvar, Y, dtype, device):
              The device in which the computations are made.
     dtype : data-type
             The dtype of the layer's computations and weights.
-    
-    """
 
+    """
     # Shape (num hermite)
     xn, wn = hermgauss(num_gh, dtype, device)
-
     # Shape (1, num_hermite)
     gh_x = xn.reshape(1, -1)
     # Shape (N, num_hermite)
     Xall = gh_x * torch.sqrt(torch.clip(2.0 * Fvar, min=1e-10)) + Fmu
-
     # Shape (num_hermite, 1)
     gh_w = wn.reshape(-1, 1) / np.sqrt(np.pi)
-
     if Y is not None:
         # Shape( N, num_hermite )
         Y = torch.tile(Y, [1, num_gh])  # broadcast Y to match X
         feval = f(Xall, Y)
     else:
         feval = f(Xall)
-
     # Shape (N, num_hermite)
     feval = feval @ gh_w
     return feval
