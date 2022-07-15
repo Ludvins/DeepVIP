@@ -8,18 +8,15 @@ from time import process_time as timer
 
 sys.path.append(".")
 
-from src.dvip import DVIP_Base, TVIP
+from src.dvip import DVIP_Base
 from src.layers_init import init_layers
-from src.layers import TVIPLayer
-from src.likelihood import QuadratureGaussian
+
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit, score, predict
+from utils.pytorch_learning import fit, score
 from scripts.filename import create_file_name
-from src.generative_functions import *
 
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
@@ -27,47 +24,20 @@ train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
 )
 
 # Get VIP layers
-f = BayesianNN(
-    num_samples=args.regression_coeffs,
-    input_dim=train_dataset.input_dim,
-    structure=args.bnn_structure,
-    activation=args.activation,
-    output_dim=train_dataset.output_dim,
-    layer_model=args.bnn_layer,
-    dropout=args.dropout,
-    fix_random_noise=args.fix_prior_noise,
-    zero_mean_prior=args.zero_mean_prior,
-    device=args.device,
-    seed=args.seed,
-    dtype=args.dtype,
-)
-
-layer = TVIPLayer(
-    f,
-    num_regression_coeffs=args.regression_coeffs,
-    input_dim=train_dataset.input_dim,
-    output_dim=train_dataset.output_dim,
-    add_prior_regularization=args.prior_kl,
-    mean_function=None,
-    q_mu_initial_value=0,
-    log_layer_noise=-5,
-    q_sqrt_initial_value=1,
-    dtype=args.dtype,
-    device=args.device,
-)
+layers = init_layers(train_dataset.inputs, args.dataset.output_dim, **vars(args))
 
 # Initialize DataLoader
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-
 # Create DVIP object
-dvip = TVIP(
-    likelihood=args.likelihood,
-    layer=layer,
-    num_data=len(train_dataset),
+dvip = DVIP_Base(
+    args.likelihood,
+    layers,
+    len(train_dataset),
     bb_alpha=args.bb_alpha,
+    num_samples=args.num_samples_train,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
     dtype=args.dtype,
@@ -79,7 +49,7 @@ dvip.print_variables()
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
 # Set the number of training samples to generate
-dvip.num_samples = 10
+dvip.num_samples = 1
 # Train the model
 start = timer()
 loss = fit(
@@ -93,23 +63,14 @@ loss = fit(
 )
 end = timer()
 
-import matplotlib.pyplot as plt
-
-a = np.arange(len(loss) // 3, len(loss))
-plt.plot(a, loss[len(loss) // 3 :])
-plt.show()
-
-
-dvip.print_variables()
-
-dvip.num_samples = args.num_samples_test
+# Set the number of test samples to generate
+dvip.num_samples = 1
 
 # Test the model
 train_metrics = score(
     dvip, train_test_loader, args.metrics, use_tqdm=True, device=args.device
 )
 test_metrics = score(dvip, test_loader, args.metrics, use_tqdm=True, device=args.device)
-
 print("TRAIN RESULTS: ")
 for k, v in train_metrics.items():
     print("\t - {}: {}".format(k, v))
@@ -118,6 +79,11 @@ print("TEST RESULTS: ")
 for k, v in test_metrics.items():
     print("\t - {}: {}".format(k, v))
 
+import matplotlib.pyplot as plt
+
+a = np.arange(len(loss) // 3, len(loss))
+plt.plot(a, loss[len(loss) // 3 :])
+plt.show()
 
 d = {
     **vars(args),

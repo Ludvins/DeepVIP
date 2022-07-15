@@ -275,7 +275,7 @@ class DVIP_Base(torch.nn.Module):
             if return_prior_samples:
                 Fprior = torch.reshape(
                     results[2],
-                    [results[2].shape[0], S, N, D_out],
+                    [results[2].shape[0], S, N, *D_out],
                 )
                 Fpriors.append(Fprior)
 
@@ -488,92 +488,7 @@ class DVIP_Base(torch.nn.Module):
         print("\n---------------------------\n\n")
 
 
-class IVAE(DVIP_Base):
-    def __init__(
-        self,
-        likelihood,
-        encoder_layer,
-        decoder_layer,
-        num_data,
-        num_samples=1,
-        bb_alpha=0,
-        y_mean=0.0,
-        y_std=1.0,
-        device=None,
-        dtype=torch.float64,
-        seed=2147483647,
-    ):
-
-        super().__init__(
-            likelihood,
-            [encoder_layer, decoder_layer],
-            num_data,
-            num_samples,
-            bb_alpha,
-            y_mean,
-            y_std,
-            device,
-            dtype,
-            seed,
-        )
-
-    def KL(self, mu, S):
-        KL = -0.5 * np.sum([*mu.shape])
-
-        # Log of determinant of covariance matrix.
-        # Det(Sigma) = Det(q_sqrt q_sqrt^T) = Det(q_sqrt) Det(q_sqrt^T)
-        #            = prod(diag_s_sqrt)^2
-        KL -= 0.5 * torch.sum(torch.log(S))
-
-        # Trace term
-        KL += 0.5 * torch.sum(S)
-
-        # Mean term
-        KL += 0.5 * torch.sum(torch.square(mu))
-
-        return KL
-
-    def nelbo(self, X, y):
-        """
-        Computes the objective minimization function. When alpha is 0
-        this function equals the variational evidence lower bound.
-        Otherwise, Black-Box alpha inference is used.
-
-        Parameters
-        ----------
-        X : torch tensor of shape (batch_size, data_dim)
-            Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input, must be standardized.
-
-        Returns
-        -------
-        nelbo : float
-                Objective minimization function.
-        """
-        # Compute model predictions, shape [S, N, D]
-        _, F_means, F_vars = self.propagate(X, num_samples=self.num_samples)
-
-        # Compute variational expectation using Black-box alpha energy.
-        # Shape [N, D]
-        ve = self.likelihood.variational_expectations(
-            F_means[-1], F_vars[-1], y, alpha=self.bb_alpha
-        )
-
-        # Aggregate on data dimension
-        ve = torch.sum(ve)
-
-        # Scale loss term corresponding to minibatch size
-        scale = self.num_data
-        scale /= X.shape[0]
-
-        # Compute KL term
-        KL = torch.stack([layer.KL() for layer in self.vip_layers]).sum()
-        KL_z = self.KL(F_means[0], F_vars[0])
-        return -scale * ve + KL + KL_z
-
-
-class TVIP(torch.nn.Module):
+class TVIP(DVIP_Base):
     def __init__(
         self,
         likelihood,
@@ -586,261 +501,73 @@ class TVIP(torch.nn.Module):
         dtype=torch.float64,
         seed=2147483647,
     ):
-        super().__init__()
-        # Store data information
-        self.num_data = num_data
-        # Store Black-Box alpha value
-        self.bb_alpha = bb_alpha
-
-        # Store targets mean and std.
-        self.y_mean = torch.tensor(y_mean, device=device)
-        self.y_std = torch.tensor(y_std, device=device)
-
-        # Store likelihood and Variational Implicit layers
-        self.likelihood = likelihood
+        super().__init__(
+            likelihood,
+            [layer],
+            num_data,
+            num_samples=10,
+            bb_alpha=bb_alpha,
+            y_mean=y_mean,
+            y_std=y_std,
+            device=device,
+            dtype=dtype,
+            seed=seed,
+        )
         self.layer = layer
 
-        self.generator = torch.Generator(device)
-        self.generator.manual_seed(seed)
+    def propagate(self, X, num_samples=1, return_prior_samples=False):
+        F, prior = self.layer(X, num_samples)
 
-        # Set device and data type (precision)
-        self.device = device
-        self.dtype = dtype
-
-        self.flow = InputDependentFlow(3, layer.input_dim, device, dtype, seed)
-
-    def propagate(self, X, return_prior_samples=False):
-        results = self.layer(X, return_prior_samples, full_cov=True)
-        # Reshape predictions to the original shape
-        Fmean = results[0]
-        Fvar = results[1]
         if return_prior_samples:
-            prior_samples = results[2]
+            return F, torch.zeros_like(F), prior
 
-            return Fmean, Fvar, prior_samples
+        return F, torch.zeros_like(F)
 
-        return Fmean, Fvar
-
-    def nelbo(self, X, y):
+    def predict_f(self, predict_at, num_samples):
         """
-        Computes the objective minimization function. When alpha is 0
-        this function equals the variational evidence lower bound.
-        Otherwise, Black-Box alpha inference is used.
-
-        Parameters
-        ----------
-        X : torch tensor of shape (batch_size, data_dim)
-            Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input, must be standardized.
-
-        Returns
-        -------
-        nelbo : float
-                Objective minimization function.
-        """
-        # Compute model predictions, shape [S, N, D]
-        F_means, F_vars = self.propagate(X)
-
-        # Compute variational expectation using Black-box alpha energy.
-        # Shape [N, D]
-        ve = self.likelihood.variational_expectations(
-            F_means, F_vars, y, alpha=self.bb_alpha, func=lambda f: self.flow(f, X)
-        )
-
-        # Aggregate on data dimension
-        ve = torch.sum(ve)
-
-        # Scale loss term corresponding to minibatch size
-        scale = self.num_data
-        scale /= X.shape[0]
-
-        # Compute KL term
-        KL = self.layer.KL()
-        return -scale * ve + KL
-
-    def forward(self, predict_at, num_samples=1):
-        """
-        Computes the predicted labels for the given input.
+        Returns the predicted mean and variance at the last layer.
 
         Parameters
         ----------
         predict_at : torch tensor of shape (batch_size, data_dim)
                      Contains the input features.
-
+        num_samples : int
+                      Number of MonteCarlo resamples to propagate.
         Returns
         -------
-        The predicted mean and standard deviation.
+        Fmeans : torch tensor of shape (num_layers, batch_size, output_dim)
+                 Contains the mean value of the predictions at
+                 each layer.
+        Fvars : torch tensor of shape (num_layers, batch_size, output_dim)
+                Contains the standard deviation of the predictions at
+                each layer.
         """
-        # Cast types if needed.
-        if self.dtype != predict_at.dtype:
-            predict_at = predict_at.to(self.dtype)
 
-        Fmean, Fvar = self.propagate(predict_at)
-
-        z = torch.randn(
-            [num_samples, *Fmean.shape],
-            generator=self.generator,
-            dtype=self.dtype,
-            device=self.device,
+        Fmeans, Fvars = self.propagate(
+            predict_at,
+            num_samples,
         )
-        F = reparameterize(Fmean, Fvar, z, full_cov=True)
-        F = self.flow(F, predict_at)
-        # Return predictions scaled to the original scale.
-        return (
-            F * self.y_std + self.y_mean,
-            Fmean * self.y_std + self.y_mean,
-            Fvar * self.y_std ** 2,
-        )
+        return Fmeans, Fvars
 
-    def train_step(self, optimizer, X, y):
+    def get_prior_samples(self, X):
         """
-        Defines the training step for the DVIP model using a simple optimizer.
-        This method illustrates a standard training step. If more complex
-        operations are needed, such as optimizers with double steps,
-        create your own training step, calling this one is not compulsory.
+        Returns the prior samples of the given inputs using 1 MonteCarlo
+        resample.
 
-        Parameters
-        ----------
-        optimizer : torch.optim
-                    The considered optimization algorithm.
-        X : torch tensor of shape (batch_size, data_dim)
-            Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input, must be standardized.
-
-        Returns
-        -------
-        loss : float
-               The nelbo of the model at the current state for the
-               given inputs.
-        """
-
-        # If targets are unidimensional,
-        # ensure there is a second dimension (N, 1)
-        if y.ndim == 1:
-            y = y.unsqueeze(-1)
-
-        # Transform inputs and largets to the model'd dtype
-        if self.dtype != X.dtype:
-            X = X.to(self.dtype)
-        if self.dtype != y.dtype:
-            y = y.to(self.dtype)
-
-        # Clear gradients
-        optimizer.zero_grad()
-
-        # Compute loss
-        loss = self.nelbo(X, y)
-        # Create backpropagation graph
-        loss.backward()
-
-        # Make optimization step
-        optimizer.step()
-
-        return loss
-
-    def test_step(self, X, y):
-        """
-        Defines the test step for the DVIP model.
         Parameters
         ----------
         X : torch tensor of shape (batch_size, data_dim)
             Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input.
+
         Returns
         -------
-        loss : float
-               The nelbo of the model at the current state for the given inputs
+        Fprior : torch tensor of shape (num_layers, S, batch_size, num_outputs)
+                 Contains the S prior samples for each layer at each data
+                 point.
         """
-
-        # In case targets are one-dimensional and flattened, add a final dimension.
-        if y.ndim == 1:
-            y = y.unsqueeze(-1)
-
-        # Cast types if needed.
-        if self.dtype != X.dtype:
-            X = X.to(self.dtype)
-        if self.dtype != y.dtype:
-            y = y.to(self.dtype)
-
-        # Compute predictions
-        with torch.no_grad():
-            mean_pred, std_pred = self(X)  # Forward pass
-
-            # Temporarily change the num data variable so that the
-            # scale of the likelihood is correctly computed on the
-            # test dataset.
-            num_data = self.num_data
-            self.num_data = X.shape[0]
-            # Compute the loss with scaled data
-            loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
-            self.num_data = num_data
-
-        return loss, mean_pred, std_pred
-
-    def print_variables(self):
-        """Prints the model variables in a prettier format."""
-        import numpy as np
-
-        print("\n---- MODEL PARAMETERS ----")
-        np.set_printoptions(threshold=3, edgeitems=2)
-        sections = []
-        for name, param in self.named_parameters():
-            name = name.split(".")
-            for i in range(len(name) - 1):
-
-                if name[i] not in sections:
-                    print("\t" * i, name[i].upper())
-                    sections = name[: i + 1]
-
-            padding = "\t" * (len(name) - 1)
-            print(
-                padding,
-                "{}: ({})".format(name[-1], str(list(param.data.size()))[1:-1]),
-            )
-            print(
-                padding + " " * (len(name[-1]) + 2),
-                param.data.detach().cpu().numpy().flatten(),
-            )
-
-        print("\n---------------------------\n\n")
-
-
-class TVIP2(torch.nn.Module):
-    def __init__(
-        self,
-        likelihood,
-        layer,
-        num_data,
-        bb_alpha=0,
-        y_mean=0.0,
-        y_std=1.0,
-        device=None,
-        dtype=torch.float64,
-        seed=2147483647,
-    ):
-        super().__init__()
-        # Store data information
-        self.num_data = num_data
-        # Store Black-Box alpha value
-        self.bb_alpha = bb_alpha
-
-        # Store targets mean and std.
-        self.y_mean = torch.tensor(y_mean, device=device)
-        self.y_std = torch.tensor(y_std, device=device)
-
-        # Store likelihood and Variational Implicit layers
-        self.likelihood = likelihood
-        self.layer = layer
-
-        self.generator = torch.Generator(device)
-        self.generator.manual_seed(seed)
-
-        # Set device and data type (precision)
-        self.device = device
-        self.dtype = dtype
+        _, _, Fpriors = self.propagate(X, num_samples=1, return_prior_samples=True)
+        # Scale data
+        return Fpriors * self.y_std + self.y_mean
 
     def nelbo(self, X, y):
         """
@@ -861,8 +588,7 @@ class TVIP2(torch.nn.Module):
                 Objective minimization function.
         """
         # Compute model predictions, shape [20, N, D_out]
-        F = self.layer(X, 10)
-
+        F, _ = self.layer(X, self.num_samples)
         # Compute variational expectation using Black-box alpha energy.
         # Shape [20, N]
         logpdf = self.likelihood.logp(F, y)
@@ -883,135 +609,3 @@ class TVIP2(torch.nn.Module):
         # Compute KL term
         KL = self.layer.KL()
         return -scale * ve + KL
-
-    def forward(self, predict_at, num_samples=1):
-        """
-        Computes the predicted labels for the given input.
-
-        Parameters
-        ----------
-        predict_at : torch tensor of shape (batch_size, data_dim)
-                     Contains the input features.
-
-        Returns
-        -------
-        The predicted mean and standard deviation.
-        """
-
-        F = self.layer(predict_at, 20)
-
-        return F * self.y_std + self.y_mean
-
-    def train_step(self, optimizer, X, y):
-        """
-        Defines the training step for the DVIP model using a simple optimizer.
-        This method illustrates a standard training step. If more complex
-        operations are needed, such as optimizers with double steps,
-        create your own training step, calling this one is not compulsory.
-
-        Parameters
-        ----------
-        optimizer : torch.optim
-                    The considered optimization algorithm.
-        X : torch tensor of shape (batch_size, data_dim)
-            Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input, must be standardized.
-
-        Returns
-        -------
-        loss : float
-               The nelbo of the model at the current state for the
-               given inputs.
-        """
-
-        # If targets are unidimensional,
-        # ensure there is a second dimension (N, 1)
-        if y.ndim == 1:
-            y = y.unsqueeze(-1)
-
-        # Transform inputs and largets to the model'd dtype
-        if self.dtype != X.dtype:
-            X = X.to(self.dtype)
-        if self.dtype != y.dtype:
-            y = y.to(self.dtype)
-
-        # Clear gradients
-        optimizer.zero_grad()
-
-        # Compute loss
-        loss = self.nelbo(X, y)
-        # Create backpropagation graph
-        loss.backward()
-
-        # Make optimization step
-        optimizer.step()
-
-        return loss
-
-    def test_step(self, X, y):
-        """
-        Defines the test step for the DVIP model.
-        Parameters
-        ----------
-        X : torch tensor of shape (batch_size, data_dim)
-            Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input.
-        Returns
-        -------
-        loss : float
-               The nelbo of the model at the current state for the given inputs
-        """
-
-        # In case targets are one-dimensional and flattened, add a final dimension.
-        if y.ndim == 1:
-            y = y.unsqueeze(-1)
-
-        # Cast types if needed.
-        if self.dtype != X.dtype:
-            X = X.to(self.dtype)
-        if self.dtype != y.dtype:
-            y = y.to(self.dtype)
-
-        # Compute predictions
-        with torch.no_grad():
-            mean_pred, std_pred = self(X)  # Forward pass
-
-            # Temporarily change the num data variable so that the
-            # scale of the likelihood is correctly computed on the
-            # test dataset.
-            num_data = self.num_data
-            self.num_data = X.shape[0]
-            # Compute the loss with scaled data
-            loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
-            self.num_data = num_data
-
-        return loss, mean_pred, std_pred
-
-    def print_variables(self):
-        """Prints the model variables in a prettier format."""
-        import numpy as np
-
-        print("\n---- MODEL PARAMETERS ----")
-        np.set_printoptions(threshold=3, edgeitems=2)
-        sections = []
-        for name, param in self.named_parameters():
-            name = name.split(".")
-            for i in range(len(name) - 1):
-
-                if name[i] not in sections:
-                    print("\t" * i, name[i].upper())
-                    sections = name[: i + 1]
-
-            padding = "\t" * (len(name) - 1)
-            print(
-                padding,
-                "{}: ({})".format(name[-1], str(list(param.data.size()))[1:-1]),
-            )
-            print(
-                padding + " " * (len(name[-1]) + 2),
-                param.data.detach().cpu().numpy().flatten(),
-            )
-
-        print("\n---------------------------\n\n")

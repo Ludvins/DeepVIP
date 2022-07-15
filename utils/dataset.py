@@ -159,6 +159,112 @@ class Synthetic_Dataset(DVIPDataset):
         self.targets = targets[..., np.newaxis]
 
 
+class Synthetic_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+
+        rng = np.random.default_rng(seed=0)
+
+        def f(x):
+            return np.cos(1 * x + 2) / (np.abs(x) + 1)
+
+        # inputs = rng.standard_normal(300)
+        inputs = np.linspace(0.0, 0.2, 50)
+        inputs = np.concatenate([inputs, np.linspace(0.8, 1, 50)], axis=-1)
+        targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.001
+
+        test_inputs = np.linspace(0.0, 1.0, 300)
+        test_targets = f(test_inputs) + rng.standard_normal(test_inputs.shape) * 0.001
+
+        targets = targets[..., np.newaxis]
+        inputs = inputs[..., np.newaxis]
+        test_inputs = test_inputs[..., np.newaxis]
+        test_targets = test_targets[..., np.newaxis]
+
+        self.train = Training_Dataset(
+            inputs,
+            targets,
+            normalize_targets=True,
+            normalize_inputs=True,
+        )
+
+        self.train_test = Test_Dataset(
+            inputs,
+            targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_inputs,
+            test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return 100
+
+    def get_split(self, *args):
+        return self.train, self.train_test, self.test
+
+    def len_train(self, test_size):
+        return 100
+
+
+class Synthetic_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+
+        rng = np.random.default_rng(seed=0)
+
+        def f(x):
+            return x ** 3
+
+        # inputs = rng.standard_normal(300)
+        inputs = np.linspace(-1, -0.7, 50)
+        inputs = np.concatenate([inputs, np.linspace(0.7, 1, 50)], axis=-1)
+        targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.05
+
+        test_inputs = np.linspace(-1, 1.0, 300)
+        test_targets = f(test_inputs) + rng.standard_normal(test_inputs.shape) * 0.05
+
+        targets = targets[..., np.newaxis]
+        inputs = inputs[..., np.newaxis]
+        test_inputs = test_inputs[..., np.newaxis]
+        test_targets = test_targets[..., np.newaxis]
+
+        self.train = Training_Dataset(
+            inputs,
+            targets,
+            normalize_targets=True,
+            normalize_inputs=True,
+        )
+
+        self.train_test = Test_Dataset(
+            inputs,
+            targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_inputs,
+            test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return 100
+
+    def get_split(self, *args):
+        return self.train, self.train_test, self.test
+
+    def len_train(self, test_size):
+        return 100
+
+
 class Bimodal_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
@@ -763,6 +869,7 @@ def get_dataset(dataset_name):
     d = {
         "SPGP": SPGP_Dataset,
         "bimodal": Bimodal_Dataset,
+        "synthetic": Synthetic_Dataset,
         "heterocedastic": Heterocedastic_Dataset,
         "boston": Boston_Dataset,
         "energy": Energy_Dataset,

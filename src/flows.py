@@ -44,42 +44,22 @@ class InputDependentFlow(Flow):
         self.input_dim = input_dim
         super().__init__(device, dtype, seed)
 
-        self.nn = torch.nn.Sequential(
-            torch.nn.Linear(input_dim, 50, dtype=dtype),
-            torch.nn.Tanh(),
-            torch.nn.Linear(50, 50, dtype=dtype),
-            torch.nn.Tanh(),
-            torch.nn.Linear(50, 50, dtype=dtype),
-            torch.nn.Tanh(),
-            torch.nn.Linear(50, 4 * self.depth, dtype=dtype),
+        self.params = torch.nn.Parameter(
+            torch.zeros(self.depth, 4, dtype=self.dtype, device=self.device)
         )
 
-        def init_weights(m):
-            if isinstance(m, torch.nn.Linear):
-                m.weight.data.fill_(0)
-                m.bias.data.fill_(0)
-
-        # self.nn[4].weight.data.fill_(0)
-        # self.nn[4].bias.data.fill_(0)
-        # self.nn.apply(init_weights)
-
-    def forward(self, f, x):
-        need_squeeze = False
-        if x.shape[-1] != self.input_dim and self.input_dim == 1:
-            x = x.unsqueeze(-1)
-            need_squeeze = True
-
-        params = self.nn(x)
-        params = params.reshape((self.depth, 4, *x.shape))
-        for param in params:
+    def forward(self, a):
+        f = a
+        for param in self.params:
             f = (1 - param[0]) * torch.sinh(
                 (1 - param[2]) * torch.arcsinh(f) - param[3]
             ) + param[1]
             # f = f * torch.exp(param[0]) + param[1]
 
-        if need_squeeze:
-            f = f.squeeze(-1)
         return f
+
+    def KL(self):
+        return torch.sum(self.params ** 2)
 
 
 class InputDependentFlow2(Flow):
@@ -87,27 +67,16 @@ class InputDependentFlow2(Flow):
         self.depth = depth
         self.input_dim = input_dim
         super().__init__(device, dtype, seed)
-
         self.nn = torch.nn.Sequential(
+            # torch.nn.Dropout(p=0.5, inplace=True),
             torch.nn.Linear(input_dim, 10, dtype=dtype),
-            torch.nn.Tanh(),
+            torch.nn.ReLU(),
+            # torch.nn.Dropout(p=0.1),
+            torch.nn.Linear(10, 10, dtype=dtype),
+            torch.nn.ReLU(),
+            # torch.nn.Dropout(p=0.1),
             torch.nn.Linear(10, 4 * self.depth, dtype=dtype),
         )
-
-        # self.nn = BayesianNN(
-        #     [50],
-        #     torch.tanh,
-        #     1,
-        #     input_dim,
-        #     4 * self.depth,
-        #     BayesLinear,
-        #     fix_random_noise=False,
-        #     device=device,
-        #     dtype=dtype,
-        # )
-        # for layer in self.nn.layers:
-        #     layer.weight_log_sigma = torch.nn.Parameter(layer.weight_log_sigma - 5)
-        #     layer.bias_log_sigma = torch.nn.Parameter(layer.bias_log_sigma - 5)
 
         def init_weights(m):
             if isinstance(m, torch.nn.Linear):
@@ -120,7 +89,8 @@ class InputDependentFlow2(Flow):
 
     def forward(self, a):
         params = self.nn(a)
-        params = params.reshape((self.depth, 4, *a.shape))
+        params = params.reshape((a.shape[0], self.depth, 4, 1))
+        params = torch.permute(params, (1, 2, 0, 3))
         f = a
         for param in params:
             f = (1 - param[0]) * torch.sinh(
@@ -132,8 +102,95 @@ class InputDependentFlow2(Flow):
 
     def KL(self):
         l2 = 0
-        l2 += torch.mean(self.nn[0].weight ** 2)
-        l2 += torch.mean(self.nn[0].bias ** 2)
-        l2 += torch.mean(self.nn[2].weight ** 2)
-        l2 += torch.mean(self.nn[2].bias ** 2)
+        # l2 += torch.sum(self.nn[-3].weight ** 2)
+        # l2 += torch.sum(self.nn[-3].bias ** 2)
+        l2 += torch.sum(self.nn[-1].weight ** 2)
+        l2 += torch.sum(self.nn[-1].bias ** 2)
         return l2
+
+
+class InputDependentFlow3(InputDependentFlow2):
+    def __init__(self, depth, input_dim, device, dtype, seed):
+        super().__init__(depth, input_dim, device, dtype, seed)
+
+        self.nn = BayesianNN(
+            [10],
+            torch.nn.ReLU(),
+            1,
+            input_dim,
+            4 * depth,
+            BayesLinear,
+            fix_random_noise=False,
+        )
+
+        for l in self.nn.layers:
+
+            l.weight_log_sigma = torch.nn.Parameter(-8 + l.weight_log_sigma)
+            l.bias_log_sigma = torch.nn.Parameter(-8 + l.bias_log_sigma)
+
+    def forward(self, a):
+        params = self.nn(a)[0]
+        params = params.reshape((a.shape[0], self.depth, 4, 1))
+        params = torch.permute(params, (1, 2, 0, 3))
+        f = a
+        for param in params:
+            f = (1 - param[0]) * torch.sinh(
+                (1 - param[2]) * torch.arcsinh(f) - param[3]
+            ) + param[1]
+            # f = f * torch.exp(param[0]) + param[1]
+
+        return f
+
+    def KL(self):
+        l2 = 0
+        return l2
+
+
+class CouplingLayer(torch.nn.Module):
+    def __init__(self, input_dim, device, dtype):
+        super().__init__()
+        self.device = device
+        self.dtype = dtype
+        self.input_dim = input_dim
+
+        self.nn = torch.nn.Sequential(
+            torch.nn.Linear(input_dim // 2, 10, dtype=dtype),
+            torch.nn.GELU(),
+            torch.nn.Dropout(0.5),
+            torch.nn.Linear(10, input_dim, dtype=dtype),
+        )
+        self.nn[-1].weight.data.fill_(0)
+        self.nn[-1].bias.data.fill_(0)
+
+    def forward(self, a):
+        z1 = a[:, : self.input_dim // 2]
+        z2 = a[:, self.input_dim // 2 :]
+        nn = self.nn(z1)
+        mu = nn[:, : self.input_dim // 2]
+        sigma = nn[:, self.input_dim // 2 :]
+        z2 = z2 * torch.exp(sigma) + mu
+
+        return torch.cat([z1, z2], dim=1)
+
+
+class CouplingFlow(Flow):
+    def __init__(self, depth, input_dim, device, dtype, seed):
+        self.depth = depth
+        self.input_dim = input_dim
+        super().__init__(device, dtype, seed)
+
+        biyections = []
+
+        for _ in range(depth):
+            biyections.append(CouplingLayer(input_dim, device, dtype))
+
+        self.biyections = torch.nn.ModuleList(biyections)
+
+    def forward(self, a):
+        for b in self.biyections:
+            a = b(a)
+            a = a.flip(-1)
+        return a
+
+    def KL(self):
+        return 0

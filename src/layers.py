@@ -319,7 +319,7 @@ class TVIPLayer(VIPLayer):
         self.generator = torch.Generator(device)
         self.generator.manual_seed(000)
 
-        self.flow = InputDependentFlow2(1, self.output_dim, device, dtype, seed=0)
+        self.flow = CouplingFlow(1, self.num_coeffs, device, dtype, seed=0)
 
     def forward(self, x, S):
         # Let S = num_coeffs, D = output_dim and N = num_samples
@@ -340,21 +340,19 @@ class TVIPLayer(VIPLayer):
         L[li, lj] = self.q_sqrt_tri
 
         coeffs = self.q_mu + torch.einsum("...sd, sad->...ad", z, L)
-        a = self.flow(coeffs.reshape(-1, self.output_dim)).reshape(
-            S, self.num_coeffs, self.output_dim
-        )
+        coeffs = self.flow(coeffs.reshape(S, -1))
+        coeffs = coeffs.reshape(S, self.num_coeffs, self.output_dim)
         f = self.generative_function(x)
+        return torch.einsum("snd, asd->and", f, coeffs), f
 
-        m = torch.mean(f, dim=0, keepdims=True)
+        # m = torch.mean(f, dim=0, keepdims=True)
 
         # Compute regresion function, shape (S , N, ...)
-        phi = (f - m) / torch.sqrt(torch.tensor(self.num_coeffs - 1).type(self.dtype))
+        # phi = (f - m) / torch.sqrt(torch.tensor(self.num_coeffs - 1).type(self.dtype))
         # Compute mean value as m + q_mu^T phi per point and output dim
         # q_mu has shape (S, D)
         # phi has shape (S, N, 1)
-        return m.squeeze(axis=0) + torch.einsum("sn...,as...->an...", phi, a)
-
-        return torch.einsum("snd, asd->and", f, a)
+        # return m.squeeze(axis=0) + torch.einsum("sn...,as...->an...", phi, a), f
 
     def get_samples(self, S):
         z = torch.randn(
@@ -373,10 +371,10 @@ class TVIPLayer(VIPLayer):
         L[li, lj] = self.q_sqrt_tri
 
         coeffs = self.q_mu + torch.einsum("...sd, sad->...ad", z, L)
-        a = self.flow(coeffs.reshape(-1, self.output_dim)).reshape(
+        a = self.flow(coeffs.reshape(S, -1)).reshape(
             S, self.num_coeffs, self.output_dim
         )
         return coeffs, a
 
     def KL(self):
-        return super().KL()  # + self.flow.KL()
+        return super().KL() + self.flow.KL()

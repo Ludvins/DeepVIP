@@ -8,7 +8,7 @@ from time import process_time as timer
 
 sys.path.append(".")
 
-from src.dvip import DVIP_Base, IVAE, TVIP2
+from src.dvip import DVIP_Base, TVIP
 from src.layers_init import init_layers
 from src.layers import TVIPLayer
 from src.likelihood import QuadratureGaussian
@@ -26,8 +26,6 @@ torch.manual_seed(args.seed)
 train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
 )
-
-args.likelihood = QuadratureGaussian()
 
 # Get VIP layers
 f = BayesianNN(
@@ -66,7 +64,7 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
 # Create DVIP object
-dvip = TVIP2(
+dvip = TVIP(
     likelihood=args.likelihood,
     layer=layer,
     num_data=len(train_dataset),
@@ -102,29 +100,60 @@ dvip.print_variables()
 import matplotlib.pyplot as plt
 
 plt.figure(figsize=(16, 6))
-ax1 = plt.subplot(1, 2, 1)
-ax2 = plt.subplot(1, 2, 2)
+ax1 = plt.subplot(1, 3, 1)
+ax2 = plt.subplot(1, 3, 2)
+ax3 = plt.subplot(1, 3, 3)
 # ax5 = plt.subplot(3, 1, 3)
 
 x = train_dataset.inputs
 y = train_dataset.targets * train_dataset.targets_std + train_dataset.targets_mean
-ax1.scatter(train_dataset.inputs, y, label="Training dataset", s=3)
+ax1.scatter(train_dataset.inputs, y, label="Training dataset", s=5)
+x = test_dataset.inputs
+y = test_dataset.targets
+ax1.scatter(test_dataset.inputs, y, label="Test dataset", s=5)
+
 ylims = ax1.get_ylim()
 
-F = dvip(torch.tensor(train_dataset.inputs, device=args.device), 100)
-print(F.shape)
+X = torch.tensor(test_dataset.inputs, device=args.device)
+F, std = dvip.predict_y(X, 100)
+
 
 F = F.squeeze().cpu().detach().numpy()
+std = std.squeeze().cpu().detach().numpy()
+sort = np.argsort(test_dataset.inputs.flatten())
 
-sort = np.argsort(train_dataset.inputs.flatten())
-ax2.plot(train_dataset.inputs.flatten()[sort], F.T[sort][:, 1:], alpha=0.5)
-ax2.plot(
-    train_dataset.inputs.flatten()[sort],
+for f, s in zip(F, std):
+    ax2.plot(
+        test_dataset.inputs.flatten()[sort],
+        f[sort],
+    )
+    ax2.fill_between(
+        test_dataset.inputs.flatten()[sort],
+        f[sort] - 2 * s[sort],
+        f[sort] + 2 * s[sort],
+        alpha=0.1,
+    )
+
+#     ax2.plot
+# ax2.plot(test_dataset.inputs.flatten()[sort], F.T[sort][:, 1:], alpha=0.5)
+# ax2.plot(
+#     test_dataset.inputs.flatten()[sort],
+#     F.T[sort][:, 0],
+#     label=r"$Q(\mathbf{f})$ samples",
+# )
+
+F = dvip.get_prior_samples(X)
+
+F = F.squeeze().cpu().detach().numpy()
+ax3.plot(test_dataset.inputs.flatten()[sort], F.T[sort][:, 1:], alpha=0.5)
+ax3.plot(
+    test_dataset.inputs.flatten()[sort],
     F.T[sort][:, 0],
-    label=r"$Q(\mathbf{f})$ samples",
+    label=r"$P(\mathbf{f})$ samples",
 )
-ax1.legend()
 
+ax1.legend()
+ax3.legend()
 ax2.legend()
 plt.tight_layout()
 plt.savefig("flow_on_a2.pdf")
