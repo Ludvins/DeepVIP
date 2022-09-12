@@ -104,6 +104,12 @@ def get_parser():
         help="Number of Monte Carlo samples of the posterior to use during inference",
     )
     parser.add_argument(
+        "--n_coupling",
+        type=int,
+        default=5,
+    )
+
+    parser.add_argument(
         "--device",
         type=str,
         default="cpu",

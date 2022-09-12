@@ -109,26 +109,22 @@ class InputDependentFlow2(Flow):
         return l2
 
 
-class InputDependentFlow3(InputDependentFlow2):
+class SAL(InputDependentFlow2):
     def __init__(self, depth, input_dim, device, dtype, seed):
         super().__init__(depth, input_dim, device, dtype, seed)
 
-        self.nn = BayesianNN(
-            [10],
-            torch.nn.ReLU(),
-            1,
-            input_dim,
-            4 * depth,
-            BayesLinear,
-            fix_random_noise=False,
+        self.nn = torch.nn.Sequential(
+            torch.nn.Linear(input_dim // 2, 50, dtype=dtype),
+            # torch.nn.Tanh(),
+            # torch.nn.Linear(100, 100, dtype=dtype),
+            torch.nn.GELU(),
+            torch.nn.Linear(50, 4 * depth, dtype=dtype),
         )
-
-        for l in self.nn.layers:
-
-            l.weight_log_sigma = torch.nn.Parameter(-8 + l.weight_log_sigma)
-            l.bias_log_sigma = torch.nn.Parameter(-8 + l.bias_log_sigma)
+        self.nn[-1].weight.data.fill_(0)
+        self.nn[-1].bias.data.fill_(0)
 
     def forward(self, a):
+        print(a.shape)
         params = self.nn(a)[0]
         params = params.reshape((a.shape[0], self.depth, 4, 1))
         params = torch.permute(params, (1, 2, 0, 3))
@@ -154,10 +150,9 @@ class CouplingLayer(torch.nn.Module):
         self.input_dim = input_dim
 
         self.nn = torch.nn.Sequential(
-            torch.nn.Linear(input_dim // 2, 10, dtype=dtype),
-            torch.nn.GELU(),
-            torch.nn.Dropout(0.5),
-            torch.nn.Linear(10, input_dim, dtype=dtype),
+            torch.nn.Linear(input_dim // 2, 50, dtype=dtype),
+            torch.nn.Tanh(),
+            torch.nn.Linear(50, input_dim, dtype=dtype),
         )
         self.nn[-1].weight.data.fill_(0)
         self.nn[-1].bias.data.fill_(0)
@@ -165,12 +160,13 @@ class CouplingLayer(torch.nn.Module):
     def forward(self, a):
         z1 = a[:, : self.input_dim // 2]
         z2 = a[:, self.input_dim // 2 :]
-        nn = self.nn(z1)
+        nn = self.nn(z1)  # [0]
         mu = nn[:, : self.input_dim // 2]
         sigma = nn[:, self.input_dim // 2 :]
         z2 = z2 * torch.exp(sigma) + mu
 
-        return torch.cat([z1, z2], dim=1)
+        ldj = torch.sum(sigma, axis=1)
+        return torch.cat([z1, z2], dim=1), ldj
 
 
 class CouplingFlow(Flow):
@@ -179,6 +175,8 @@ class CouplingFlow(Flow):
         self.input_dim = input_dim
         super().__init__(device, dtype, seed)
 
+        self.generator = torch.Generator(device)
+        self.generator.manual_seed(000)
         biyections = []
 
         for _ in range(depth):
@@ -187,10 +185,9 @@ class CouplingFlow(Flow):
         self.biyections = torch.nn.ModuleList(biyections)
 
     def forward(self, a):
+        LDJ = 0
         for b in self.biyections:
-            a = b(a)
+            a, ldj = b(a)
             a = a.flip(-1)
-        return a
-
-    def KL(self):
-        return 0
+            LDJ += ldj
+        return a, -LDJ

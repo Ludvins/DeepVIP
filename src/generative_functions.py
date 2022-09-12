@@ -51,6 +51,7 @@ class GenerativeFunction(torch.nn.Module):
             param.requires_grad = False
 
     def defreeze_parameters(self):
+        print("asdadadadasd")
         """Set the model parameters as trainable."""
         for param in self.parameters():
             param.requires_grad = True
@@ -115,6 +116,7 @@ class BayesLinear(GenerativeFunction):
         # If the BNN has zero mean, no parameters are considered for the
         # mean values the weights and bias variable
 
+        # input_dim = 1
         if zero_mean_prior:
             self.weight_mu = 0
             self.bias_mu = 0
@@ -134,7 +136,6 @@ class BayesLinear(GenerativeFunction):
         )
 
         # Reset the generator's seed if fixed noise.
-        self.gaussian_sampler.reset_seed()
         if self.fix_random_noise:
             self.noise = self.get_noise(first_call=True)
 
@@ -149,7 +150,6 @@ class BayesLinear(GenerativeFunction):
             # Generate Gaussian values
             z_w = self.gaussian_sampler(z_w_shape)
             z_b = self.gaussian_sampler(z_b_shape)
-
             return (z_w, z_b)
 
     def forward(self, inputs):
@@ -165,9 +165,6 @@ class BayesLinear(GenerativeFunction):
         """
 
         # Check the given input is valid
-
-        if inputs.shape[-1] != self.input_dim:
-            raise RuntimeError("Input shape does not match stored data dimension")
 
         # Generate Gaussian values
         z_w, z_b = self.get_noise()
@@ -384,6 +381,7 @@ class BayesianNN(GenerativeFunction):
             inputs.unsqueeze(0),
             (self.num_samples, *np.ones(inputs.ndim, dtype=int)),
         )
+        x = self.dropout(x)
 
         for layer in self.layers[:-1]:
             # Apply BNN layer
@@ -401,6 +399,133 @@ class BayesianNN(GenerativeFunction):
         """Computes the Kl divergence of the model as the addition of the
         KL divergences of its sub-models."""
         return torch.stack([layer.KL() for layer in self.layers]).sum()
+
+
+class Constant(torch.nn.Module):
+    def __init__(self, seed, device, dtype):
+        super().__init__()
+        self.seed = seed
+        self.dtype = dtype
+        self.generator = torch.Generator()
+        self.generator.manual_seed(self.seed)
+
+        n = torch.poisson(3 * torch.ones(1), generator=self.generator)
+        n = n.to(torch.int)
+        self.locations = torch.sort(
+            torch.cat(
+                [
+                    torch.rand(n, generator=self.generator, dtype=self.dtype),
+                    torch.tensor([0.0, 1.0]),
+                ]
+            )
+        )[0].reshape(-1, 1)
+        self.values = torch.rand(
+            size=[n + 2], generator=self.generator, dtype=self.dtype
+        ).reshape(-1, 1)
+        self.device = device
+
+    def forward(self, x):
+        a = (x.reshape(-1, 1) > self.locations.reshape(1, -1)).sum(axis=1) - 1
+        return self.values[a]
+
+
+class Linear(torch.nn.Module):
+    def __init__(self, seed, device, dtype):
+        super().__init__()
+        self.seed = seed
+        self.dtype = dtype
+        self.generator = torch.Generator()
+        self.generator.manual_seed(self.seed)
+
+        n = torch.poisson(3 * torch.ones(1), generator=self.generator)
+        n = n.to(torch.int)
+        self.locations = torch.sort(
+            torch.cat(
+                [
+                    torch.rand(n, generator=self.generator, dtype=self.dtype),
+                    torch.tensor([0.0, 1.0]),
+                ]
+            )
+        )[0].reshape(-1, 1)
+        self.values = torch.rand(
+            size=[n + 2], generator=self.generator, dtype=self.dtype
+        ).reshape(-1, 1)
+        self.device = device
+
+    def forward(self, x):
+        a = (x.reshape(-1, 1) > self.locations.reshape(1, -1)).sum(axis=1) - 1
+        y = (self.values[a + 1] - self.values[a]) / (
+            self.locations[a + 1] - self.locations[a]
+        ) * (x - self.locations[a]) + self.values[a]
+        return y
+
+
+class PWConstant(GenerativeFunction):
+    def __init__(
+        self,
+        num_samples,
+        input_dim,
+        output_dim,
+        seed=2147483647,
+        fix_random_noise=True,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__(
+            num_samples,
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
+
+        self.input_dim = input_dim
+
+        self.functions = [
+            Constant(self.seed - i, self.device, self.dtype)
+            for i in range(self.num_samples)
+        ]
+
+    def forward(self, inputs):
+        ret = [f(inputs) for f in self.functions]
+        ret = torch.stack(ret)
+        return ret
+
+
+class PWLinear(GenerativeFunction):
+    def __init__(
+        self,
+        num_samples,
+        input_dim,
+        output_dim,
+        seed=2147483647,
+        fix_random_noise=True,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__(
+            num_samples,
+            input_dim,
+            output_dim,
+            device=device,
+            fix_random_noise=fix_random_noise,
+            seed=seed,
+            dtype=dtype,
+        )
+
+        self.input_dim = input_dim
+
+        self.functions = [
+            Linear(self.seed - i, self.device, self.dtype)
+            for i in range(self.num_samples)
+        ]
+
+    def forward(self, inputs):
+        ret = [f(inputs) for f in self.functions]
+        ret = torch.stack(ret)
+        return ret
 
 
 class BayesianConvNN(GenerativeFunction):

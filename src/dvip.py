@@ -81,17 +81,6 @@ class DVIP_Base(torch.nn.Module):
         self.generator = torch.Generator(device)
         self.generator.manual_seed(seed)
 
-        # Warning about vip_layers and posterior samples
-        if len(self.vip_layers) == 1 and self.num_samples > 1:
-            import warnings
-
-            self.num_samples = 1
-            warnings.warn(
-                "Using more than one posterior sample seriously affects the"
-                " computational time. When wsing only one layer all posterior"
-                " samples coincide. The number of samples will be set to 1."
-            )
-
         # Set device and data type (precision)
         self.device = device
         self.dtype = dtype
@@ -467,15 +456,16 @@ class DVIP_Base(torch.nn.Module):
         print("\n---- MODEL PARAMETERS ----")
         np.set_printoptions(threshold=3, edgeitems=2)
         sections = []
+        pad = "  "
         for name, param in self.named_parameters():
             name = name.split(".")
             for i in range(len(name) - 1):
 
                 if name[i] not in sections:
-                    print("\t" * i, name[i].upper())
+                    print(pad * i, name[i].upper())
                     sections = name[: i + 1]
 
-            padding = "\t" * (len(name) - 1)
+            padding = pad * (len(name) - 1)
             print(
                 padding,
                 "{}: ({})".format(name[-1], str(list(param.data.size()))[1:-1]),
@@ -494,6 +484,7 @@ class TVIP(DVIP_Base):
         likelihood,
         layer,
         num_data,
+        num_samples,
         bb_alpha=0,
         y_mean=0.0,
         y_std=1.0,
@@ -505,7 +496,7 @@ class TVIP(DVIP_Base):
             likelihood,
             [layer],
             num_data,
-            num_samples=10,
+            num_samples=num_samples,
             bb_alpha=bb_alpha,
             y_mean=y_mean,
             y_std=y_std,
@@ -514,6 +505,8 @@ class TVIP(DVIP_Base):
             seed=seed,
         )
         self.layer = layer
+        self.KLs = []
+        self.bb_alphas = []
 
     def propagate(self, X, num_samples=1, return_prior_samples=False):
         F, prior = self.layer(X, num_samples)
@@ -549,7 +542,31 @@ class TVIP(DVIP_Base):
         )
         return Fmeans, Fvars
 
-    def get_prior_samples(self, X):
+    def forward(self, predict_at, num_samples=None):
+        """
+        Computes the predicted labels for the given input.
+
+        Parameters
+        ----------
+        predict_at : torch tensor of shape (batch_size, data_dim)
+                     Contains the input features.
+
+        Returns
+        -------
+        The predicted mean and standard deviation.
+        """
+        # Cast types if needed.
+        if self.dtype != predict_at.dtype:
+            predict_at = predict_at.to(self.dtype)
+
+        if num_samples is None:
+            num_samples = self.num_samples
+
+        mean, var = self.predict_y(predict_at, num_samples)
+        # Return predictions scaled to the original scale.
+        return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
+
+    def get_prior_samples(self, X, num_samples):
         """
         Returns the prior samples of the given inputs using 1 MonteCarlo
         resample.
@@ -565,9 +582,10 @@ class TVIP(DVIP_Base):
                  Contains the S prior samples for each layer at each data
                  point.
         """
-        _, _, Fpriors = self.propagate(X, num_samples=1, return_prior_samples=True)
+
+        Fpriors, f = self.layer.forward_prior(X, num_samples)
         # Scale data
-        return Fpriors * self.y_std + self.y_mean
+        return Fpriors * self.y_std + self.y_mean, f * self.y_std + self.y_mean
 
     def nelbo(self, X, y):
         """
@@ -608,4 +626,26 @@ class TVIP(DVIP_Base):
 
         # Compute KL term
         KL = self.layer.KL()
+        self.bb_alphas.append((-scale * ve).detach().numpy())
+        self.KLs.append(KL.detach().numpy())
+        # print(-scale * ve)
+        # print(KL)
         return -scale * ve + KL
+
+    def freeze_prior(self):
+        """Sets the prior parameters of each layer as non-trainable."""
+        self.layer.freeze_prior()
+
+    def freeze_posterior(self):
+        """Sets the posterior parameters of every layer as non-trainable."""
+        self.layer.freeze_posterior()
+
+    def defreeze_prior(self):
+        """Sets the prior parameters of each layer as non-trainable."""
+        for layer in self.vip_layers:
+            layer.defreeze_prior()
+
+    def defreeze_posterior(self):
+        """Sets the posterior parameters of every layer as non-trainable."""
+        for layer in self.vip_layers:
+            layer.defreeze_posterior()

@@ -10,7 +10,7 @@ sys.path.append(".")
 
 from src.dvip import DVIP_Base, TVIP
 from src.layers_init import init_layers
-from src.layers import TVIPLayer
+from src.layers import TVIPLayer, TVIP3Layer
 from src.likelihood import QuadratureGaussian
 from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit, score, predict
@@ -42,7 +42,7 @@ f = BayesianNN(
     dtype=args.dtype,
 )
 
-layer = TVIPLayer(
+layer = TVIP3Layer(
     f,
     num_regression_coeffs=args.regression_coeffs,
     input_dim=train_dataset.input_dim,
@@ -50,8 +50,9 @@ layer = TVIPLayer(
     add_prior_regularization=args.prior_kl,
     mean_function=None,
     q_mu_initial_value=0,
-    log_layer_noise=-5,
+    log_layer_noise=None,
     q_sqrt_initial_value=1,
+    n_coupling=args.n_coupling,
     dtype=args.dtype,
     device=args.device,
 )
@@ -67,19 +68,21 @@ dvip = TVIP(
     likelihood=args.likelihood,
     layer=layer,
     num_data=len(train_dataset),
+    num_samples=args.num_samples_train,
     bb_alpha=args.bb_alpha,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
     dtype=args.dtype,
     device=args.device,
 )
+if args.freeze_prior:
+    dvip.freeze_prior()
 dvip.print_variables()
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
 # Set the number of training samples to generate
-dvip.num_samples = 10
 # Train the model
 start = timer()
 loss = fit(
@@ -93,17 +96,40 @@ loss = fit(
 )
 end = timer()
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
-a = np.arange(len(loss) // 3, len(loss))
-plt.plot(a, loss[len(loss) // 3 :])
-plt.show()
+# a = np.arange(len(loss) // 3, len(loss))
+# plt.plot(a, loss[len(loss) // 3 :])
+# plt.show()
 
 
 dvip.print_variables()
+import matplotlib.pyplot as plt
 
-dvip.num_samples = args.num_samples_test
+plt.figure(figsize=(16, 6))
+ax1 = plt.subplot(2, 3, 1)
+ax2 = plt.subplot(2, 3, 2)
+ax3 = plt.subplot(2, 3, 3)
+ax4 = plt.subplot(2, 3, 4)
+ax5 = plt.subplot(2, 3, 5)
+ax6 = plt.subplot(2, 3, 6)
 
+n = len(loss)
+ax1.plot(np.arange(n // 5, n), loss[n // 5 :])
+ax2.plot(np.arange(n // 5, n), dvip.bb_alphas[n // 5 :])
+ax3.plot(np.arange(n // 5, n), dvip.KLs[n // 5 :])
+ax4.plot(loss)
+ax5.plot(dvip.bb_alphas)
+ax6.plot(dvip.KLs)
+ax4.set_yscale("symlog")
+ax5.set_yscale("symlog")
+ax6.set_yscale("symlog")
+ax1.set_title("Loss")
+ax2.set_title("Data Fitting Term")
+ax3.set_title("Regularizer Term")
+plt.savefig("plots/loss_" + create_file_name(args) + ".pdf", format="pdf")
+# plt.show()
+# plt.show()
 # Test the model
 train_metrics = score(
     dvip, train_test_loader, args.metrics, use_tqdm=True, device=args.device
@@ -128,6 +154,6 @@ d = {
 
 df = pd.DataFrame.from_dict(d, orient="index").transpose()
 df.to_csv(
-    path_or_buf="results/" + create_file_name(args) + ".csv",
+    path_or_buf="results/tvip_" + create_file_name(args) + ".csv",
     encoding="utf-8",
 )

@@ -2,25 +2,26 @@ def create_file_name(args):
     filename = ""
 
     filename += "dataset=" + args.dataset_name
-    filename += "_vip-layers=" + "-".join(str(i) for i in args.vip_layers)
+    # filename += "_vip-layers=" + "-".join(str(i) for i in args.vip_layers)
     filename += "_iterations=" + str(args.iterations)
     filename += "_batch=" + str(args.batch_size)
     if args.lr != 0.001:
         filename += "_lr=" + str(args.lr)
 
     if args.genf == "BNN":
-        dims = "-".join(str(i) for i in args.bnn_structure)
-        filename += "_genf=BNN_bnn-structure=" + dims
+        # dims = "-".join(str(i) for i in args.bnn_structure)
+        # filename += "_genf=BNN_bnn-structure=" + dims
         if args.dropout != 0:
             filename += "_dropout=" + str(args.dropout)
-        filename += "_act=" + str(args.activation_str)
+        # filename += "_act=" + str(args.activation_str)
         filename += "_layer=" + args.bnn_layer_str
 
-    elif args.genf == "GP":
-        filename += "_genf=GP_inner-dim=" + str(args.bnn_inner_dim)
-    else:
-        filename += "_genf=" + args.genf
+    # elif args.genf == "GP":
+    #     filename += "_genf=GP_inner-dim=" + str(args.bnn_inner_dim)
+    # else:
+    #     filename += "_genf=" + args.genf
 
+    filename += "_n-coupling=" + str(args.n_coupling)
     filename += "_regression-coeffs=" + str(args.regression_coeffs)
     if args.bb_alpha != 0:
         filename += "_alpha=" + str(args.bb_alpha)

@@ -44,7 +44,8 @@ dvip = DVIP_Base(
     device=args.device,
 )
 dvip.print_variables()
-
+if args.freeze_prior:
+    dvip.freeze_prior()
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
@@ -63,7 +64,7 @@ loss = fit(
 )
 end = timer()
 
-# Set the number of test samples to generate
+dvip.print_variables()
 dvip.num_samples = 1
 
 # Test the model
@@ -79,11 +80,11 @@ print("TEST RESULTS: ")
 for k, v in test_metrics.items():
     print("\t - {}: {}".format(k, v))
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
-a = np.arange(len(loss) // 3, len(loss))
-plt.plot(a, loss[len(loss) // 3 :])
-plt.show()
+# a = np.arange(len(loss) // 3, len(loss))
+# plt.plot(a, loss[len(loss) // 3 :])
+# plt.show()
 
 d = {
     **vars(args),
@@ -94,6 +95,6 @@ d = {
 
 df = pd.DataFrame.from_dict(d, orient="index").transpose()
 df.to_csv(
-    path_or_buf="results/" + create_file_name(args) + ".csv",
+    path_or_buf="results/vip_" + create_file_name(args) + ".csv",
     encoding="utf-8",
 )
