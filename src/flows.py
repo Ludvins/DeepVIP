@@ -150,9 +150,11 @@ class CouplingLayer(torch.nn.Module):
         self.input_dim = input_dim
 
         self.nn = torch.nn.Sequential(
-            torch.nn.Linear(input_dim // 2, 50, dtype=dtype),
+            torch.nn.Linear(input_dim // 2, 100, dtype=dtype),
             torch.nn.Tanh(),
-            torch.nn.Linear(50, input_dim, dtype=dtype),
+            # torch.nn.Linear(100, 100, dtype=dtype),
+            # torch.nn.ReLU(),
+            torch.nn.Linear(100, input_dim, dtype=dtype),
         )
         self.nn[-1].weight.data.fill_(0)
         self.nn[-1].bias.data.fill_(0)

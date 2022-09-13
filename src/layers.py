@@ -395,6 +395,7 @@ class TVIP2Layer(Layer):
         output_dim,
         add_prior_regularization=False,
         log_layer_noise=None,
+        n_coupling = 1,
         q_sqrt_initial_value=1,
         q_mu_initial_value=0,
         mean_function=None,
@@ -429,7 +430,7 @@ class TVIP2Layer(Layer):
         self.generator = torch.Generator(device)
         self.generator.manual_seed(2147483647)
 
-        self.flow = CouplingFlow(3, self.num_coeffs, device, dtype, seed=0)
+        self.flow = CouplingFlow(n_coupling, self.num_coeffs, device, dtype, seed=2147483647)
 
     def forward(self, x, S):
         # Let S = num_coeffs, D = output_dim and N = num_samples

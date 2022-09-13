@@ -10,7 +10,7 @@ sys.path.append(".")
 
 from src.dvip import DVIP_Base, TVIP
 from src.layers_init import init_layers
-from src.layers import TVIPLayer, TVIP3Layer
+from src.layers import TVIPLayer, TVIP3Layer, TVIP2Layer
 from src.likelihood import QuadratureGaussian
 from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit, score, predict
@@ -43,7 +43,7 @@ f = BayesianNN(
     dtype=args.dtype,
 )
 
-layer = TVIP3Layer(
+layer = TVIP2Layer(
     f,
     num_regression_coeffs=args.regression_coeffs,
     input_dim=train_dataset.input_dim,
