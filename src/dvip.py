@@ -516,6 +516,7 @@ class TVIP(DVIP_Base):
 
         return F, torch.zeros_like(F)
 
+
     def predict_f(self, predict_at, num_samples):
         """
         Returns the predicted mean and variance at the last layer.
@@ -649,3 +650,196 @@ class TVIP(DVIP_Base):
         """Sets the posterior parameters of every layer as non-trainable."""
         for layer in self.vip_layers:
             layer.defreeze_posterior()
+
+
+
+class TDVIP(DVIP_Base):
+    def __init__(
+        self,
+        likelihood,
+        layers,
+        num_data,
+        num_samples,
+        bb_alpha=0,
+        y_mean=0.0,
+        y_std=1.0,
+        device=None,
+        dtype=torch.float64,
+        seed=2147483647,
+    ):
+        super().__init__(
+            likelihood,
+            layers,
+            num_data,
+            num_samples=num_samples,
+            bb_alpha=bb_alpha,
+            y_mean=y_mean,
+            y_std=y_std,
+            device=device,
+            dtype=dtype,
+            seed=seed,
+        )
+        self.KLs = []
+        self.bb_alphas = []
+
+    def propagate(self, X, num_samples=1):
+        
+        F, _ = self.vip_layers[0](X, num_samples)        
+        F = F.reshape(-1, F.shape[-1])
+        
+        for layer in self.vip_layers[1:]:
+            F, _ = layer(F, 1)
+            F = F.squeeze(0)
+        
+        F = F.reshape(num_samples, -1, F.shape[-1])
+        return F, torch.zeros_like(F)
+
+    def propagate_prior(self, X, num_samples=1):
+        
+        F, f = self.vip_layers[0].forward_prior(X, num_samples)        
+        F = F.reshape(-1, F.shape[-1])
+        
+        for layer in self.vip_layers[1:]:
+            F, f = layer.forward_prior(F, 1)
+            F = F.squeeze(0)
+        
+        F = F.reshape(num_samples, -1, F.shape[-1])
+        return F, f
+
+    def predict_f(self, predict_at, num_samples):
+        """
+        Returns the predicted mean and variance at the last layer.
+
+        Parameters
+        ----------
+        predict_at : torch tensor of shape (batch_size, data_dim)
+                     Contains the input features.
+        num_samples : int
+                      Number of MonteCarlo resamples to propagate.
+        Returns
+        -------
+        Fmeans : torch tensor of shape (num_layers, batch_size, output_dim)
+                 Contains the mean value of the predictions at
+                 each layer.
+        Fvars : torch tensor of shape (num_layers, batch_size, output_dim)
+                Contains the standard deviation of the predictions at
+                each layer.
+        """
+
+        Fmeans, Fvars = self.propagate(
+            predict_at,
+            num_samples,
+        )
+        return Fmeans, Fvars
+
+    def forward(self, predict_at, num_samples=None):
+        """
+        Computes the predicted labels for the given input.
+
+        Parameters
+        ----------
+        predict_at : torch tensor of shape (batch_size, data_dim)
+                     Contains the input features.
+
+        Returns
+        -------
+        The predicted mean and standard deviation.
+        """
+        # Cast types if needed.
+        if self.dtype != predict_at.dtype:
+            predict_at = predict_at.to(self.dtype)
+
+        if num_samples is None:
+            num_samples = self.num_samples
+
+        mean, var = self.predict_y(predict_at, num_samples)
+        # Return predictions scaled to the original scale.
+        return mean * self.y_std + self.y_mean, torch.sqrt(var) * self.y_std
+
+    def get_prior_samples(self, X, num_samples):
+        """
+        Returns the prior samples of the given inputs using 1 MonteCarlo
+        resample.
+
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+
+        Returns
+        -------
+        Fprior : torch tensor of shape (num_layers, S, batch_size, num_outputs)
+                 Contains the S prior samples for each layer at each data
+                 point.
+        """
+
+        Fpriors, f = self.propagate_prior(X, num_samples)
+        # Scale data
+        return Fpriors * self.y_std + self.y_mean, f * self.y_std + self.y_mean
+
+    def nelbo(self, X, y):
+        """
+        Computes the objective minimization function. When alpha is 0
+        this function equals the variational evidence lower bound.
+        Otherwise, Black-Box alpha inference is used.
+
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input, must be standardized.
+
+        Returns
+        -------
+        nelbo : float
+                Objective minimization function.
+        """
+        # Compute model predictions, shape [20, N, D_out]
+        F, _ = self.propagate(X, self.num_samples)
+        # Compute variational expectation using Black-box alpha energy.
+        # Shape [20, N]
+        logpdf = self.likelihood.logp(F, y)
+        if self.bb_alpha == 0:
+            ve = torch.mean(logpdf, axis=0)
+        if self.bb_alpha != 0:
+            ve = (
+                torch.logsumexp(self.bb_alpha * logpdf, axis=0)
+                - torch.log(torch.tensor(F.shape[0]))
+            ) / self.bb_alpha
+        # Aggregate on data dimension
+        ve = torch.sum(ve)
+
+        # Scale loss term corresponding to minibatch size
+        scale = self.num_data
+        scale /= X.shape[0]
+
+        # Compute KL term
+        KL = 0
+        for layer in self.vip_layers:
+            KL += layer.KL()
+
+        self.bb_alphas.append((-scale * ve).detach().numpy())
+        self.KLs.append(KL.detach().numpy())
+        # print(-scale * ve)
+        # print(KL)
+        return -scale * ve + KL
+
+    def freeze_prior(self):
+        """Sets the prior parameters of each layer as non-trainable."""
+        self.layer.freeze_prior()
+
+    def freeze_posterior(self):
+        """Sets the posterior parameters of every layer as non-trainable."""
+        self.layer.freeze_posterior()
+
+    def defreeze_prior(self):
+        """Sets the prior parameters of each layer as non-trainable."""
+        for layer in self.vip_layers:
+            layer.defreeze_prior()
+
+    def defreeze_posterior(self):
+        """Sets the posterior parameters of every layer as non-trainable."""
+        for layer in self.vip_layers:
+            layer.defreeze_posterior()
+

@@ -150,25 +150,29 @@ class CouplingLayer(torch.nn.Module):
         self.input_dim = input_dim
 
         self.nn = torch.nn.Sequential(
-            torch.nn.Linear(input_dim // 2, 100, dtype=dtype),
+            torch.nn.Linear(input_dim + input_dim//2, 100, dtype=dtype),
             torch.nn.Tanh(),
-            # torch.nn.Linear(100, 100, dtype=dtype),
-            # torch.nn.ReLU(),
+            torch.nn.Linear(100, 100, dtype=dtype),
+            torch.nn.Tanh(),
             torch.nn.Linear(100, input_dim, dtype=dtype),
         )
         self.nn[-1].weight.data.fill_(0)
         self.nn[-1].bias.data.fill_(0)
+        
+    def forward(self, a, x):
+        z1 = a[..., : self.input_dim // 2]
+        z2 = a[..., self.input_dim // 2 :]
 
-    def forward(self, a):
-        z1 = a[:, : self.input_dim // 2]
-        z2 = a[:, self.input_dim // 2 :]
-        nn = self.nn(z1)  # [0]
-        mu = nn[:, : self.input_dim // 2]
-        sigma = nn[:, self.input_dim // 2 :]
+        x = torch.tile(x.squeeze(-1), (z1.shape[0], 1))
+        aux = torch.cat([z1, x], dim = 1)
+        nn = self.nn(aux)  # [0]
+        mu = nn[..., : self.input_dim // 2]
+        sigma = nn[..., self.input_dim // 2 :]
         z2 = z2 * torch.exp(sigma) + mu
 
-        ldj = torch.sum(sigma, axis=1)
-        return torch.cat([z1, z2], dim=1), ldj
+
+        ldj = torch.sum(sigma, dim = -1)
+        return torch.cat([z1, z2], dim=-1), ldj
 
 
 class CouplingFlow(Flow):
@@ -186,10 +190,10 @@ class CouplingFlow(Flow):
 
         self.biyections = torch.nn.ModuleList(biyections)
 
-    def forward(self, a):
+    def forward(self, a, x):
         LDJ = 0
         for b in self.biyections:
-            a, ldj = b(a)
+            a, ldj = b(a, x)
             a = a.flip(-1)
             LDJ += ldj
         return a, -LDJ

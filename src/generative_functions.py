@@ -51,7 +51,6 @@ class GenerativeFunction(torch.nn.Module):
             param.requires_grad = False
 
     def defreeze_parameters(self):
-        print("asdadadadasd")
         """Set the model parameters as trainable."""
         for param in self.parameters():
             param.requires_grad = True
@@ -133,7 +132,7 @@ class BayesLinear(GenerativeFunction):
         )
         self.bias_log_sigma = torch.nn.Parameter(
             torch.zeros([1, output_dim], dtype=dtype, device=device)
-        )
+        ) 
 
         # Reset the generator's seed if fixed noise.
         if self.fix_random_noise:
@@ -175,6 +174,31 @@ class BayesLinear(GenerativeFunction):
 
         # Apply linear transformation.
         return inputs @ w + b
+    
+    def forward_weights(self, inputs, w, b):
+        # Apply linear transformation.
+        return inputs @ w + b
+    
+    def forward_mean(self, inputs):
+        """Forwards the given input through the Bayesian Neural Network.
+        Generates as many samples of the stochastic output as indicated.
+
+        Arguments
+        ---------
+
+        inputs : torch tensor of shape (S, N, D)
+                 Input tensor where the last two dimensions are batch and
+                 data dimensionality.
+        """
+
+        # Apply linear transformation.
+        return inputs @ self.weight_mu + self.bias_mu
+
+    def get_weights(self):
+        return [self.weight_mu, self.bias_mu]
+    
+    def get_std_params(self):
+        return torch.cat([self.weight_log_sigma.flatten(), self.bias_log_sigma.flatten()], -1)
 
     def KL(self):
         """
@@ -186,6 +210,7 @@ class BayesLinear(GenerativeFunction):
         KL : int
              The addition of the 2 KL terms computed
         """
+        
         # Compute covariance diagonal matrixes
         w_Sigma = torch.square(torch.exp(self.weight_log_sigma))
         b_Sigma = torch.square(torch.exp(self.bias_log_sigma))
@@ -394,11 +419,44 @@ class BayesianNN(GenerativeFunction):
 
         # Last layer has identity activation function
         return self.layers[-1](x)
+    
+    def forward_mean(self, inputs):
+        x = inputs
+        for layer in self.layers[:-1]:
+            # Apply BNN layer
+            x = self.activation(layer.forward_mean(x))
+            # Pytorch internally handles when the dropout layer is in
+            # training mode. Moreover, if p = 0, no bernoully samples
+            # are taken, so there is no additional computational cost
+            # in calling this function in evaluation or p=0.
+            x = self.dropout(x)
 
+        # Last layer has identity activation function
+        return self.layers[-1].forward_mean(x)
+    
+    def forward_weights(self, inputs, weights):
+        x = inputs
+        for i, _ in enumerate(self.layers[:-1]):
+            # Apply BNN layer
+            x = self.activation(self.layers[i].forward_weights(x, 
+                                                               weights[2*i], 
+                                                               weights[2*i+1]))
+        # Last layer has identity activation function
+        return self.layers[-1].forward_weights(x,  weights[-2], weights[-1])
+                
     def KL(self):
         """Computes the Kl divergence of the model as the addition of the
         KL divergences of its sub-models."""
         return torch.stack([layer.KL() for layer in self.layers]).sum()
+    
+    def get_weights(self):
+        weights = []
+        for layer in self.layers:
+            weights = weights + layer.get_weights()
+        return tuple(weights)
+
+    def get_std_params(self):
+        return torch.cat([layer.get_std_params() for layer in self.layers])
 
 
 class Constant(torch.nn.Module):

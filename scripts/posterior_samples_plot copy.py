@@ -5,10 +5,11 @@ import pandas as pd
 from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
+from scipy.cluster.vq import kmeans2
 
 sys.path.append(".")
 
-from src.dvip import DVIP_Base, TDVIP
+from src.fvi import Test, Test2
 from src.layers_init import init_layers, init_layers_tvip
 from src.layers import TVIPLayer
 from src.likelihood import QuadratureGaussian
@@ -19,26 +20,58 @@ from src.generative_functions import *
 
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-print(args.device)
+#args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+args.device = torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
 )
 
-layers = init_layers_tvip(train_dataset.inputs, args.dataset.output_dim, **vars(args))
-
 # Initialize DataLoader
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
+Z = kmeans2(train_dataset.inputs, 10, minit='points', seed = args.seed)[0]
 
+f1 = BayesianNN(
+                num_samples=50,
+                input_dim=1,
+                structure=args.bnn_structure,
+                activation=args.activation,
+                output_dim=1,
+                layer_model=args.bnn_layer,
+                dropout=args.dropout,
+                fix_random_noise=False,
+                zero_mean_prior=args.zero_mean_prior,
+                device=args.device,
+                seed=args.seed,
+                dtype=args.dtype,
+            )
+
+f1.freeze_parameters()
+
+f2 = BayesianNN(
+                num_samples=50,
+                input_dim=1,
+                structure=args.bnn_structure,
+                activation=args.activation,
+                output_dim=1,
+                layer_model=args.bnn_layer,
+                dropout=args.dropout,
+                fix_random_noise=False,
+                zero_mean_prior=args.zero_mean_prior,
+                device=args.device,
+                seed=args.seed,
+                dtype=args.dtype,
+            )
 # Create DVIP object
-dvip = TDVIP(
+dvip = Test(
+    prior_ip=f1,
+    variational_ip=f2,
+    Z = Z,
     likelihood=args.likelihood,
-    layers=layers,
     num_data=len(train_dataset),
     num_samples=args.num_samples_train,
     bb_alpha=args.bb_alpha,
@@ -47,9 +80,7 @@ dvip = TDVIP(
     dtype=args.dtype,
     device=args.device,
 )
-if args.freeze_prior:
-    dvip.freeze_prior()
-
+#dvip.freeze_ll_variance()
 dvip.print_variables()
 
 # Define optimizer and compile model
@@ -106,47 +137,52 @@ ax3 = plt.subplot(2, 2, 3)
 ax4 = plt.subplot(2, 2, 4)
 # ax5 = plt.subplot(3, 1, 3)
 
+
+x = test_dataset.inputs
+y = test_dataset.targets
+if y is not None:
+    ax1.scatter(test_dataset.inputs, y, label="Test dataset", s=5)
+
 x = train_dataset.inputs
 y = train_dataset.targets * train_dataset.targets_std + train_dataset.targets_mean
 ax1.scatter(train_dataset.inputs, y, label="Training dataset", s=5)
-x = test_dataset.inputs
-y = test_dataset.targets
-ax1.scatter(test_dataset.inputs, y, label="Test dataset", s=5)
+
 ax1.set_title("Dataset")
 ylims = ax1.get_ylim()
 
 X = torch.tensor(test_dataset.inputs, device=args.device)
-F, std = dvip(X, 100)
-print(F.shape)
+F, std, u = dvip(X, 100)
 
 F = F.squeeze().cpu().detach().numpy()
 std = std.squeeze().cpu().detach().numpy()
 sort = np.argsort(test_dataset.inputs.flatten())
 
 
-ax2.plot(test_dataset.inputs.flatten()[sort], F.T[sort], alpha=0.5)
+for i in range(F.shape[0]):
+    #ax2.plot(test_dataset.inputs.flatten()[sort], F[i, sort], alpha=0.5)
+    ax2.fill_between(test_dataset.inputs.flatten()[sort],
+                     F[i, sort] - 3*std[i, sort],
+                     F[i, sort] + 3*std[i, sort],
+                     alpha=0.1)
+
 
 ax2.set_title(r"$Q(\mathbf{f})$ samples")
 
-#     ax2.plot
-# ax2.plot(test_dataset.inputs.flatten()[sort], F.T[sort][:, 1:], alpha=0.5)
-# ax2.plot(
-#     test_dataset.inputs.flatten()[sort],
-#     F.T[sort][:, 0],
-#     label=r"$Q(\mathbf{f})$ samples",
-# )
-
-Fprior, F = dvip.get_prior_samples(X, 100)
-
-F = F.squeeze().cpu().detach().numpy()
-ax3.plot(test_dataset.inputs.flatten()[sort], F.T[sort][:, 1:], alpha=0.5)
-ax3.plot(
+ax2.plot(test_dataset.inputs.flatten()[sort], F.T[sort][:, 1:], alpha=0.5)
+ax2.plot(
     test_dataset.inputs.flatten()[sort],
     F.T[sort][:, 0],
+    label=r"$Q(\mathbf{f})$ samples",
 )
-ax3.set_title(
-    "Prior BNN Samples",
-)
+ax2.scatter(train_dataset.inputs, y, s=5, zorder = 2)
+
+ax3.set_title(r"$Q(\mathbf{u})$ samples")
+
+for i in range(u.shape[0]):
+    ax3.scatter(dvip.inducing_points.detach().numpy(), u.detach().numpy()[i], alpha=0.5)
+ax3.scatter(Z, np.zeros_like(Z), alpha=0.9, color = "black")
+
+Fprior = dvip.get_prior_samples(X, 100)
 
 Fprior = Fprior.squeeze().cpu().detach().numpy()
 ax4.plot(test_dataset.inputs.flatten()[sort], Fprior.T[sort], alpha=0.5)

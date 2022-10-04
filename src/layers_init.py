@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from src.generative_functions import *
-from src.layers import VIPLayer, TVIP2Layer
+from src.layers import VIPLayer, TVIPLayer
 
 
 class LinearProjection:
@@ -251,6 +251,7 @@ def init_layers_tvip(
     output_dim,
     vip_layers,
     genf,
+    n_coupling,
     regression_coeffs,
     bnn_structure,
     bnn_layer,
@@ -435,13 +436,14 @@ def init_layers_tvip(
 
         # Create layer
         layers.append(
-            TVIP2Layer(
+            TVIPLayer(
                 f,
                 num_regression_coeffs=regression_coeffs,
                 input_dim=dim_in,
                 output_dim=dim_out,
                 add_prior_regularization=prior_kl,
                 mean_function=mf,
+                n_coupling=n_coupling,
                 q_mu_initial_value=q_mu_initial_value,
                 log_layer_noise=log_layer_noise,
                 q_sqrt_initial_value=q_sqrt_initial_value,

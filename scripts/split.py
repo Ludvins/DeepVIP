@@ -77,7 +77,7 @@ dvip = TVIP(
 )
 if args.freeze_prior:
     dvip.freeze_prior()
-dvip.print_variables()
+dvip.freeze_ll_variance()
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)

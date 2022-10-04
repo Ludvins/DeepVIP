@@ -269,7 +269,6 @@ class Gaussian(Likelihood):
                 - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
             )
             return torch.mean(logpdf, dim=0)
-
         # Black-box alpha-energy
         # Number of predictive mixtures
         S = torch.tensor(Fmu.shape[0])
