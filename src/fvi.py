@@ -325,7 +325,7 @@ class Test(torch.nn.Module):
         self.bb_alpha = bb_alpha
         
         self.inducing_points = torch.tensor(Z, dtype = dtype, device = device)
-        self.inducing_points = torch.nn.Parameter(self.inducing_points)
+        #self.inducing_points = torch.nn.Parameter(self.inducing_points)
 
         # Store targets mean and std.
         self.y_mean = torch.tensor(y_mean, device=device)
@@ -535,77 +535,31 @@ class Test(torch.nn.Module):
         cov = torch.einsum("snd, smd ->nmd",m, m)/(f.shape[0] - 1)
         return mean, cov
 
-    def gaussianize2(self, f, prior, X):
-        
-        def gradient(y, x, grad_outputs=None):
-            """Compute dy/dx @ grad_outputs"""
-            if grad_outputs is None:
-                grad_outputs = torch.ones_like(y)
-            grad = torch.autograd.grad(y,
-                                       [x],
-                                       grad_outputs = grad_outputs, create_graph=True)[0]
-            return grad
-
-        
+    def gaussianize(self, f, prior, X):
+                
         w = prior.get_weights()
         for t in w:
             t.requires_grad = True
-            
-        f = prior.forward(X)
-
-        J = torch.cat(
-            [
-                torch.cat(
-                    [
-                        torch.flatten(gradient(y, a)) 
-                        for a in w
-                    ], 
-                    dim = -1).unsqueeze(0)
-                for y in f[0]
-            ],
-            dim = 0)
-
         
-        S = torch.exp(prior.get_std_params())**2
-
-        cov = J * S.unsqueeze(0)
-        cov = torch.einsum("ns, ms -> nm", cov, J).unsqueeze(-1)
-        mean = prior.forward_mean(X)
-
-        return mean, cov
-    
-
-    def gaussianize2(self, f, prior, X):
+        def f(*p):
+            return prior.forward_weights(X, p)
         
-        def gradient(y, x, grad_outputs=None):
-            """Compute dy/dx @ grad_outputs"""
-            #if grad_outputs is None:
-            #    grad_outputs = torch.ones_like(y)
-            grad = torch.autograd.grad(y,
-                                       [x],
-                                       grad_outputs = grad_outputs, 
-                                       is_grads_batched = True,
-                                       create_graph=True)[0]
-            return grad
-
-        
-        w = prior.get_weights()
-        for t in w:
-            t.requires_grad = True
-            
-        f = prior.forward(X)
         
         J = torch.autograd.functional.jacobian(
-            lambda *p: prior.forward_weights(X, p),
-            w
+                f,
+                w,
+                create_graph = True,
             )
+        J = torch.cat(
+            [
+                torch.flatten(a, -2, -1) for a in J
+            ],
+            dim = -1).transpose(-1, -2)
 
-        print(J)
-        
         S = torch.exp(prior.get_std_params())**2
 
-        cov = J * S.unsqueeze(0)
-        cov = torch.einsum("ns, ms -> nm", cov, J).unsqueeze(-1)
+        cov = J * S.unsqueeze(0).unsqueeze(-1)
+        cov = torch.einsum("nsd, msd -> nmd", cov, J)
         mean = prior.forward_mean(X)
 
         return mean, cov
