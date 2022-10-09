@@ -115,24 +115,25 @@ class BayesLinear(GenerativeFunction):
         # If the BNN has zero mean, no parameters are considered for the
         # mean values the weights and bias variable
 
+        rng = np.random.default_rng(0)
         # input_dim = 1
         if zero_mean_prior:
             self.weight_mu = 0
             self.bias_mu = 0
         else:
             self.weight_mu = torch.nn.Parameter(
-                torch.zeros([input_dim, output_dim], dtype=dtype, device=device)
+                    torch.tensor(rng.normal(size = (input_dim, output_dim)), dtype=dtype, device=device)
             )
             self.bias_mu = torch.nn.Parameter(
-                torch.zeros([1, output_dim], dtype=dtype, device=device)
+                torch.tensor(rng.normal(size = (1, output_dim)), dtype=dtype, device=device)
             )
 
         self.weight_log_sigma = torch.nn.Parameter(
-            torch.zeros([input_dim, output_dim], dtype=dtype, device=device)
+            torch.tensor(rng.normal(size = (input_dim, output_dim)) * 0.001, dtype=dtype, device=device)
         )
         self.bias_log_sigma = torch.nn.Parameter(
-            torch.zeros([1, output_dim], dtype=dtype, device=device)
-        ) 
+            torch.tensor(rng.normal(size = (1, output_dim))* 0.001, dtype=dtype, device=device)
+        )
 
         # Reset the generator's seed if fixed noise.
         if self.fix_random_noise:
@@ -174,11 +175,11 @@ class BayesLinear(GenerativeFunction):
 
         # Apply linear transformation.
         return inputs @ w + b
-    
+
     def forward_weights(self, inputs, w, b):
         # Apply linear transformation.
         return inputs @ w + b
-    
+
     def forward_mean(self, inputs):
         """Forwards the given input through the Bayesian Neural Network.
         Generates as many samples of the stochastic output as indicated.
@@ -196,9 +197,11 @@ class BayesLinear(GenerativeFunction):
 
     def get_weights(self):
         return [self.weight_mu, self.bias_mu]
-    
+
     def get_std_params(self):
-        return torch.cat([self.weight_log_sigma.flatten(), self.bias_log_sigma.flatten()], -1)
+        return torch.cat(
+            [self.weight_log_sigma.flatten(), self.bias_log_sigma.flatten()], -1
+        )
 
     def KL(self):
         """
@@ -210,7 +213,7 @@ class BayesLinear(GenerativeFunction):
         KL : int
              The addition of the 2 KL terms computed
         """
-        
+
         # Compute covariance diagonal matrixes
         w_Sigma = torch.square(torch.exp(self.weight_log_sigma))
         b_Sigma = torch.square(torch.exp(self.bias_log_sigma))
@@ -419,7 +422,7 @@ class BayesianNN(GenerativeFunction):
 
         # Last layer has identity activation function
         return self.layers[-1](x)
-    
+
     def forward_mean(self, inputs):
         x = inputs
         for layer in self.layers[:-1]:
@@ -433,22 +436,22 @@ class BayesianNN(GenerativeFunction):
 
         # Last layer has identity activation function
         return self.layers[-1].forward_mean(x)
-    
+
     def forward_weights(self, inputs, weights):
         x = inputs
         for i, _ in enumerate(self.layers[:-1]):
             # Apply BNN layer
-            x = self.activation(self.layers[i].forward_weights(x, 
-                                                               weights[2*i], 
-                                                               weights[2*i+1]))
+            x = self.activation(
+                self.layers[i].forward_weights(x, weights[2 * i], weights[2 * i + 1])
+            )
         # Last layer has identity activation function
-        return self.layers[-1].forward_weights(x,  weights[-2], weights[-1])
-                
+        return self.layers[-1].forward_weights(x, weights[-2], weights[-1])
+
     def KL(self):
         """Computes the Kl divergence of the model as the addition of the
         KL divergences of its sub-models."""
         return torch.stack([layer.KL() for layer in self.layers]).sum()
-    
+
     def get_weights(self):
         weights = []
         for layer in self.layers:

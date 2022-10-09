@@ -68,6 +68,8 @@ def manage_experiment_configuration(args=None):
         FLAGS["activation"] = torch.sigmoid
     elif args.activation == "cos":
         FLAGS["activation"] = torch.cos
+    elif args.activation == "linear":
+        FLAGS["activation"] = torch.nn.Identity()
     else:
         raise ValueError("Invalid BNN activation type.")
 

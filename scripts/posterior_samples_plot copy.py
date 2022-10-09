@@ -33,10 +33,10 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-Z = kmeans2(train_dataset.inputs, 10, minit='points', seed = args.seed)[0]
+Z = kmeans2(train_dataset.inputs, 5, minit='points', seed = args.seed)[0]
 
 f1 = BayesianNN(
-                num_samples=50,
+                num_samples=20,
                 input_dim=1,
                 structure=args.bnn_structure,
                 activation=args.activation,
@@ -53,7 +53,7 @@ f1 = BayesianNN(
 f1.freeze_parameters()
 
 f2 = BayesianNN(
-                num_samples=50,
+                num_samples=20,
                 input_dim=1,
                 structure=args.bnn_structure,
                 activation=args.activation,
@@ -151,10 +151,13 @@ ax1.set_title("Dataset")
 ylims = ax1.get_ylim()
 
 X = torch.tensor(test_dataset.inputs, device=args.device)
-F, std, u = dvip(X, 100)
+F, std = dvip(X, 100)
+print(F.shape)
+print(std.shape)
+u = dvip.generate_u_samples().detach().numpy() * train_dataset.targets_std + train_dataset.targets_mean
 
-F = F.squeeze().cpu().detach().numpy()
-std = std.squeeze().cpu().detach().numpy()
+F = F.squeeze(-1).cpu().detach().numpy()
+std = std.squeeze(-1).cpu().detach().numpy()
 sort = np.argsort(test_dataset.inputs.flatten())
 
 
@@ -179,7 +182,7 @@ ax2.scatter(train_dataset.inputs, y, s=5, zorder = 2)
 ax3.set_title(r"$Q(\mathbf{u})$ samples")
 
 for i in range(u.shape[0]):
-    ax3.scatter(dvip.inducing_points.detach().numpy(), u.detach().numpy()[i], alpha=0.5)
+    ax3.scatter(dvip.inducing_points.detach().numpy(), u[i], alpha=0.5)
 ax3.scatter(Z, np.zeros_like(Z), alpha=0.9, color = "black")
 
 Fprior = dvip.get_prior_samples(X, 100)
