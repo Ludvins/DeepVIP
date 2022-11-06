@@ -70,6 +70,8 @@ def manage_experiment_configuration(args=None):
         FLAGS["activation"] = torch.cos
     elif args.activation == "linear":
         FLAGS["activation"] = torch.nn.Identity()
+    elif args.activation == "cdf":
+        FLAGS["activation"] = lambda x:  0.5 * (1 + torch.tanh(torch.sqrt(2 / torch.pi) * (x + 0.044715 * x^3)))
     else:
         raise ValueError("Invalid BNN activation type.")
 
@@ -238,6 +240,11 @@ def get_parser():
         help="Batch size",
     )
     parser.add_argument(
+        "--num_inducing",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
         "--activation",
         type=str,
         default="tanh",
@@ -271,6 +278,14 @@ def get_parser():
         help="Set the prior samples not to be fixed.",
     )
     parser.set_defaults(fix_prior_noise=True)
+    
+    parser.add_argument(
+        "--no-fix_inducing",
+        dest="fix_inducing",
+        action="store_false",
+    )
+    parser.set_defaults(fix_inducing=True)
+
 
     parser.add_argument(
         "--prior_kl",
@@ -281,13 +296,20 @@ def get_parser():
     parser.set_defaults(prior_kl=False)
 
     parser.add_argument(
-        "--zero_mean_prior",
-        dest="zero_mean_prior",
+        "--fix_mean",
+        dest="fix_mean",
         action="store_true",
         help="Use a prior with zero and untrainable mean",
     )
-    parser.set_defaults(zero_mean_prior=False)
-
+    parser.set_defaults(fix_mean=False)
+    
+    parser.add_argument(
+        "--fix_variance",
+        dest="fix_variance",
+        action="store_true",
+        help="Use a prior with zero and untrainable mean",
+    )
+    parser.set_defaults(fix_variance=False)
     parser.add_argument(
         "--freeze_prior",
         dest="freeze_prior",

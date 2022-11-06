@@ -9,7 +9,7 @@ from scipy.cluster.vq import kmeans2
 
 sys.path.append(".")
 
-from src.fvi import Test, Test2
+from src.fvi import FVI, FVI2, FVI3, FVI4, FVI5
 from src.layers_init import init_layers, init_layers_tvip
 from src.layers import TVIPLayer
 from src.likelihood import QuadratureGaussian
@@ -33,61 +33,70 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-Z = kmeans2(train_dataset.inputs, 5, minit='points', seed = args.seed)[0]
+Z = kmeans2(train_dataset.inputs, args.num_inducing, minit='points', seed = args.seed)[0]
+
 
 f1 = BayesianNN(
-                num_samples=20,
-                input_dim=1,
+                input_dim=train_dataset.inputs.shape[1],
                 structure=args.bnn_structure,
                 activation=args.activation,
                 output_dim=1,
-                layer_model=args.bnn_layer,
+                layer_model=BayesLinear,
                 dropout=args.dropout,
-                fix_random_noise=False,
-                zero_mean_prior=args.zero_mean_prior,
+                fix_mean=args.fix_mean,
+                fix_variance=args.fix_variance,
                 device=args.device,
                 seed=args.seed,
                 dtype=args.dtype,
             )
 
-f1.freeze_parameters()
+f1 = GP(
+    input_dim=1,
+    output_dim=1,
+    inner_layer_dim=100,
+    kernel_amp=1,
+    kernel_length=1,
+    device=args.device,
+    seed=args.seed,
+    dtype=args.dtype,
+)
+#f1.freeze_parameters()
 
 f2 = BayesianNN(
-                num_samples=20,
-                input_dim=1,
+                input_dim=train_dataset.inputs.shape[1],
                 structure=args.bnn_structure,
                 activation=args.activation,
                 output_dim=1,
-                layer_model=args.bnn_layer,
+                layer_model=BayesLinear,
                 dropout=args.dropout,
-                fix_random_noise=False,
-                zero_mean_prior=args.zero_mean_prior,
+                fix_mean=False,
                 device=args.device,
                 seed=args.seed,
                 dtype=args.dtype,
             )
+
 # Create DVIP object
-dvip = Test(
+dvip = FVI3(
     prior_ip=f1,
     variational_ip=f2,
     Z = Z,
+    fix_inducing=args.fix_inducing,
     likelihood=args.likelihood,
     num_data=len(train_dataset),
-    num_samples=args.num_samples_train,
+    num_samples=100,
     bb_alpha=args.bb_alpha,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
     dtype=args.dtype,
     device=args.device,
 )
+
 #dvip.freeze_ll_variance()
 dvip.print_variables()
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(dvip.parameters(), lr=args.lr)
 
-# Set the number of training samples to generate
-dvip.num_samples = args.num_samples_train
 # Train the model
 start = timer()
 loss = fit(
@@ -126,11 +135,12 @@ ax3.set_title("Regularizer Term")
 
 plt.savefig("plots/loss_" + create_file_name(args) + ".pdf", format="pdf")
 plt.show()
+
 dvip.print_variables()
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(16, 6))
+plt.figure(figsize=(20, 10))
 ax1 = plt.subplot(2, 2, 1)
 ax2 = plt.subplot(2, 2, 2)
 ax3 = plt.subplot(2, 2, 3)
@@ -146,15 +156,15 @@ if y is not None:
 x = train_dataset.inputs
 y = train_dataset.targets * train_dataset.targets_std + train_dataset.targets_mean
 ax1.scatter(train_dataset.inputs, y, label="Training dataset", s=5)
+ax3.scatter(train_dataset.inputs, y, label="Training dataset", s=5)
 
 ax1.set_title("Dataset")
 ylims = ax1.get_ylim()
 
 X = torch.tensor(test_dataset.inputs, device=args.device)
-F, std = dvip(X, 100)
+F, std = dvip(X, 20)
 print(F.shape)
-print(std.shape)
-u = dvip.generate_u_samples().detach().numpy() * train_dataset.targets_std + train_dataset.targets_mean
+u = dvip.generate_u_samples(20).detach().numpy() * train_dataset.targets_std + train_dataset.targets_mean
 
 F = F.squeeze(-1).cpu().detach().numpy()
 std = std.squeeze(-1).cpu().detach().numpy()
@@ -178,12 +188,14 @@ ax2.plot(
     label=r"$Q(\mathbf{f})$ samples",
 )
 ax2.scatter(train_dataset.inputs, y, s=5, zorder = 2)
+ax2.set_ylim(-3, 3)
 
 ax3.set_title(r"$Q(\mathbf{u})$ samples")
 
 for i in range(u.shape[0]):
     ax3.scatter(dvip.inducing_points.detach().numpy(), u[i], alpha=0.5)
 ax3.scatter(Z, np.zeros_like(Z), alpha=0.9, color = "black")
+
 
 Fprior = dvip.get_prior_samples(X, 100)
 

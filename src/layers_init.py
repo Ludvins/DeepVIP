@@ -208,7 +208,17 @@ def init_layers(
                 seed=seed,
                 dtype=dtype,
             )
-
+        if genf == "cos":            
+            f = CosNN(
+                num_samples=regression_coeffs,
+                input_dim=dim_in,
+                structure=bnn_structure,
+                output_dim=out,
+                device=device,
+                seed=seed,
+                dtype=dtype,
+            )
+            
         else:
             f = BayesianNN(
                 num_samples=regression_coeffs,

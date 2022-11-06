@@ -1,4 +1,5 @@
 from datetime import datetime
+import itertools
 import numpy as np
 import torch
 import pandas as pd
@@ -72,8 +73,8 @@ ax6 = plt.subplot(3, 3, 8)
 ax7 = plt.subplot(3, 3, 9)
 fig = plt.gcf()
 
-samples = f1(torch.tensor(X, dtype=args.dtype), 200)
-for f in samples:
+samples = f1(torch.tensor(X, dtype=args.dtype), 500)
+for f in samples[:100]:
     ax1.plot(X.flatten(), f.detach().numpy().flatten(), alpha=0.5)
 
 ax1.set_title("Samples from original IP")
@@ -136,6 +137,44 @@ ax3.fill_between(
 for f in samples:
     ax3.plot(X.flatten(), f, alpha=0.3)
 ax3.set_title("Samples from Gaussianized IP using Taylor (1)")
+
+
+GP_mean = f1.GP_mean(torch.tensor(X)).detach().numpy()
+
+GP_cov = np.zeros(X.shape[0])
+for i in range(X.shape[0]):
+    GP_cov[i] = f1.GP_cov(torch.tensor(X[i]).unsqueeze(0), torch.tensor(X[i]).unsqueeze(0)).detach().numpy()
+    
+    
+ax4.plot(test_dataset.inputs.flatten(), GP_mean, alpha=1, label = "GP Mean")
+ax4.set_title("GP distribution")
+ax4.fill_between(
+    test_dataset.inputs.flatten(),
+    GP_mean.flatten() - 2*GP_cov,
+    GP_mean.flatten() + 2*GP_cov,
+    alpha = 0.3,
+)
+
+
+l = list(itertools.combinations_with_replacement(range(X.shape[0]), 2))
+GP_cov = np.zeros((X.shape[0], X.shape[0]))
+for a in l:
+    print(a)
+    GP_cov[a[0], a[1]] = f1.GP_cov(torch.tensor(X[a[0]]).unsqueeze(0), torch.tensor(X[a[1]]).unsqueeze(0)).detach().numpy()
+    GP_cov[a[1], a[0]] = GP_cov[a[0], a[1]]
+pos = ax7.imshow(GP_cov)
+ax7.set_title("Covariance matrix (GP")
+fig.colorbar(pos, ax=ax7)
+
+L = np.linalg.cholesky(GP_cov + np.eye(GP_mean.shape[0]) * 1e-5)
+z = np.random.randn(20, GP_mean.shape[0])
+
+
+samples = GP_mean.T + (L @ z.T).T
+
+for f in samples:
+    ax4.plot(X.flatten(), f, alpha=0.3)
+
 
 # xmean = f1.get_weights()
 

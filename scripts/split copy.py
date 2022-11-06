@@ -9,7 +9,7 @@ from time import process_time as timer
 from scipy.cluster.vq import kmeans2
 sys.path.append(".")
 
-from src.fvi import FVI, FVI2, FVI5, FVI3
+from src.fvi import FVI
 from src.layers_init import init_layers
 from src.likelihood import QuadratureGaussian
 from utils.process_flags import manage_experiment_configuration
@@ -32,45 +32,35 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-Z = kmeans2(train_dataset.inputs, args.num_inducing, minit='points', seed = args.seed)[0]
-
-
+Z = kmeans2(train_dataset.inputs, 100, minit='points', seed = args.seed)[0]
 
 f1 = BayesianNN(
+                num_samples=20,
                 input_dim=train_dataset.inputs.shape[1],
                 structure=args.bnn_structure,
                 activation=args.activation,
-                output_dim=1,
+                output_dim=10,
                 layer_model=args.bnn_layer,
                 dropout=args.dropout,
-                fix_mean=args.fix_mean,
-                fix_variance=args.fix_variance,
+                fix_random_noise=False,
+                zero_mean_prior=args.zero_mean_prior,
                 device=args.device,
                 seed=args.seed,
                 dtype=args.dtype,
             )
 
-# f1 = GP(
-#     input_dim=1,
-#     output_dim=1,
-#     inner_layer_dim=200,
-#     kernel_amp=0.001,
-#     kernel_length=1,
-#     device=args.device,
-#     seed=args.seed,
-#     dtype=args.dtype,
-# )
-#f1.freeze_parameters()
+f1.freeze_parameters()
 
 f2 = BayesianNN(
+                num_samples=20,
                 input_dim=train_dataset.inputs.shape[1],
                 structure=args.bnn_structure,
                 activation=args.activation,
-                output_dim=1,
-                layer_model=BayesLinear,
+                output_dim=10,
+                layer_model=args.bnn_layer,
                 dropout=args.dropout,
-                fix_mean=False,
-                fix_variance=False,
+                fix_random_noise=False,
+                zero_mean_prior=args.zero_mean_prior,
                 device=args.device,
                 seed=args.seed,
                 dtype=args.dtype,
@@ -80,17 +70,16 @@ dvip = FVI(
     prior_ip=f1,
     variational_ip=f2,
     Z = Z,
-    fix_inducing=args.fix_inducing,
     likelihood=args.likelihood,
     num_data=len(train_dataset),
-    num_samples=100,
+    num_samples=args.num_samples_train,
     bb_alpha=args.bb_alpha,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
     dtype=args.dtype,
     device=args.device,
 )
-#dvip.freeze_ll_variance()
+# dvip.freeze_ll_variance()
 dvip.print_variables()
 
 
@@ -143,20 +132,18 @@ ax6.set_yscale("symlog")
 ax1.set_title("Loss")
 ax2.set_title("Data Fitting Term")
 ax3.set_title("Regularizer Term")
-plt.savefig("plots/loss_" + create_file_name(args) + ".pdf", format="pdf")
+# plt.savefig("plots/loss_" + create_file_name(args) + ".pdf", format="pdf")
 plt.show()
 # plt.show()
 # Test the model
-
-print("asdasdad")
-train_metrics = score(
-    dvip, train_test_loader, args.metrics, use_tqdm=True, device=args.device
-)
+# train_metrics = score(
+#     dvip, train_test_loader, args.metrics, use_tqdm=True, device=args.device
+# )
 test_metrics = score(dvip, test_loader, args.metrics, use_tqdm=True, device=args.device)
 
-print("TRAIN RESULTS: ")
-for k, v in train_metrics.items():
-    print("\t - {}: {}".format(k, v))
+# print("TRAIN RESULTS: ")
+# for k, v in train_metrics.items():
+#     print("\t - {}: {}".format(k, v))
 
 print("TEST RESULTS: ")
 for k, v in test_metrics.items():
@@ -172,6 +159,6 @@ d = {
 
 df = pd.DataFrame.from_dict(d, orient="index").transpose()
 df.to_csv(
-    path_or_buf="results/fvi_" + create_file_name(args) + ".csv",
+    path_or_buf="results/tvip_" + create_file_name(args) + ".csv",
     encoding="utf-8",
 )
