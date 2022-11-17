@@ -94,7 +94,7 @@ class DVIPDataset(Dataset):
         train_indexes, test_indexes = train_test_split(
             np.arange(len(self)), test_size=test_size, random_state=seed
         )
-
+    
         train_dataset = Training_Dataset(
             self.inputs[train_indexes],
             self.targets[train_indexes],
@@ -200,6 +200,7 @@ class Boston_Dataset(DVIPDataset):
 
         data_url = "{}{}".format(uci_base, "housing/housing.data")
         raw_df = pd.read_fwf(data_url, header=None).to_numpy()
+
         self.split_data(raw_df)
 
 
@@ -296,6 +297,9 @@ class CO2_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
+        import ssl
+
+        ssl._create_default_https_context = ssl._create_unverified_context
         url = "https://scrippsco2.ucsd.edu/assets/data/atmospheric/stations/in_situ_co2/monthly/monthly_in_situ_co2_mlo.csv"
         data = pd.read_csv(url, comment='"', header=[0, 1, 2], dtype=float).values[
             :, [3, 4]
@@ -336,7 +340,7 @@ class CO2_Dataset(DVIPDataset):
     def len_train(self, test_size):
         return len(self.train)
 
-    def get_split(self, seed, *args):
+    def get_split(self, seed, test_size):
         return self.train, self.train_test, self.test
 
 
@@ -446,7 +450,7 @@ class Year_Dataset(DVIPDataset):
                     zfile.extractall("./data/")
 
             data = pd.read_csv(
-                "/data/YearPredictionMSD.txt", header=None, delimiter=","
+                "./data/YearPredictionMSD.txt", header=None, delimiter=","
             ).values
 
         self.len_data = data.shape[0]
@@ -670,10 +674,8 @@ class Taxi_Dataset(DVIPDataset):
             data = pd.read_csv(url)
             data.to_csv("data/taxi.csv")
 
-        print(data.columns)
         data["tpep_pickup_datetime"] = pd.to_datetime(data["tpep_pickup_datetime"])
         data["tpep_dropoff_datetime"] = pd.to_datetime(data["tpep_dropoff_datetime"])
-        print(data)
         data["day_of_week"] = data["tpep_pickup_datetime"].dt.dayofweek
         data["day_of_month"] = data["tpep_pickup_datetime"].dt.day
         data["month"] = data["tpep_pickup_datetime"].dt.month
@@ -700,7 +702,6 @@ class Taxi_Dataset(DVIPDataset):
         data = data[data["trip_duration"] >= 10]
         data = data[data["trip_duration"] <= 5 * 3600]
         data = data.astype(float)
-        print(data)
         data = data.values
         self.split_data(data)
 

@@ -23,7 +23,7 @@ args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
 
-train_d, train_test_d, test_d = args.dataset.get_split(args.split, args.test_size)
+train_d, train_test_d, test_d = args.dataset.get_split(seed = args.split, test_size = args.test_size)
 
 
 # Get VIP layers
@@ -72,7 +72,7 @@ def get_predictive_results(mean, var):
     return prediction_mean, prediction_var
 
 
-# Change MC samples for test
+# # Change MC samples for test
 dvip.num_samples = args.num_samples_test
 train_metrics = score(dvip, train_test_loader, args.metrics, device=args.device)
 test_metrics = score(dvip, test_loader, args.metrics, device=args.device)
@@ -108,13 +108,13 @@ f, (ax0, ax1) = plt.subplots(
 ax0.scatter(
     train_d.inputs * train_d.inputs_std + train_d.inputs_mean,
     train_d.targets * train_d.targets_std + train_d.targets_mean,
-    s=0.2,
+    s=5,
     label="Training set",
 )
 ax0.scatter(
     test_d.inputs * train_d.inputs_std + train_d.inputs_mean,
     test_d.targets,
-    s=0.2,
+    s=5,
     color="purple",
     label="Test set",
 )
@@ -163,6 +163,7 @@ ax1.fill_between(
 ax1.legend(fontsize=24)
 ax1.tick_params(axis="y", labelsize=24)
 ax1.tick_params(axis="x", labelsize=24)
+plt.show()
 plt.savefig("plots/extrapolate_" + create_file_name(args) + ".pdf", bbox_inches="tight")
 
 

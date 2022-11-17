@@ -560,7 +560,7 @@ class GP(GenerativeFunction):
         self.log_kernel_length = torch.nn.Parameter(
             torch.log(torch.tensor(kernel_length, dtype=self.dtype))
         )
-
+    
         # Sample noise values from Gaussian and uniform in order to
         # approximate the kernel
         self.z = self.gaussian_sampler((self.input_dim, self.inner_layer_dim))
@@ -601,6 +601,7 @@ class GP(GenerativeFunction):
 
         # Compute kernel function, start by scaling the inputs by the kernel length
         x = inputs / torch.exp(self.log_kernel_length)
+
         # Compute the normalizing factor
         scale_factor = torch.sqrt(
             2.0 * torch.exp(self.log_kernel_amp) * self.inner_layer_dim_inv
@@ -611,7 +612,6 @@ class GP(GenerativeFunction):
         # Once the kernel is approximated, generate the desired number
         # of samples from the approximate GP.
         w = self.get_noise()
-
         return phi @ w
 
 

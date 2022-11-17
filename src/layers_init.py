@@ -1,8 +1,8 @@
 import numpy as np
 import torch
-
+from scipy.cluster.vq import kmeans2
 from src.generative_functions import *
-from src.layers import VIPLayer
+from src.layers import VIPLayer, VIPLayerInducing, SparseGP
 
 
 class LinearProjection:
@@ -49,6 +49,7 @@ def init_layers(
     prior_kl,
     zero_mean_prior,
     input_prop,
+    inducing_layer,
     **kwargs
 ):
     """
@@ -134,6 +135,7 @@ def init_layers(
     zero_mean_prior : boolean
                       Wether to restraint the prior to have zero mean.
     """
+    Z = kmeans2(X, 100, minit="points", seed = 0)[0]
 
     # Create VIP layers. If integer, replicate input dimension. For example,
     # for a data of shape (N, D), vip_layers = 4 would generate layers with
@@ -214,8 +216,8 @@ def init_layers(
                 input_dim=dim_in,
                 output_dim=out,
                 inner_layer_dim=bnn_inner_dim,
-                kernel_amp=1.0,
-                kernel_length=1.0,
+                kernel_amp=1,
+                kernel_length=1,
                 seed=seed,
                 fix_random_noise=fix_prior_noise,
                 device=device,
@@ -239,8 +241,25 @@ def init_layers(
             )
 
         # Create layer
-        layers.append(
-            VIPLayer(
+        
+        if inducing_layer:
+            
+            layer = VIPLayerInducing(   
+            #layer = SparseGP(
+                f,
+                Z=Z,
+                input_dim=dim_in,
+                output_dim=dim_out,
+                add_prior_regularization=prior_kl,
+                mean_function=mf,
+                q_mu_initial_value=q_mu_initial_value,
+                log_layer_noise=log_layer_noise,
+                q_sqrt_initial_value=q_sqrt_initial_value,
+                dtype=dtype,
+                device=device,
+            )
+        else:
+            layer = VIPLayer(
                 f,
                 num_regression_coeffs=regression_coeffs,
                 input_dim=dim_in,
@@ -253,6 +272,9 @@ def init_layers(
                 dtype=dtype,
                 device=device,
             )
+        
+        layers.append(
+            layer
         )
 
     return layers

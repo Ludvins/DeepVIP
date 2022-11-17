@@ -303,6 +303,13 @@ def get_parser():
         help="Freeze the likelihood parameters, set them unlearnable",
     )
     parser.set_defaults(freeze_ll=False)
+    
+    parser.add_argument(
+        "--inducing_layer",
+        dest="inducing_layer",
+        action="store_true",
+    )
+    parser.set_defaults(inducing_layer=False)
 
     parser.add_argument(
         "--show",
