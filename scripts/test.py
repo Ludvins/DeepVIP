@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
 from scipy.cluster.vq import kmeans2
-from functorch import jacrev
+from functorch import jacrev, hessian
 
 sys.path.append(".")
 
@@ -49,14 +49,16 @@ f1 = BayesianNN(
     dtype=args.dtype,
 )
 
-f1 = GP(
-    input_dim=1,
-    output_dim=1,
-    inner_layer_dim=200,
-    device=args.device,
-    seed=args.seed,
-    dtype=args.dtype,
-)
+
+
+# f1 = GP(
+#     input_dim=1,
+#     output_dim=1,
+#     inner_layer_dim=20,
+#     device=args.device,
+#     seed=args.seed,
+#     dtype=args.dtype,
+# )
 
 
 X = test_dataset.inputs
@@ -104,6 +106,10 @@ for f in samples:
 
 ax2.set_title("Samples from Gaussianized IP using Moments")
 
+
+
+
+
 w = f1.get_weights()
 
 J = jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X), w)
@@ -118,8 +124,6 @@ ax6.set_title("Covariance matrix Taylor (1)")
 
 mean = f1.forward_mean(torch.tensor(X, dtype=args.dtype)).squeeze(-1).detach().numpy()
 
-print(mean[0])
-print(mean[-1])
 L = np.linalg.cholesky(cov.detach().numpy() + np.eye(mean.shape[0]) * 1e-6)
 z = np.random.randn(20, mean.shape[0])
 
@@ -137,84 +141,48 @@ for f in samples:
     ax3.plot(X.flatten(), f, alpha=0.3)
 ax3.set_title("Samples from Gaussianized IP using Taylor (1)")
 
-# xmean = f1.get_weights()
 
-# shapes = [list(a.shape) for a in xmean]
-# sizes = [np.prod(a) for a in shapes]
+print(J.shape)
+H = hessian(f1.forward_weights, argnums = 1)(torch.tensor(X), w)
 
-# xmean = torch.cat([torch.flatten(a, -2, -1) for a in xmean], dim=-1).detach().numpy()
-# xcov = torch.exp(f1.get_std_params()).detach().numpy() ** 2
-
-# L = xmean.shape[0]
-# alpha = 1e-3
-# beta = 2
-
-# lamb = alpha ** 2 * L - L
+H = torch.cat([
+    torch.diagonal(H[i][i].flatten(-4, -3).flatten(-2, -1), dim1 = -2, dim2 = -1)
+               
+               for i in range(len(H))], dim=-1).transpose(-2, -1)
 
 
-# sqrt = np.sqrt((L + lamb) * xcov)
-# barx = [xmean]
-# for i in range(L):
-#     a = np.copy(xmean)
-#     a[i] += sqrt[i]
-#     barx.append(a)
 
-# for i in range(L, 2 * L):
-#     a = np.copy(xmean)
-#     a[i - L] -= sqrt[i - L]
-#     barx.append(a)
+# mean = mean + 0.5 * torch.einsum("nsd, s-> nd", H, S).squeeze(-1).detach().cpu().numpy()
+# cov = cov + torch.einsum("nsd, s, msd -> nmd", H, S, H).squeeze(-1)
 
 
-# Wm = [torch.tensor(lamb / (L + lamb))]
-# Wc = [torch.tensor(lamb / (L + lamb) + (1 - alpha ** 2 + beta))]
-# for i in range(1, 2 * L + 1):
-#     Wm.append(torch.tensor(1 / (2 * (L + lamb))))
-#     Wc.append(torch.tensor(1 / (2 * (L + lamb))))
+mean = mean - 0.5 * torch.einsum("nsd, s-> nd", J, S).squeeze(-1).detach().cpu().numpy()
+cov = cov + torch.einsum("nsd, s, msd -> nmd", J**2, S**2, J**2).squeeze(-1)
 
 
-# Y = []
-# for x in barx:
 
-#     v = []
-#     for i in range(len(shapes)):
-#         aux = x[int(np.sum(sizes[:i])) : int(np.sum(sizes[: i + 1]))]
-#         aux = aux.reshape(shapes[i])
-#         v.append(torch.tensor(aux, dtype=args.dtype))
-
-#     Y.append(f1.forward_weights(torch.tensor(X, dtype=args.dtype), v).unsqueeze(0))
-
-# Y = torch.concat(Y, dim=0)
-# Wm = torch.stack(Wm).unsqueeze(-1).unsqueeze(-1)
-# Wc = torch.stack(Wc)
-
-# ymean = torch.sum(Y * Wm, 0)
-# a = (Y - ymean).squeeze(-1)
-# Ycov = torch.einsum("s,sn,sm->nm", Wc, a, a).detach().numpy()
+pos = ax7.imshow(cov.detach().numpy())
+fig.colorbar(pos, ax=ax7)
+ax7.set_title("Covariance matrix Taylor Logarithm")
 
 
-# ax7.imshow(Ycov)
-# ax7.set_title("Covariance matrix Kalman")
+L = np.linalg.cholesky(cov.detach().numpy() + np.eye(mean.shape[0]) * 1e-6)
+z = np.random.randn(20, mean.shape[0])
 
 
-# ax4.plot(X.flatten(), ymean.flatten())
-# ax4.fill_between(
-#     X.flatten(),
-#     ymean.flatten() - 2 * np.sqrt(np.diag(Ycov)),
-#     ymean.flatten() + 2 * np.sqrt(np.diag(Ycov)),
-#     alpha=0.2,
-# )
+samples = mean + (L @ z.T).T
 
-# L = np.linalg.cholesky(Ycov + np.eye(ymean.shape[0]) * 1e-4)
-# z = np.random.randn(20, ymean.shape[0])
+ax4.plot(X.flatten(), mean)
+ax4.fill_between(
+    X.flatten(),
+    mean - 2 * np.sqrt(np.diag(cov.detach().numpy())),
+    mean + 2 * np.sqrt(np.diag(cov.detach().numpy())),
+    alpha=0.2,
+)
+for f in samples:
+    ax4.plot(X.flatten(), f, alpha=0.3)
+ax4.set_title("Samples from Gaussianized IP using Taylor Logarithm")
 
 
-# samples = ymean.flatten() + (L @ z.T).T
 
-
-# for f in samples:
-#     ax4.plot(X.flatten(), f, alpha=0.3)
-# ax4.set_title("Samples from Gaussianized IP using Kalman")
-
-# plt.tight_layout()
-# plt.savefig("figure.pdf")
 plt.show()

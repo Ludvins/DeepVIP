@@ -991,8 +991,6 @@ class GP(GenerativeFunction):
         input_dim=1,
         output_dim=1,
         inner_layer_dim=10,
-        kernel_amp=1,
-        kernel_length=1,
         seed=2147483647,
         device=None,
         dtype=torch.float64,
@@ -1013,31 +1011,66 @@ class GP(GenerativeFunction):
         self.uniform_sampler = UniformSampler(seed, device)
 
         self.rng = np.random.default_rng(0)
-        self.w1_mean = torch.tensor(
+        self.w1_mean = torch.nn.Parameter(
+            torch.tensor(
                  self.rng.normal(size = (self.input_dim,  self.inner_layer_dim)) * 1,
                  dtype=self.dtype, 
                  device=self.device)
-        self.b1_mean = torch.tensor(
-                 self.rng.normal(size = (1,  self.inner_layer_dim)) * 0.1,
+        )
+        self.b1_mean = torch.nn.Parameter(
+            torch.tensor(
+                 self.rng.normal(size = (1,  self.inner_layer_dim))  * 1,
                  dtype=self.dtype, 
-                 device=self.device)
-        self.w2_mean = torch.tensor(
-                self.rng.normal(size = (self.inner_layer_dim, output_dim)) * 0.01,
+                 device=self.device))
+        self.w1_log_std = torch.nn.Parameter(
+            torch.tensor(
+                 self.rng.normal(size = (self.input_dim,  self.inner_layer_dim))  * 1,
+                 dtype=self.dtype, 
+                 device=self.device))
+        self.b1_log_std = torch.nn.Parameter(
+            torch.tensor(
+                 self.rng.normal(size = (1,  self.inner_layer_dim))  * 1,
+                 dtype=self.dtype, 
+                 device=self.device))
+        self.w2_mean = torch.nn.Parameter(
+            torch.tensor(
+                self.rng.normal(size = (self.inner_layer_dim, output_dim))  * 1,
                 dtype=self.dtype, 
-                device=self.device)
-        self.b2_mean = torch.tensor(
-                 self.rng.normal(size = (1,  output_dim)) * 0.1,
+                device=self.device))
+        self.b2_mean = torch.nn.Parameter(
+            torch.tensor(
+                 self.rng.normal(size = (1,  output_dim))  * 1,
                  dtype=self.dtype, 
-                 device=self.device)
-
+                 device=self.device))
+        self.w2_log_std = torch.nn.Parameter(
+            torch.tensor(
+                 self.rng.normal(size = (self.inner_layer_dim,  output_dim)) * 1,
+                 dtype=self.dtype, 
+                 device=self.device))
+        self.b2_log_std = torch.nn.Parameter(
+            torch.tensor(
+                 self.rng.normal(size = (1,  output_dim))  * 1,
+                 dtype=self.dtype, 
+                 device=self.device))
+        
+        # self.w1_mean.requires_grad = False
+        # self.b1_mean.requires_grad = False
+        # self.w1_log_std.requires_grad = False
+        # self.b1_log_std.requires_grad = False
+        # self.w2_mean.requires_grad = False
+        # self.b2_mean.requires_grad = False
+        # self.w2_log_std.requires_grad = False
+        # self.b2_log_std.requires_grad = False
+        
+        
         self.activation = lambda x:  0.5 * (1 + torch.erf((x) / torch.sqrt(torch.tensor(2))))
 
     def get_noise(self, num_samples):
 
-        w1 = self.w1_mean + self.gaussian_sampler((num_samples, self.input_dim, self.inner_layer_dim)).to(self.dtype)
-        b1 = self.b1_mean + self.gaussian_sampler((num_samples, 1, self.inner_layer_dim)).to(self.dtype)
-        w2 = self.w2_mean + self.gaussian_sampler((num_samples, self.inner_layer_dim, self.output_dim)).to(self.dtype)
-        b2 = self.b2_mean + self.gaussian_sampler((num_samples, 1, self.output_dim)).to(self.dtype)
+        w1 = self.w1_mean + self.gaussian_sampler((num_samples, self.input_dim, self.inner_layer_dim)).to(self.dtype) * torch.exp(self.w1_log_std)
+        b1 = self.b1_mean + self.gaussian_sampler((num_samples, 1, self.inner_layer_dim)).to(self.dtype) * torch.exp(self.b1_log_std)
+        w2 = self.w2_mean + self.gaussian_sampler((num_samples, self.inner_layer_dim, self.output_dim)).to(self.dtype)* torch.exp(self.w2_log_std)
+        b2 = self.b2_mean + self.gaussian_sampler((num_samples, 1, self.output_dim)).to(self.dtype)* torch.exp(self.b2_log_std)
 
         return w1, b1, w2, b2
 
@@ -1082,77 +1115,66 @@ class GP(GenerativeFunction):
     
     def GP_mean(self, inputs):
         #return self.forward_mean(inputs)
-        x = inputs / torch.exp(self.log_kernel_length)
-        scale_factor = torch.exp(self.log_kernel_amp)
+        x = inputs
             
         aux1 = x @ self.w1_mean + self.b1_mean
-        aux2 = torch.sqrt(1 + torch.sum(x*x, 1) ).unsqueeze(-1)
+        aux2 = torch.sqrt(1 + torch.exp(self.b1_log_std)**2 + torch.sum((x * x).unsqueeze(-1) * torch.exp(self.w1_log_std.unsqueeze(0))**2, 1))
         x = aux1 / aux2
         
-        phi = scale_factor * self.activation(x)
+        phi = self.activation(x) / np.sqrt(self.inner_layer_dim)
 
         return phi @ self.w2_mean + self.b2_mean
     
-    # def GP_cov(self, x1, x2):
+    def GP_cov(self, x1, x2):
         
-    #     x1 = x1 / torch.exp(self.log_kernel_length)
-    #     x2 = x2 / torch.exp(self.log_kernel_length)
+        mean_v1 = (x1 @ self.w1_mean + self.b1_mean).squeeze(0)
+        mean_v2 = (x2 @ self.w1_mean + self.b1_mean).squeeze(0)
 
-    #     scale_factor = torch.sqrt(
-    #             2.0 * torch.exp(self.log_kernel_amp) / self.output_dim
-    #         )
+        var_v1 = ((x1*x1) @ torch.exp(self.w1_log_std)**2 + torch.exp(self.b1_log_std)**2).squeeze(0)
 
-    #     mean_v1 = (x1 @ self.w1_mean + self.b1_mean).squeeze(0)
-    #     mean_v2 = (x2 @ self.w1_mean + self.b1_mean).squeeze(0)
-
-    #     var_v1 = torch.sum(x1**2) * torch.ones(self.inner_layer_dim)
-    #     var_v2 = torch.sum(x2**2) * torch.ones(self.inner_layer_dim)
-    #     cov_v1v2 = torch.sum(x1*x2) * torch.ones(self.inner_layer_dim)
-    #     f = lambda a: self.activation(a) \
-    #         * self.activation(
-    #             (mean_v2 + cov_v1v2 / var_v1  * (a - mean_v1)) 
-    #             / 
-    #             (torch.sqrt(1 + var_v2 - cov_v1v2**2 / var_v1))
-    #         )
+        var_v2 =  ((x2*x2) @ torch.exp(self.w1_log_std)**2+ torch.exp(self.b1_log_std)**2).squeeze(0)
+        cov_v1v2 =  ((x1*x2) @ torch.exp(self.w1_log_std)**2+ torch.exp(self.b1_log_std)**2).squeeze(0)
         
-    #     xn, wn = hermgauss(20, self.dtype, self.device)
-    #     gh_x = xn.unsqueeze(-1)
-    #     # Shape (N, num_hermite)
-    #     Xall = gh_x * torch.sqrt(torch.clip(2.0 * var_v1, min=1e-10)) + mean_v1
-    #     # Shape (num_hermite, 1)
-    #     gh_w = wn.reshape(-1, 1) / torch.sqrt(torch.tensor(np.pi))
-    #     feval = f(Xall)
-    #     # Shape (N, num_hermite)
-    #     feval = feval.T @ gh_w
+        f = lambda a: self.activation(a) \
+            * self.activation(
+                (mean_v2 + cov_v1v2 / var_v1  * (a - mean_v1)) 
+                / 
+                (torch.sqrt(1 + var_v2 - cov_v1v2**2 / var_v1))
+            )
+        
+        xn, wn = hermgauss(10, self.dtype, self.device)
+        gh_x = xn.unsqueeze(-1)
+        # Shape (N, num_hermite)
+        Xall = gh_x * torch.sqrt(torch.clip(2.0 * var_v1, min=1e-10)) + mean_v1
+        # Shape (num_hermite, 1)
+        gh_w = wn.reshape(-1, 1) / torch.sqrt(torch.tensor(np.pi))
+        feval = f(Xall)
+        # Shape (N, num_hermite)
+        feval = feval.T @ gh_w
+        a =  torch.exp(self.b2_log_std)**2 + torch.sum(feval * (torch.exp(self.w2_log_std)**2 + self.w2_mean**2))/self.inner_layer_dim
 
-    #     a =  1 + scale_factor * torch.sum(feval / (self.inner_layer_dim + self.w2_mean**2)) - self.GP_mean(x1.unsqueeze(-1))*self.GP_mean(x2.unsqueeze(-1))
-    #     return a
+        x1 = self.activation(mean_v1 / torch.sqrt(1 + var_v1)) * self.w2_mean.T
+        x2 = self.activation(mean_v2 / torch.sqrt(1 + var_v2)) * self.w2_mean.T
+        
+        return a - torch.sum(x1*x2)/self.inner_layer_dim
     
     
     def GP_cov(self, x1, x2 = None):
-        
+                
         if x2 is None:
             x2 = x1
-        
-        # Shape (N1, D1)
-        x1 = x1 / torch.exp(self.log_kernel_length)
-        # Shape (N2, D1)
-        x2 = x2 / torch.exp(self.log_kernel_length)
-
-        scale_factor = torch.exp(self.log_kernel_amp)
 
         # Shape (N1, 1, D2)
         mean_v1 = (x1 @ self.w1_mean + self.b1_mean).unsqueeze(1)
         # Shape (1, N2, D2)
         mean_v2 = (x2 @ self.w1_mean + self.b1_mean).unsqueeze(0)
         
-
         # Shape (N1, 1, D2)        
-        var_v1 = torch.tile(torch.sum(x1 * x1, dim = -1, keepdim=True).unsqueeze(1), (1, 1, self.inner_layer_dim))
+        var_v1 = ((x1*x1) @ torch.exp(self.w1_log_std)**2 + torch.exp(self.b1_log_std)**2).squeeze(0).unsqueeze(1)
         # Shape (1, N2, D2)
-        var_v2 = torch.tile(torch.sum(x2 * x2, dim = -1, keepdim=True).unsqueeze(0) , (1, 1,self.inner_layer_dim))
+        var_v2 = ((x2*x2) @ torch.exp(self.w1_log_std)**2 + torch.exp(self.b1_log_std)**2).squeeze(0).unsqueeze(0)
         # Shape (N1, N2, D2)
-        cov_v1v2 = torch.tile((x1 @ x2.T).unsqueeze(-1) , (1,1,self.inner_layer_dim))
+        cov_v1v2 = torch.einsum("ad, bd, do -> abo", x1, x2, torch.exp(self.w1_log_std)**2)
 
         def f(a):
             return self.activation(a) \
@@ -1173,31 +1195,25 @@ class GP(GenerativeFunction):
         # Shape (num_hermite, 1, 1)
         gh_w = wn.reshape(-1, 1, 1, 1) / torch.sqrt(torch.tensor(np.pi))
         feval = f(Xall)
-
         # Shape (N, num_hermite)
         feval = torch.sum(feval * gh_w, 0)
 
-        # E[ (f(x) - m(x)) (f(x') - m(x') ] =
-        #   E[ f(x) * f(x') + f(x) * m(x') + f(x') * m(x') + m(x) * m(x')]
+
+        red = torch.sum((torch.exp(self.w2_log_std)**2 + self.w2_mean**2).T * feval, -1)/self.inner_layer_dim
         
-        a= 1 +  torch.sum( scale_factor * feval / self.inner_layer_dim, -1) \
-            - self.GP_mean(x1) @ self.GP_mean(x2).T
-        return a
-    
-    
+        x1 = self.activation(mean_v1 / torch.sqrt(1 + var_v1)) * self.w2_mean.T
+        x2 = self.activation(mean_v2 / torch.sqrt(1 + var_v2)) * self.w2_mean.T
+        
+        return  torch.exp(self.b2_log_std)**2 + red - torch.sum(x1*x2, -1)/self.inner_layer_dim
     
     def get_weights(self):
         return tuple([self.w1_mean, self.b1_mean, self.w2_mean, self.b2_mean])
 
     def get_std_params(self):
-        w1 = torch.ones((self.input_dim, self.inner_layer_dim))
-        b1 = torch.ones((1, self.inner_layer_dim))
-        b2 = torch.ones((1, self.output_dim))
-        w2 = torch.ones((self.inner_layer_dim, self.output_dim)) / np.sqrt(self.inner_layer_dim)
-        return torch.cat([torch.log(w1.flatten()),
-                          torch.log(b1.flatten()),
-                          torch.log(w2.flatten()),
-                          torch.log(b2.flatten()),
+        return torch.cat([self.w1_log_std.flatten(),
+                          self.b1_log_std.flatten(),
+                          self.w2_log_std.flatten(),
+                          self.b2_log_std.flatten(),
                           ])
         
         

@@ -137,10 +137,10 @@ class SPGP_Dataset(DVIPDataset):
         inputs = np.loadtxt("data/SPGP_dist/train_inputs")
         targets = np.loadtxt("data/SPGP_dist/train_outputs")
         test_inputs = np.loadtxt("data/SPGP_dist/test_inputs")
-        test_inputs = np.linspace(-40, 50, 200)
+        #test_inputs = np.linspace(-40, 50, 200)
         mask = ((inputs < 1.5) | (inputs > 3.5)).flatten()
 
-        print(inputs.shape)
+        
         
         self.train = Training_Dataset(
             inputs[mask, np.newaxis],

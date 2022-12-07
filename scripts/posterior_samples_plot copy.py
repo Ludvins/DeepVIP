@@ -9,7 +9,7 @@ from scipy.cluster.vq import kmeans2
 
 sys.path.append(".")
 
-from src.fvi import FVI, FVI2, FVI3, FVI4, FVI5
+from src.fvi import FVI, FVI2, FVI3, FVI4, SparseGP
 from src.layers_init import init_layers, init_layers_tvip
 from src.layers import TVIPLayer
 from src.likelihood import QuadratureGaussian
@@ -53,14 +53,12 @@ f1 = BayesianNN(
 f1 = GP(
     input_dim=1,
     output_dim=1,
-    inner_layer_dim=100,
-    kernel_amp=1,
-    kernel_length=1,
+    inner_layer_dim=20,
     device=args.device,
     seed=args.seed,
     dtype=args.dtype,
 )
-#f1.freeze_parameters()
+# f1.freeze_parameters()
 
 f2 = BayesianNN(
                 input_dim=train_dataset.inputs.shape[1],
@@ -76,14 +74,14 @@ f2 = BayesianNN(
             )
 
 # Create DVIP object
-dvip = FVI3(
+dvip = SparseGP(
     prior_ip=f1,
     variational_ip=f2,
     Z = Z,
     fix_inducing=args.fix_inducing,
     likelihood=args.likelihood,
     num_data=len(train_dataset),
-    num_samples=100,
+    num_samples=1,
     bb_alpha=args.bb_alpha,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
@@ -138,6 +136,7 @@ plt.show()
 
 dvip.print_variables()
 
+
 import matplotlib.pyplot as plt
 
 plt.figure(figsize=(20, 10))
@@ -163,7 +162,7 @@ ylims = ax1.get_ylim()
 
 X = torch.tensor(test_dataset.inputs, device=args.device)
 F, std = dvip(X, 20)
-print(F.shape)
+print(std.shape)
 u = dvip.generate_u_samples(20).detach().numpy() * train_dataset.targets_std + train_dataset.targets_mean
 
 F = F.squeeze(-1).cpu().detach().numpy()

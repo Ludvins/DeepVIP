@@ -10,7 +10,7 @@ import gpytorch
 
 sys.path.append(".")
 
-from src.fvi import FVI, FVI2, FVI3, FVI4, FVI5
+from src.fvi import FVI, FVI2, FVI3, FVI4
 from src.layers_init import init_layers, init_layers_tvip
 from src.layers import TVIPLayer
 from src.likelihood import QuadratureGaussian
@@ -35,14 +35,12 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-Z = kmeans2(train_dataset.inputs, args.num_inducing, minit='points', seed = args.seed)[0]
+Z = kmeans2(train_dataset.inputs, 5, minit='points', seed = args.seed)[0]
 
 f = GP(
     input_dim=1,
     output_dim=1,
-    inner_layer_dim=200,
-    kernel_amp=1,
-    kernel_length=1,
+    inner_layer_dim=20,
     device=args.device,
     seed=args.seed,
     dtype=args.dtype,
@@ -64,7 +62,7 @@ class Mean(gpytorch.means.Mean):
         return f.GP_mean(x).T
 
 from gpytorch.variational import CholeskyVariationalDistribution
-from gpytorch.variational import VariationalStrategy
+from gpytorch.variational import VariationalStrategy, UnwhitenedVariationalStrategy
 
 class GPModel(gpytorch.models.ApproximateGP):
     def __init__(self, inducing_points):
@@ -86,14 +84,6 @@ model = GPModel(inducing_points=torch.tensor(Z, dtype = args.dtype))
 likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.GreaterThan(1e-12))
 likelihood.noise = np.exp(-5)
 
-for name, param in model.named_parameters():
-    if param.requires_grad:
-        print(name, param.data)
-for name, param in likelihood.named_parameters():
-    if param.requires_grad:
-        print(name, param.data)
-print(Z.shape)
-
 model.train()
 likelihood.train()
 
@@ -106,6 +96,13 @@ optimizer = torch.optim.Adam([
 mll = gpytorch.mlls.VariationalELBO(likelihood, model, num_data=train_dataset.inputs.shape[0])
 
 from tqdm import tqdm
+
+# for name, param in model.named_parameters():
+#     if param.requires_grad:
+#         print(name, param.data)
+# for name, param in likelihood.named_parameters():
+#     if param.requires_grad:
+#         print(name, param.data)
 
 data_iter = iter(train_loader)
 
@@ -125,6 +122,10 @@ for i in epochs_iter:
     loss = -mll(output, target.T)
     epochs_iter.set_postfix(loss=loss.item())
     loss.backward()
+    
+    print(f.b2_log_std.grad)
+    input()
+    
     optimizer.step()
         
 model.eval()
@@ -138,25 +139,72 @@ for name, param in likelihood.named_parameters():
         print(name, param.data)
 import matplotlib.pyplot as plt
 
+
 plt.figure(figsize=(20, 10))
+ax1 = plt.subplot(2, 2, 1)
+ax2 = plt.subplot(2, 2, 2)
+ax3 = plt.subplot(2, 2, 3)
+ax4 = plt.subplot(2, 2, 4)
+# ax5 = plt.subplot(3, 1, 3)
 
 
+x = test_dataset.inputs
+y = test_dataset.targets
+if y is not None:
+    ax1.scatter(test_dataset.inputs, y, label="Test dataset", s=5)
 
 x = train_dataset.inputs
 y = train_dataset.targets * train_dataset.targets_std + train_dataset.targets_mean
-plt.scatter(train_dataset.inputs, y, label="Training dataset", s=5)
+ax1.scatter(train_dataset.inputs, y, label="Training dataset", s=5)
+ax3.scatter(train_dataset.inputs, y, label="Training dataset", s=5)
+
+ax1.set_title("Dataset")
+ylims = ax1.get_ylim()
+
+X = torch.tensor(test_dataset.inputs, device=args.device)
+
+u_mean = model.variational_strategy._variational_distribution.variational_mean.detach().cpu().numpy()
+inducing = model.variational_strategy.inducing_points.detach().cpu().numpy()
+u_covar = model.variational_strategy._variational_distribution.chol_variational_covar
+u_diag = np.sqrt(torch.diagonal(u_covar).detach().cpu().numpy())
+
+z = np.random.randn(20, *u_mean.shape)
+u = (u_mean + z * u_diag) * train_dataset.targets_std + train_dataset.targets_mean
 
 
-
+sort = np.argsort(test_dataset.inputs.flatten())
 
 preds = model(torch.tensor(test_dataset.inputs).to(args.dtype))
 mean = preds.mean
-var = preds.variance
+std = np.sqrt((preds.variance + likelihood.noise).detach().numpy().flatten())
 
-plt.plot(test_dataset.inputs.flatten(), mean.detach().numpy().flatten())
-plt.fill_between(test_dataset.inputs.flatten(),
-                 mean.detach().numpy().flatten() - 3*var.detach().numpy().flatten(),
-                 mean.detach().numpy().flatten() + 3*var.detach().numpy().flatten(),
+ax2.plot(test_dataset.inputs.flatten(), mean.detach().numpy().flatten())
+ax2.fill_between(test_dataset.inputs.flatten(),
+                 mean.detach().numpy().flatten() - 3*std,
+                 mean.detach().numpy().flatten() + 3*std,
                  alpha = 0.2
                  )
+
+
+ax2.set_title(r"$Q(\mathbf{f})$ samples")
+ax2.scatter(train_dataset.inputs, y, s=5, zorder = 2)
+ax2.set_ylim(-3, 3)
+
+ax3.set_title(r"$Q(\mathbf{u})$ samples")
+
+for i in range(u.shape[0]):
+    ax3.scatter(inducing, u[i], alpha=0.5)
+ax3.scatter(Z, np.zeros_like(Z), alpha=0.9, color = "black")
+
+
+Fprior = f(X.to(args.dtype), 100)
+Fprior = Fprior.squeeze().cpu().detach().numpy()* train_dataset.targets_std + train_dataset.targets_mean
+
+ax4.plot(test_dataset.inputs.flatten()[sort], Fprior.T[sort], alpha=0.5)
+ax4.set_title(
+    r"$P(\mathbf{f})$ samples",
+)
+
+plt.tight_layout()
+plt.savefig("plots/SGP_" + create_file_name(args) + ".pdf", format="pdf")
 plt.show()
