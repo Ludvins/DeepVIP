@@ -50,15 +50,16 @@ f1 = BayesianNN(
                 dtype=args.dtype,
             )
 
-f1 = GP(
-    input_dim=1,
-    output_dim=1,
-    inner_layer_dim=20,
-    device=args.device,
-    seed=args.seed,
-    dtype=args.dtype,
-)
-# f1.freeze_parameters()
+# f1 = GP(
+#     input_dim=1,
+#     output_dim=1,
+#     inner_layer_dim=20,
+#     device=args.device,
+#     seed=args.seed,
+#     dtype=args.dtype,
+# )
+
+f1.freeze_parameters()
 
 f2 = BayesianNN(
                 input_dim=train_dataset.inputs.shape[1],
@@ -74,7 +75,7 @@ f2 = BayesianNN(
             )
 
 # Create DVIP object
-dvip = SparseGP(
+dvip = FVI3(
     prior_ip=f1,
     variational_ip=f2,
     Z = Z,

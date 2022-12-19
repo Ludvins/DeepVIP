@@ -3,7 +3,7 @@ import numpy as np
 from .flows import *
 from .noise_samplers import *
 
-from functorch import jacrev, jacfwd
+from functorch import jacrev, jacfwd, hessian
 
 
 class FVI(torch.nn.Module):
@@ -217,11 +217,23 @@ class FVI(torch.nn.Module):
             .transpose(-1, -2)
             .to(self.dtype)
         )
+        H = hessian(ip.forward_weights, argnums = 1)(X, w)
 
+
+        H = torch.cat([
+                torch.cat([
+                    H[i][j].flatten(-4, -3).flatten(-2, -1) 
+                for j in range(len(H))], dim=-1)
+            for i in range(len(H))], dim = -2)
+
+        H = torch.diagonal(H, dim1=-2, dim2 = -1).transpose(-1, -2).to(self.dtype)
+        
         S = torch.exp(ip.get_std_params()) ** 2
 
-        cov = torch.einsum("nsd, s, msd -> nmd", J, S, J)
+        cov = torch.einsum("nsd, s, msd -> nmd", J, S, J) #
+        cov = cov + torch.einsum("nsd, s, msd -> nmd", H, S**2, H)
         mean = ip.forward_mean(X)
+        mean = mean + 0.5 * torch.einsum("s, nsd-> nd",S, H)
         return mean, cov
 
     def KL(self, Qu_mean, Qu_var, Pu_mean, Pu_var):

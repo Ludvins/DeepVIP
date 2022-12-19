@@ -112,25 +112,25 @@ class BayesLinear(GenerativeFunction):
 
         self.weight_mu = torch.nn.Parameter(
                     torch.tensor(
-                        rng.normal(size = (input_dim, output_dim))*1,
+                        rng.normal(size = (input_dim, output_dim)) * 0,
                         dtype=dtype, 
                         device=device)
             )
         self.bias_mu = torch.nn.Parameter(
                 torch.tensor(
-                    rng.normal(size = (1, output_dim))*1, 
+                    rng.normal(size = (1, output_dim)) * 0, 
                     dtype=dtype,
                     device=device)
             )
 
         self.weight_log_sigma = torch.nn.Parameter(
             torch.tensor(
-                rng.normal(size = (input_dim, output_dim))*0.1,
+                rng.normal(size = (input_dim, output_dim))* 0 - 1,
                 dtype=dtype, 
                 device=device)
         )
         self.bias_log_sigma = torch.nn.Parameter(
-            torch.tensor(rng.normal(size = (1, output_dim)) * 0.1,
+            torch.tensor(rng.normal(size = (1, output_dim)) * 0 - 1,
                          dtype=dtype, 
                          device=device)
         )
@@ -149,8 +149,8 @@ class BayesLinear(GenerativeFunction):
         z_b_shape = (num_samples, 1, self.output_dim)
 
         # Generate Gaussian values
-        z_w = self.gaussian_sampler(z_w_shape)
-        z_b = self.gaussian_sampler(z_b_shape)
+        z_w = self.gaussian_sampler(z_w_shape).to(self.dtype)
+        z_b = self.gaussian_sampler(z_b_shape).to(self.dtype)
         return (z_w, z_b)
 
     def forward(self, inputs, num_samples):
@@ -196,6 +196,16 @@ class BayesLinear(GenerativeFunction):
 
     def get_weights(self):
         return [self.weight_mu, self.bias_mu]
+    
+    def sample_weights(self, num_samples):
+        # Generate Gaussian values
+        z_w, z_b = self.get_noise(num_samples)
+
+        # Perform reparameterization trick
+        w = self.weight_mu + z_w * torch.exp(self.weight_log_sigma)
+        b = self.bias_mu + z_b * torch.exp(self.bias_log_sigma)
+        return [w.to(self.dtype), b.to(self.dtype)]
+
 
     def get_std_params(self):
         return torch.cat(
@@ -542,6 +552,7 @@ class BayesianNN(GenerativeFunction):
         # Last layer has identity activation function
         return self.layers[-1].forward_weights(x, weights[-2], weights[-1])
 
+
     def KL(self):
         """Computes the Kl divergence of the model as the addition of the
         KL divergences of its sub-models."""
@@ -551,6 +562,12 @@ class BayesianNN(GenerativeFunction):
         weights = []
         for layer in self.layers:
             weights = weights + layer.get_weights()
+        return tuple(weights)
+
+    def sample_weights(self, num_samples):
+        weights = []
+        for layer in self.layers:
+            weights = weights + layer.sample_weights(num_samples)
         return tuple(weights)
 
     def get_std_params(self):
@@ -1024,12 +1041,12 @@ class GP(GenerativeFunction):
                  device=self.device))
         self.w1_log_std = torch.nn.Parameter(
             torch.tensor(
-                 self.rng.normal(size = (self.input_dim,  self.inner_layer_dim))  * 1,
+                 self.rng.normal(size = (self.input_dim,  self.inner_layer_dim))  * 0.1,
                  dtype=self.dtype, 
                  device=self.device))
         self.b1_log_std = torch.nn.Parameter(
             torch.tensor(
-                 self.rng.normal(size = (1,  self.inner_layer_dim))  * 1,
+                 self.rng.normal(size = (1,  self.inner_layer_dim))  * 0.1,
                  dtype=self.dtype, 
                  device=self.device))
         self.w2_mean = torch.nn.Parameter(
@@ -1044,12 +1061,12 @@ class GP(GenerativeFunction):
                  device=self.device))
         self.w2_log_std = torch.nn.Parameter(
             torch.tensor(
-                 self.rng.normal(size = (self.inner_layer_dim,  output_dim)) * 1,
+                 self.rng.normal(size = (self.inner_layer_dim,  output_dim)) * 0.1,
                  dtype=self.dtype, 
                  device=self.device))
         self.b2_log_std = torch.nn.Parameter(
             torch.tensor(
-                 self.rng.normal(size = (1,  output_dim))  * 1,
+                 self.rng.normal(size = (1,  output_dim))  * 0.1,
                  dtype=self.dtype, 
                  device=self.device))
         
@@ -1098,6 +1115,13 @@ class GP(GenerativeFunction):
         phi = self.activation(x @ w1 + b1) / np.sqrt(self.inner_layer_dim)
 
         return phi @ w2 + b2
+    
+    def sample_weights(self, num_samples):
+        # Generate Gaussian values
+        w1, b1, w2, b2 = self.get_noise(num_samples)
+        
+        return [w1, b1, w2, b2]
+
     
     def forward_mean(self, inputs):
         x = inputs  

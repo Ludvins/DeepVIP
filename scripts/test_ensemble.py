@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
 from scipy.cluster.vq import kmeans2
-from functorch import jacrev, hessian, jacfwd
+from functorch import jacrev, hessian, jacfwd, vmap
 
 sys.path.append(".")
 
@@ -69,9 +69,6 @@ ax1 = plt.subplot(3, 2, 1)
 ax2 = plt.subplot(3, 2, 2)
 ax3 = plt.subplot(3, 2, 3)
 ax4 = plt.subplot(3, 2, 4)
-ax5 = plt.subplot(3, 3, 7)
-ax6 = plt.subplot(3, 3, 8)
-ax7 = plt.subplot(3, 3, 9)
 fig = plt.gcf()
 
 samples = f1(torch.tensor(X, dtype=args.dtype), 200)
@@ -83,123 +80,66 @@ ax1.set_title("Samples from original IP")
 mean = torch.mean(samples, dim=0).squeeze().detach().numpy()
 cov = torch.cov(samples.squeeze().T)
 
-pos = ax5.imshow(cov.detach().numpy())
-
-fig.colorbar(pos, ax=ax5)
-ax5.set_title("Covariance matrix Moments")
-
-
-L = np.linalg.cholesky(cov.detach().numpy() + np.eye(mean.shape[0]) * 1e-6)
-z = np.random.randn(30, mean.shape[0])
-
-
-samples = mean + (L @ z.T).T
-ax2.plot(X.flatten(), mean)
+ax2.plot(X.flatten(), mean, alpha = 0.5)
 ax2.fill_between(
     X.flatten(),
     mean - 2 * np.sqrt(np.diag(cov.detach().numpy())),
     mean + 2 * np.sqrt(np.diag(cov.detach().numpy())),
-    alpha=0.2,
+    alpha=0.1,
 )
-for f in samples:
-    ax2.plot(X.flatten(), f, alpha=0.3)
 
-ax2.set_title("Samples from Gaussianized IP using Moments")
+ax2.set_title("GP using Moments")
 
 
 
 
 
-w = f1.sample_weights(12)
+w = f1.sample_weights(20)
 mean = f1.get_weights()
 
 diff = [w[i] - mean[i] for i in range(len(w))]
 
 diff = torch.cat([torch.flatten(a, -2, -1) for a in diff], -1)
 
-print(diff.shape)
-
-print()
-
 J = jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X), w)
 
-
-
-print(J[0].shape)
 J = torch.cat([torch.flatten(a, -2, -1) for a in J], dim=-1)
 J = torch.diagonal(J, dim1= 0, dim2 = 3).permute((3, 0 ,1 ,2))
 
 
 S = torch.exp(f1.get_std_params()) ** 2
 cov = torch.einsum("ands, s, ands -> and", J, S, J).squeeze(-1)
-
-# pos = ax6.imshow(cov.detach().numpy())
-# fig.colorbar(pos, ax=ax6)
-# ax6.set_title("Covariance matrix Taylor (1)")
+print(cov[:, 0])
 
 mean = f1.forward_weights(torch.tensor(X, dtype=args.dtype), w) + torch.einsum("ands, as -> and", J, diff)
 
-print(mean.shape)
-input()
-
-# L = np.linalg.cholesky(cov.detach().numpy() + np.eye(mean.shape[0]) * 1e-6)
-# z = np.random.randn(20, mean.shape[0])
-
-
-# samples = mean + (L @ z.T).T
 
 mean = mean.squeeze(-1).detach().cpu().numpy()
 
-for f in mean:
+for i in range(mean.shape[0]):
     
-    ax3.plot(X.flatten(), f)
-    
-plt.show()
-# ax3.fill_between(
-#     X.flatten(),
-#     mean - 2 * np.sqrt(np.diag(cov.detach().numpy())),
-#     mean + 2 * np.sqrt(np.diag(cov.detach().numpy())),
-#     alpha=0.2,
-# )
-# for f in samples:
-#     ax3.plot(X.flatten(), f, alpha=0.3)
-# ax3.set_title("Samples from Gaussianized IP using Taylor (1)")
+    ax3.plot(X.flatten(), mean[i])
+    ax3.fill_between(
+        X.flatten(),
+        mean[i] - 2 * np.sqrt(cov[i].detach().numpy()),
+        mean[i] + 2 * np.sqrt(cov[i].detach().numpy()),
+        alpha=0.2,
+    )
+ax3.set_title("Linearized GP at random parameter values")
 
 
 
-# H = hessian(f1.forward_weights, argnums = 1)(torch.tensor(X), w)
-
-# H = torch.cat([
-#         torch.cat([
-#             H[i][j].flatten(-4, -3).flatten(-2, -1) 
-#         for j in range(len(H))], dim=-1)
-#     for i in range(len(H))], dim = -2)
-
-# H = torch.diagonal(H, dim1=-2, dim2 = -1).transpose(-1, -2)
-
-
-
-pos = ax7.imshow(cov.detach().numpy())
-fig.colorbar(pos, ax=ax7)
-ax7.set_title("Covariance matrix Taylor Logarithm")
-
-
-L = np.linalg.cholesky(cov.detach().numpy() + np.eye(mean.shape[0]) * 1e-6)
-z = np.random.randn(20, mean.shape[0])
-
-
-samples = mean + (L @ z.T).T
-
-ax4.plot(X.flatten(), mean)
+mean = np.mean(mean, axis = 0)
+cov = np.sum(cov.detach().numpy(), axis = 0)/cov.shape[0]
+ax4.plot(X.flatten(), mean, alpha = 0.5)
 ax4.fill_between(
-    X.flatten(),
-    mean - 2 * np.sqrt(np.diag(cov.detach().numpy())),
-    mean + 2 * np.sqrt(np.diag(cov.detach().numpy())),
-    alpha=0.2,
-)
-for f in samples:
-    ax4.plot(X.flatten(), f, alpha=0.3)
-ax4.set_title("Samples from Gaussianized IP using Taylor Logarithm")
+        X.flatten(),
+        mean - 2 * np.sqrt(cov),
+        mean + 2 * np.sqrt(cov),
+        alpha=0.1,
+   )
+
+ax4.set_title("Ensemble of GP")
 
 
 
