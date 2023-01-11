@@ -51,24 +51,24 @@ f1 = BayesianNN(
 
 
 
-# f1 = GP(
-#     input_dim=1,
-#     output_dim=1,
-#     inner_layer_dim=20,
-#     device=args.device,
-#     seed=args.seed,
-#     dtype=args.dtype,
-# )
+f1 = GP(
+    input_dim=1,
+    output_dim=1,
+    inner_layer_dim=20,
+    device=args.device,
+    seed=args.seed,
+    dtype=args.dtype,
+)
 
 
 X = test_dataset.inputs
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(16, 6))
-ax1 = plt.subplot(3, 2, 1)
-ax2 = plt.subplot(3, 2, 2)
-ax3 = plt.subplot(3, 2, 3)
-ax4 = plt.subplot(3, 2, 4)
+plt.figure(figsize=(16, 10))
+ax1 = plt.subplot(2, 2, 1)
+ax2 = plt.subplot(2, 2, 2)
+ax3 = plt.subplot(2, 2, 3)
+ax4 = plt.subplot(2, 2, 4)
 fig = plt.gcf()
 
 samples = f1(torch.tensor(X, dtype=args.dtype), 200)
@@ -87,6 +87,15 @@ ax2.fill_between(
     mean + 2 * np.sqrt(np.diag(cov.detach().numpy())),
     alpha=0.1,
 )
+ax4.plot(X.flatten(), mean, alpha = 0.9, label = "GP mean")
+ax4.fill_between(
+    X.flatten(),
+    mean - 2 * np.sqrt(np.diag(cov.detach().numpy())),
+    mean + 2 * np.sqrt(np.diag(cov.detach().numpy())),
+    alpha=0.2,
+    label = "GP std"
+)
+
 
 ax2.set_title("GP using Moments")
 
@@ -94,35 +103,32 @@ ax2.set_title("GP using Moments")
 
 
 
-w = f1.sample_weights(20)
-mean = f1.get_weights()
+n = 20
+w = f1.sample_weights(n)
+w_mean = f1.get_weights()
+diff = w - w_mean
 
-diff = [w[i] - mean[i] for i in range(len(w))]
 
-diff = torch.cat([torch.flatten(a, -2, -1) for a in diff], -1)
-
-J = jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X), w)
-
-J = torch.cat([torch.flatten(a, -2, -1) for a in J], dim=-1)
-J = torch.diagonal(J, dim1= 0, dim2 = 3).permute((3, 0 ,1 ,2))
-
+J = torch.stack(
+    [jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X, dtype=args.dtype), a) for a in w]
+    )
 
 S = torch.exp(f1.get_std_params()) ** 2
-cov = torch.einsum("ands, s, ands -> and", J, S, J).squeeze(-1)
-print(cov[:, 0])
+cov = torch.einsum("ands, s, bnds -> abnd", J, S, J).squeeze(-1)
+mean = f1.forward_weights(torch.tensor(X, dtype=args.dtype), w)\
+    + torch.einsum("ands, as -> and", J, diff)
 
-mean = f1.forward_weights(torch.tensor(X, dtype=args.dtype), w) + torch.einsum("ands, as -> and", J, diff)
-
+cov_diag = torch.diagonal(cov, dim1 = 0, dim2 = 1).T
 
 mean = mean.squeeze(-1).detach().cpu().numpy()
 
 for i in range(mean.shape[0]):
-    
+
     ax3.plot(X.flatten(), mean[i])
     ax3.fill_between(
         X.flatten(),
-        mean[i] - 2 * np.sqrt(cov[i].detach().numpy()),
-        mean[i] + 2 * np.sqrt(cov[i].detach().numpy()),
+        mean[i] - 2 * np.sqrt(cov_diag[i].detach().numpy()),
+        mean[i] + 2 * np.sqrt(cov_diag[i].detach().numpy()),
         alpha=0.2,
     )
 ax3.set_title("Linearized GP at random parameter values")
@@ -130,17 +136,38 @@ ax3.set_title("Linearized GP at random parameter values")
 
 
 mean = np.mean(mean, axis = 0)
-cov = np.sum(cov.detach().numpy(), axis = 0)/cov.shape[0]
-ax4.plot(X.flatten(), mean, alpha = 0.5)
+cov = np.sum(cov.detach().numpy(), axis = (0, 1))/(cov.shape[0]**2)
+ax4.plot(X.flatten(), mean, alpha = 0.9, label = "Ensemble Mean")
 ax4.fill_between(
         X.flatten(),
         mean - 2 * np.sqrt(cov),
         mean + 2 * np.sqrt(cov),
-        alpha=0.1,
+        alpha=0.2,
+        label = "Ensemble std"
    )
 
-ax4.set_title("Ensemble of GP")
+ax4.set_title("Distributions")
 
+J = jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X, dtype=args.dtype), w_mean)
+cov = torch.einsum("nds, s, nds -> nd", J, S, J).squeeze(-1).detach().numpy()
+mean = f1.forward_weights(torch.tensor(X, dtype=args.dtype), w_mean).squeeze(-1).detach().cpu().numpy()
+ax4.plot(X.flatten(), mean, alpha = 0.9, label = "Taylor Mean")
+ax4.fill_between(
+        X.flatten(),
+        mean - 2 * np.sqrt(cov),
+        mean + 2 * np.sqrt(cov),
+        alpha=0.2,
+        label = "Taylor std"
+   )
+ax4.legend()
 
+ylims = ax1.get_ylim()
 
+ax1.set_ylim(ylims)
+ax2.set_ylim(ylims)
+ax3.set_ylim(ylims)
+ax4.set_ylim(ylims)
+
+plt.tight_layout()
+plt.savefig("Prior distribution.pdf", format="pdf")
 plt.show()

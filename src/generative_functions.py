@@ -125,12 +125,12 @@ class BayesLinear(GenerativeFunction):
 
         self.weight_log_sigma = torch.nn.Parameter(
             torch.tensor(
-                rng.normal(size = (input_dim, output_dim))* 0 - 1,
+                rng.normal(size = (input_dim, output_dim))* 0,
                 dtype=dtype, 
                 device=device)
         )
         self.bias_log_sigma = torch.nn.Parameter(
-            torch.tensor(rng.normal(size = (1, output_dim)) * 0 - 1,
+            torch.tensor(rng.normal(size = (1, output_dim)) * 0 ,
                          dtype=dtype, 
                          device=device)
         )
@@ -175,7 +175,12 @@ class BayesLinear(GenerativeFunction):
         # Apply linear transformation.
         return inputs @ w + b
 
-    def forward_weights(self, inputs, w, b):
+    def forward_weights(self, inputs, weights):
+
+        shape = weights.shape[:-1]
+        aux = self.input_dim * self.output_dim
+        w = weights[..., :aux].reshape(*shape, *self.weight_mu.shape)
+        b = weights[..., aux:aux + self.output_dim].reshape(*shape, *self.bias_mu.shape)
         # Apply linear transformation.
         return inputs @ w + b
 
@@ -195,7 +200,11 @@ class BayesLinear(GenerativeFunction):
         return inputs @ self.weight_mu + self.bias_mu
 
     def get_weights(self):
-        return [self.weight_mu, self.bias_mu]
+        return torch.cat(
+            [self.weight_mu.flatten(),
+             self.bias_mu.flatten()],
+            dim = -1
+            )
     
     def sample_weights(self, num_samples):
         # Generate Gaussian values
@@ -204,7 +213,12 @@ class BayesLinear(GenerativeFunction):
         # Perform reparameterization trick
         w = self.weight_mu + z_w * torch.exp(self.weight_log_sigma)
         b = self.bias_mu + z_b * torch.exp(self.bias_log_sigma)
-        return [w.to(self.dtype), b.to(self.dtype)]
+
+        return torch.cat(
+            [w.flatten(-2, -1),
+             b.flatten(-2, -1)],
+            dim = -1
+            )
 
 
     def get_std_params(self):
@@ -543,14 +557,23 @@ class BayesianNN(GenerativeFunction):
         return self.layers[-1].forward_mean(x)
 
     def forward_weights(self, inputs, weights):
+        # raise NotImplementedError("Need to test forward weights")
         x = inputs
+
+        pre = 0
+
         for i, _ in enumerate(self.layers[:-1]):
+
+            post = pre + (self.layers[i].input_dim + 1) * self.layers[i].output_dim
             # Apply BNN layer
             x = self.activation(
-                self.layers[i].forward_weights(x, weights[2 * i], weights[2 * i + 1])
+                self.layers[i].forward_weights(x, weights[..., pre:post])
             )
+            pre = post
+
+        post = pre + (self.layers[-1].input_dim + 1) * self.layers[-1].output_dim
         # Last layer has identity activation function
-        return self.layers[-1].forward_weights(x, weights[-2], weights[-1])
+        return self.layers[-1].forward_weights(x, weights[..., pre:post])
 
 
     def KL(self):
@@ -559,16 +582,18 @@ class BayesianNN(GenerativeFunction):
         return torch.stack([layer.KL() for layer in self.layers]).sum()
 
     def get_weights(self):
-        weights = []
-        for layer in self.layers:
-            weights = weights + layer.get_weights()
-        return tuple(weights)
+        weights = torch.cat(
+            [layer.get_weights() for layer in self.layers],
+            dim = -1
+            )
+        return weights
 
     def sample_weights(self, num_samples):
-        weights = []
-        for layer in self.layers:
-            weights = weights + layer.sample_weights(num_samples)
-        return tuple(weights)
+        weights = torch.cat(
+            [layer.sample_weights(num_samples) for layer in self.layers],
+            dim = -1
+            )
+        return weights
 
     def get_std_params(self):
         return torch.cat([layer.get_std_params() for layer in self.layers])
@@ -1119,8 +1144,12 @@ class GP(GenerativeFunction):
     def sample_weights(self, num_samples):
         # Generate Gaussian values
         w1, b1, w2, b2 = self.get_noise(num_samples)
-        
-        return [w1, b1, w2, b2]
+        return torch.cat(
+            [w1.flatten(-2, -1),
+             b1.flatten(-2, -1),
+             w2.flatten(-2, -1),
+             b2.flatten(-2, -1)],
+            dim = -1)
 
     
     def forward_mean(self, inputs):
@@ -1131,11 +1160,21 @@ class GP(GenerativeFunction):
         return phi @ self.w2_mean + self.b2_mean
 
     def forward_weights(self, inputs, weights):
+        # weights shape (s, 61)
+        shape = weights.shape[:-1]
+        aux1 = self.input_dim * self.inner_layer_dim
+        aux2 = aux1 + self.inner_layer_dim
+        aux3 = aux2 + self.output_dim * self.inner_layer_dim
         x = inputs
-            
-        phi = self.activation(x @ weights[0] + weights[1])  / np.sqrt(self.inner_layer_dim)
+        w1 = weights[..., :aux1].reshape(*shape, *self.w1_mean.shape)
+        b1 = weights[..., aux1:aux2].reshape(*shape, *self.b1_mean.shape)
 
-        return phi @ weights[2] + weights[3]
+        w2 = weights[..., aux2:aux3].reshape(*shape, *self.w2_mean.shape)
+        b2 = weights[..., aux3:].reshape(*shape, *self.b2_mean.shape)
+
+        phi = self.activation(x @ w1 + b1)  / np.sqrt(self.inner_layer_dim)
+
+        return phi @ w2 + b2
     
     def GP_mean(self, inputs):
         #return self.forward_mean(inputs)
@@ -1231,6 +1270,14 @@ class GP(GenerativeFunction):
         return  torch.exp(self.b2_log_std)**2 + red - torch.sum(x1*x2, -1)/self.inner_layer_dim
     
     def get_weights(self):
+        return torch.cat(
+            [self.w1_mean.flatten(),
+             self.b1_mean.flatten(),
+             self.w2_mean.flatten(),
+             self.b2_mean.flatten()],
+            dim = -1)
+
+
         return tuple([self.w1_mean, self.b1_mean, self.w2_mean, self.b2_mean])
 
     def get_std_params(self):
@@ -1239,5 +1286,3 @@ class GP(GenerativeFunction):
                           self.w2_log_std.flatten(),
                           self.b2_log_std.flatten(),
                           ])
-        
-        

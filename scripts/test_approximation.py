@@ -65,13 +65,21 @@ X = test_dataset.inputs
 import matplotlib.pyplot as plt
 
 plt.figure(figsize=(15, 12))
-ax1 = plt.subplot(4, 1, 1)
-ax2 = plt.subplot(4, 2, 3)
-ax3 = plt.subplot(4, 2, 4)
-ax4 = plt.subplot(4, 2, 5)
-ax5 = plt.subplot(4, 2, 6)
-ax6 = plt.subplot(4, 2, 7)
-ax7 = plt.subplot(4, 2, 8)
+
+ax1 = plt.subplot(7, 1, 1)
+ax2 = plt.subplot(7, 2, 3)
+ax3 = plt.subplot(7, 2, 4)
+ax4 = plt.subplot(7, 2, 5)
+ax5 = plt.subplot(7, 2, 6)
+ax6 = plt.subplot(7, 2, 7)
+ax7 = plt.subplot(7, 2, 8)
+ax8 = plt.subplot(7, 2, 9)
+ax9 = plt.subplot(7, 2, 10)
+ax10 = plt.subplot(7, 2, 11)
+ax11 = plt.subplot(7, 2, 12)
+ax12 = plt.subplot(7, 2, 13)
+ax13 = plt.subplot(7, 2, 14)
+
 fig = plt.gcf()
 
 
@@ -80,25 +88,11 @@ fig = plt.gcf()
 w = f1.get_weights()
 
 J = jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X), w)
-J = torch.cat([torch.flatten(a, -2, -1) for a in J], dim=-1).transpose(-1, -2)
-
-
-H = hessian(f1.forward_weights, argnums = 1)(torch.tensor(X), w)
-
-
-H = torch.cat([
-        torch.cat([
-            H[i][j].flatten(-4, -3).flatten(-2, -1) 
-        for j in range(len(H))], dim=-1)
-    for i in range(len(H))], dim = -2)
-
-
-#H = torch.diagonal(H, dim1=-2, dim2 = -1).transpose(-1, -2)
-
+print(J.shape)
 
 S = torch.exp(f1.get_std_params()) ** 2
 
-mean_weights = f1.get_weights()
+mean_weights = w
 weights = f1.sample_weights(200)
 
 
@@ -110,12 +104,10 @@ ax1.set_title("Samples from original IP")
 
 
 
-diff = [weights[i] - mean_weights[i] for i in range(len(weights))]
+diff = weights - mean_weights
+print(diff.shape)
 
-diff = torch.cat([torch.flatten(a, -2, -1) for a in diff], -1)
-
-
-samples2 = f1.forward_mean(torch.tensor(X)).unsqueeze(0)# + torch.einsum("nsd, ms -> mnd", J, diff) + 0.5 * torch.einsum("ma, ndba, mb -> mnd",diff, H, diff)
+samples2 = f1.forward_mean(torch.tensor(X)).unsqueeze(0)
 err0 = np.mean(np.abs(samples.detach().cpu().numpy() - samples2.detach().cpu().numpy()), axis = 0)
 
 for f in samples2:
@@ -126,7 +118,8 @@ ax3.set_title("Mean Absolute Error of Taylor Approximation of Order 0")
 ax3.plot(X.flatten(), err0.flatten())
 
 
-samples2 = f1.forward_mean(torch.tensor(X)) + torch.einsum("nsd, ms -> mnd", J, diff)# + 0.5 * torch.einsum("ma, ndba, mb -> mnd",diff, H, diff)
+samples2 = f1.forward_mean(torch.tensor(X)) + torch.einsum("nds, ms -> mnd", J, diff)
+print(samples2.shape)
 err0 = np.mean(np.abs(samples.detach().cpu().numpy() - samples2.detach().cpu().numpy()), axis = 0)
 
 for f in samples2:
@@ -136,13 +129,117 @@ ax5.plot(X.flatten(), err0.flatten())
 ax4.set_title("Samples from Taylor Approximation of Order 1")
 ax5.set_title("Mean Absolute Error of Taylor Approximation of Order 1")
 
-samples2 = f1.forward_mean(torch.tensor(X)) + torch.einsum("nsd, ms -> mnd", J, diff) + 0.5 * torch.einsum("ma, ndba, mb -> mnd",diff, H, diff)
+
+# H = hessian(f1.forward_weights, argnums = 1)(torch.tensor(X), w)
+# H = torch.diagonal(H, dim1 = -2, dim2 = -1)
+# print(H.shape)
+# input()
+# samples2 = f1.forward_mean(torch.tensor(X)) + torch.einsum("nds, ms -> mnd", J, diff)
+# samples2 = samples2 +  torch.einsum("nds, ms -> mnd", H, diff**2)
+# err0 = np.mean(np.abs(samples.detach().cpu().numpy() - samples2.detach().cpu().numpy()), axis = 0)
+
+# for f in samples2:
+#     ax6.plot(X.flatten(), f.detach().numpy().flatten(), alpha=0.5)
+
+# ax7.plot(X.flatten(), err0.flatten())
+# ax6.set_title("Samples from Taylor Approximation of Order 2")
+# ax7.set_title("Mean Absolute Error of Taylor Approximation of Order 2")
+
+
+
+n = 10
+weights_ensemble = f1.sample_weights(n)
+J = torch.stack(
+    [jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X, dtype=args.dtype), a) for a in weights_ensemble]
+    )
+
+diff = weights.unsqueeze(1) - weights_ensemble.unsqueeze(0)
+
+samples2 = f1.forward_weights(torch.tensor(X), weights_ensemble) \
+    + torch.einsum("ands, bas -> band", J, diff)
+
+samples2 = torch.mean(samples2, axis = 1)
 err0 = np.mean(np.abs(samples.detach().cpu().numpy() - samples2.detach().cpu().numpy()), axis = 0)
 
 for f in samples2:
     ax6.plot(X.flatten(), f.detach().numpy().flatten(), alpha=0.5)
 
 ax7.plot(X.flatten(), err0.flatten())
-ax6.set_title("Samples from Taylor Approximation of Order 2")
-ax7.set_title("Mean Absolute Error of Taylor Approximation of Order 2")
+ax6.set_title("Samples from Taylor Approximation Ensemble {}".format(n))
+ax7.set_title("Mean Absolute Error of Taylor Approximation Ensemble {}".format(n))
+
+n = 20
+weights_ensemble = f1.sample_weights(n)
+J = torch.stack(
+    [jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X, dtype=args.dtype), a) for a in weights_ensemble]
+    )
+
+diff = weights.unsqueeze(1) - weights_ensemble.unsqueeze(0)
+
+samples2 = f1.forward_weights(torch.tensor(X), weights_ensemble) \
+    + torch.einsum("ands, bas -> band", J, diff)
+
+samples2 = torch.mean(samples2, axis = 1)
+err0 = np.mean(np.abs(samples.detach().cpu().numpy() - samples2.detach().cpu().numpy()), axis = 0)
+
+for f in samples2:
+    ax8.plot(X.flatten(), f.detach().numpy().flatten(), alpha=0.5)
+
+ax9.plot(X.flatten(), err0.flatten())
+ax8.set_title("Samples from Taylor Approximation Ensemble {}".format(n))
+ax9.set_title("Mean Absolute Error of Taylor Approximation Ensemble {}".format(n))
+
+n = 50
+weights_ensemble = f1.sample_weights(n)
+J = torch.stack(
+    [jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X, dtype=args.dtype), a) for a in weights_ensemble]
+    )
+
+diff = weights.unsqueeze(1) - weights_ensemble.unsqueeze(0)
+
+samples2 = f1.forward_weights(torch.tensor(X), weights_ensemble) \
+    + torch.einsum("ands, bas -> band", J, diff)
+
+samples2 = torch.mean(samples2, axis = 1)
+err0 = np.mean(np.abs(samples.detach().cpu().numpy() - samples2.detach().cpu().numpy()), axis = 0)
+
+for f in samples2:
+    ax10.plot(X.flatten(), f.detach().numpy().flatten(), alpha=0.5)
+
+ax11.plot(X.flatten(), err0.flatten())
+ax10.set_title("Samples from Taylor Approximation Ensemble {}".format(n))
+ax11.set_title("Mean Absolute Error of Taylor Approximation Ensemble {}".format(n))
+
+
+
+
+n = 100
+weights_ensemble = f1.sample_weights(n)
+J = torch.stack(
+    [jacrev(f1.forward_weights, argnums = 1)(torch.tensor(X, dtype=args.dtype), a) for a in weights_ensemble]
+    )
+
+diff = weights.unsqueeze(1) - weights_ensemble.unsqueeze(0)
+
+samples2 = f1.forward_weights(torch.tensor(X), weights_ensemble) \
+    + torch.einsum("ands, bas -> band", J, diff)
+
+samples2 = torch.mean(samples2, axis = 1)
+err0 = np.mean(np.abs(samples.detach().cpu().numpy() - samples2.detach().cpu().numpy()), axis = 0)
+
+for f in samples2:
+    ax12.plot(X.flatten(), f.detach().numpy().flatten(), alpha=0.5)
+
+ax13.plot(X.flatten(), err0.flatten())
+ax12.set_title("Samples from Taylor Approximation Ensemble {}".format(n))
+ax13.set_title("Mean Absolute Error of Taylor Approximation Ensemble {}".format(n))
+
+
+
+
+
+
+
+plt.tight_layout()
+plt.savefig("MAE.pdf", format = "pdf")
 plt.show()
