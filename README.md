@@ -10,8 +10,8 @@ The code is divided in several folders that contains Python files of different p
     - `generative_functions.py`: Contains the definition of the different Prior models, such as BNN.
     - `layers_init.py`: Contains a function used to generate the VIP layers using different parameters.
     - `layers.py`: Contains the definition of the VIP layer.
-    - `likelihood.py`` : Contains the used likelihoods as Python Classes.
-    - `noise_samples.py : Contains classes for Gaussian and Uniform sampling.
+    - `likelihood.py` : Contains the used likelihoods as Python Classes.
+    - `noise_samples.py` : Contains classes for Gaussian and Uniform sampling.
     - `quadrature.py`: Includes the necesarry functions to estimate likelihoods using quadrature.
     - `utils.py`: Contains general purpose functions, such as the reparameterization trick for Gaussians.
 - scripts: Contains Python scripts that perform different experiments.
