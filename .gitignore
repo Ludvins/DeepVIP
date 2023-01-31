@@ -18,3 +18,4 @@ results/results4
 *.csv
 *.pdf
 demos/data/*
+.venv_laplace/*

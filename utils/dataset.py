@@ -137,7 +137,7 @@ class SPGP_Dataset(DVIPDataset):
         inputs = np.loadtxt("data/SPGP_dist/train_inputs")
         targets = np.loadtxt("data/SPGP_dist/train_outputs")
         test_inputs = np.loadtxt("data/SPGP_dist/test_inputs")
-        test_inputs = np.linspace(-40, 50, 200)
+        #test_inputs = np.linspace(-40, 50, 200)
         mask = ((inputs < 1.5) | (inputs > 3.5)).flatten()
 
         
@@ -183,64 +183,10 @@ class Synthetic_Dataset(DVIPDataset):
 
         # inputs = rng.standard_normal(300)
         inputs = np.linspace(-1.0, 1.0, 300)
-        targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.1
+        targets = f(inputs) + rng.standard_normal(inputs.shape)
 
         self.inputs = inputs[..., np.newaxis]
         self.targets = targets[..., np.newaxis]
-
-
-# class Synthetic_Dataset(DVIPDataset):
-#     def __init__(self):
-#         self.type = "regression"
-#         self.output_dim = 1
-
-#         rng = np.random.default_rng(seed=0)
-
-#         def f(x):
-#             return np.cos(1 * x + 2) / (np.abs(x) + 1)
-
-#         # inputs = rng.standard_normal(300)
-#         inputs = np.linspace(0.0, 0.2, 50)
-#         inputs = np.concatenate([inputs, np.linspace(0.8, 1, 50)], axis=-1)
-#         targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.001
-
-#         test_inputs = np.linspace(0.0, 1.0, 300)
-#         test_targets = f(test_inputs) + rng.standard_normal(test_inputs.shape) * 0.001
-
-#         targets = targets[..., np.newaxis]
-#         inputs = inputs[..., np.newaxis]
-#         test_inputs = test_inputs[..., np.newaxis]
-#         test_targets = test_targets[..., np.newaxis]
-
-#         self.train = Training_Dataset(
-#             inputs,
-#             targets,
-#             normalize_targets=True,
-#             normalize_inputs=True,
-#         )
-
-#         self.train_test = Test_Dataset(
-#             inputs,
-#             targets,
-#             self.train.inputs_mean,
-#             self.train.inputs_std,
-#         )
-#         self.test = Test_Dataset(
-#             test_inputs,
-#             test_targets,
-#             self.train.inputs_mean,
-#             self.train.inputs_std,
-#         )
-
-#     def __len__(self):
-#         return 100
-
-#     def get_split(self, *args):
-#         return self.train, self.train_test, self.test
-
-#     def len_train(self, test_size):
-#         return 100
-
 
 class Synthetic_Dataset(DVIPDataset):
     def __init__(self):
@@ -250,108 +196,43 @@ class Synthetic_Dataset(DVIPDataset):
         rng = np.random.default_rng(seed=0)
 
         def f(x):
-            return np.cos(5 * x) / (np.abs(x) + 1)
+            return np.sin(4 * x) 
 
         # inputs = rng.standard_normal(300)
-        inputs = rng.standard_normal(300)
-        targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.05
-
-        test_inputs = np.linspace(-3, 3, 500)
-        test_targets = f(test_inputs) + rng.standard_normal(test_inputs.shape) * 0.05
-
-        targets = targets[..., np.newaxis]
-        inputs = inputs[..., np.newaxis]
-        test_inputs = test_inputs[..., np.newaxis]
-        test_targets = test_targets[..., np.newaxis]
-
+        inputs = np.linspace(-2.0,2.0, 300)
+        targets = f(inputs) + rng.standard_normal(inputs.shape)*0.1
+        
+        mask = (((inputs > -1) * (inputs < -0.5)) | ((inputs < 1) * (inputs > 0.5))).flatten()
+        #mask = ...
+        
         self.train = Training_Dataset(
-            inputs,
-            targets,
+            inputs[mask, np.newaxis],
+            targets[mask, np.newaxis],
             normalize_targets=True,
             normalize_inputs=False,
         )
 
         self.train_test = Test_Dataset(
-            inputs,
-            targets,
+            inputs[mask, np.newaxis],
+            targets[mask, np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            test_inputs,
-            test_targets,
+            inputs[..., np.newaxis],
+            targets[..., np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
 
     def __len__(self):
-        return 100
+        return 300
 
     def get_split(self, *args):
         return self.train, self.train_test, self.test
 
     def len_train(self, test_size):
-        return 100
-    
-
-# class Synthetic_Dataset(DVIPDataset):
-#     def __init__(self):
-#         self.type = "regression"
-#         self.output_dim = 1
-
-#         rng = np.random.default_rng(seed=0)
-
-#         def f(x):
-#             return np.cos(2 * x) / (np.abs(x) + 1)
-#         n = 200
-#         # inputs = rng.standard_normal(300)
-#         test_inputs = np.linspace(-5, 5, n)
-
-#         indexes = np.concatenate(
-#             [
-#                 np.arange(int(n*0.1),int(n*0.3)),
-#                 np.arange(int(n*0.6),int(n*0.8))
-#              ]
-#             )
-#         inputs = test_inputs[indexes]
-#         targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.05
-
-#         #test_inputs = inputs
-#         test_targets = f(test_inputs) + rng.standard_normal(test_inputs.shape) * 0.05
-
-#         targets = targets[..., np.newaxis]
-#         inputs = inputs[..., np.newaxis]
-#         test_inputs = test_inputs[..., np.newaxis]
-#         test_targets = test_targets[..., np.newaxis]
-
-#         self.train = Training_Dataset(
-#             inputs,
-#             targets,
-#             normalize_targets=True,
-#             normalize_inputs=True,
-#         )
-
-#         self.train_test = Test_Dataset(
-#             inputs,
-#             targets,
-#             self.train.inputs_mean,
-#             self.train.inputs_std,
-#         )
-#         self.test = Test_Dataset(
-#             test_inputs,
-#             test_targets,
-#             self.train.inputs_mean,
-#             self.train.inputs_std,
-#         )
-
-#     def __len__(self):
-#         return 100
-
-#     def get_split(self, *args):
-#         return self.train, self.train_test, self.test
-
-#     def len_train(self, test_size):
-#         return 100
+        return 200
 
 
 class Constant_Dataset(DVIPDataset):

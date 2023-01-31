@@ -3,6 +3,54 @@ import torch
 from tqdm import tqdm
 
 
+
+
+def fit_map(
+    model,
+    training_generator,
+    optimizer,
+    criterion,
+    iterations=None,
+    use_tqdm=False,
+    return_loss=False,
+    device=None,
+):
+    # Set model in training mode
+
+    losses = []
+
+    model.train()
+
+    if use_tqdm:
+        # Initialize TQDM bar
+        iters = tqdm(range(iterations), unit=" iteration")
+        iters.set_description("Training ")
+    else:
+        iters = range(iterations)
+    data_iter = iter(training_generator)
+
+    for _ in iters:
+        try:
+            inputs, target = next(data_iter)
+        except StopIteration:
+            # StopIteration is thrown if dataset ends
+            # reinitialize data loader
+            data_iter = iter(training_generator)
+            inputs, target = next(data_iter)
+        inputs = inputs.to(device)
+        target = target.to(device)
+        optimizer.zero_grad()   # zero the gradient buffers
+        output = model(inputs)
+        
+        loss = criterion(output, target)
+        loss.backward()
+        optimizer.step()
+        if return_loss:
+            losses.append(loss.detach().cpu().numpy())
+
+    return losses
+
+
 def fit(
     model,
     training_generator,
@@ -109,7 +157,7 @@ def score(model, generator, metrics, use_tqdm=False, device=None):
               batches.
     """
     # Set model in evaluation mode
-    model.eval()
+    #model.eval()
     # Initialize metrics
     metrics = metrics(len(generator.dataset), device=device)
 
@@ -121,18 +169,18 @@ def score(model, generator, metrics, use_tqdm=False, device=None):
         iters = range(len(generator))
     data_iter = iter(generator)
 
-    with torch.no_grad():
-        # Batches evaluation
-        for _ in iters:
-            data, target = next(data_iter)
-            data = data.to(device)
-            target = target.to(device)
-            loss, mean_pred, std_pred = model.test_step(data, target)
-            # log_likelihood = model.predict_logdensity(data, target)
-            # Update mertics using this batch
-            metrics.update(
-                target, loss, mean_pred, std_pred, model.likelihood, light=False
-            )
+   
+    # Batches evaluation
+    for _ in iters:
+        data, target = next(data_iter)
+        data = data.to(device)
+        target = target.to(device)
+        loss, mean_pred, std_pred = model.test_step(data, target)
+        # log_likelihood = model.predict_logdensity(data, target)
+        # Update mertics using this batch
+        metrics.update(
+            target, loss, mean_pred, std_pred, model.likelihood, light=False
+        )
     # Return metrics as a dictionary
     return metrics.get_dict()
 

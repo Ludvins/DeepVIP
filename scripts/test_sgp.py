@@ -6,8 +6,6 @@ from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
 
-from laplace.curvature import AsdlInterface, BackPackInterface
-from laplace import Laplace
 
 from scipy.cluster.vq import kmeans2
 sys.path.append(".")
@@ -18,6 +16,7 @@ from scripts.filename import create_file_name
 from src.generative_functions import *
 from src.sparseLA import SparseLA
 from src.likelihood import Gaussian
+from src.backpack_interface import BackPackInterface
 
 args = manage_experiment_configuration()
 
@@ -34,9 +33,7 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-Z = kmeans2(train_dataset.inputs, 20, minit='points', seed = args.seed)[0]
 
-print(train_dataset.inputs.dtype)
 
 def get_model():
     torch.manual_seed(711)
@@ -51,7 +48,7 @@ f = get_model()
 setattr(f, 'output_size', 1)
 
 # Define optimizer and compile model
-opt = torch.optim.Adam(f.parameters(), lr=args.lr)
+opt = torch.optim.Adam(f.parameters(), lr=0.01)
 criterion = torch.nn.MSELoss()
 
 # Set the number of training samples to generate
@@ -70,62 +67,123 @@ loss = fit_map(
 )
 end = timer()
 
-X = test_dataset.inputs
-backend = BackPackInterface(f, "regression")
-Jx, _ = backend.jacobians(x = torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype))
-Jz, _ = backend.jacobians(x = torch.tensor(test_dataset.inputs, device = args.device, dtype = args.dtype))
+Z = kmeans2(train_dataset.inputs, 10, minit="points", seed=args.seed)[0]
+
+sparseLA = SparseLA(
+    f.forward,
+    Z, 
+    alpha = args.bb_alpha,
+    prior_variance_init=1,
+    likelihood=Gaussian(device=args.device, 
+                        dtype = args.dtype), 
+    num_data = train_dataset.inputs.shape[0],
+    output_dim = 1,
+    backend = BackPackInterface(f, "regression"),
+    track_inducing_locations=True,
+    y_mean=train_dataset.targets_mean,
+    y_std=train_dataset.targets_std,
+    device=args.device,
+    dtype=args.dtype,)
+
+sparseLA.print_variables()
+
+opt = torch.optim.Adam(sparseLA.parameters(), lr=args.lr)
+
+start = timer()
+loss = fit(
+    sparseLA,
+    train_loader,
+    opt,
+    use_tqdm=True,
+    return_loss=True,
+    iterations=args.iterations,
+    device=args.device,
+)
+end = timer()
+
+sparseLA.print_variables()
 
 
-prior_std = torch.tensor(2.4607, dtype = args.dtype)
-ll_std = torch.tensor(0.1965, dtype = args.dtype)
-Kxx = torch.einsum("nds, mds -> dnm", Jx, Jx)
-Kzz = torch.einsum("nds, mds -> dnm", Jz, Jz)
-Kxz = torch.einsum("nds, mds -> dnm", Jx, Jz)
 
-inv = torch.inverse(
-    Kxx + ll_std**2/prior_std**2 * torch.eye(Kxx.shape[1], dtype = args.dtype).unsqueeze(0))
-KLLA = prior_std**2 * (Kzz - Kxz.transpose(1, 2) @ inv @Kxz)
+
+print("Last NELBO value: ", loss[-1])
 
 import matplotlib.pyplot as plt
 
+fig, axis = plt.subplots(2, 1)
+a = np.arange(len(loss) // 3, len(loss))
+axis[0].plot(a, loss[len(loss) // 3 :])
 
-fig, axis = plt.subplots(2, 1, gridspec_kw = {'height_ratios':[2,1]})
+axis[1].plot(loss)
+
+axis[1].set_yscale("symlog")
+plt.show()
+
+
+
+import matplotlib.pyplot as plt
+fig, axis = plt.subplots(3, 1, gridspec_kw = {'height_ratios':[2,1, 1]})
+
 
 axis[0].scatter(train_dataset.inputs, train_dataset.targets, label = "Training points")
-#plt.scatter(test_dataset.inputs, test_dataset.targets, label = "Test points")
 
 
 
 
-f_mu = f(torch.tensor(X, dtype = torch.float64, device=args.device))
+
+X = np.concatenate([train_dataset.inputs, test_dataset.inputs], 0)
+Z = sparseLA.inducing_locations.detach().cpu().numpy()
+
+
+
+
+f_mu, f_std = sparseLA(torch.tensor(X, dtype = torch.float64, device=args.device))
 f_mu = f_mu.squeeze().detach().cpu().numpy()
-f_var = torch.diagonal(KLLA, dim1 = 1, dim2 = 2)
-pred_std = np.sqrt(f_var + ll_std**2).flatten().detach().cpu().numpy()
+f_std = f_std.squeeze().detach().cpu().numpy()
+pred_std = np.sqrt(f_std**2 + (torch.exp(sparseLA.likelihood.log_variance)).detach().cpu().numpy())
 
 
 sort = np.argsort(X.flatten())
+
 
 axis[0].plot(X.flatten()[sort], f_mu.flatten()[sort], label = "Predictions")
 axis[0].fill_between(X.flatten()[sort],
                  f_mu.flatten()[sort] - 2*pred_std[sort],
                   f_mu.flatten()[sort] + 2*pred_std[sort],
                   alpha = 0.1,
-                  label = "GP_LA uncertainty")
+                  label = "SparseLA uncertainty")
 
+m = f(sparseLA.inducing_locations).flatten().detach().cpu().numpy()
 
-axis[0].legend()
+xlims = axis[0].get_xlim()
+
+axis[0].scatter(sparseLA.inducing_locations.detach().cpu().numpy(), m, label = "Inducing locations")
 
 axis[1].fill_between(X.flatten()[sort],
                  np.zeros(X.shape[0]),
                  pred_std[sort],
                   alpha = 0.1,
-                  label = "GP uncertainty (std)")
+                  label = "SparseLA uncertainty (std)")
 axis[1].fill_between(X.flatten()[sort],
                  np.zeros(X.shape[0]),
-                 ll_std.detach().cpu().numpy(),
+                 torch.sqrt(torch.exp(sparseLA.likelihood.log_variance)).detach().cpu().numpy(),
                   alpha = 0.1,
                   label = "Likelihood uncertainty (std)")
 
+axis[0].set_xlim(left = xlims[0], right = xlims[1])
 
+inducing_history = np.stack(sparseLA.inducing_history)
+import matplotlib.cm as cm
+colors = cm.rainbow(np.linspace(0, 1, inducing_history.shape[1]))
+for i in np.arange(inducing_history.shape[1]):
+    axis[2].plot(inducing_history[:, i], np.arange(len(inducing_history[:, i])), alpha = 0.5)
+axis[2].set_xlim(left = xlims[0], right = xlims[1])
+
+axis[0].legend()
 axis[1].legend()
+
+axis[0].set_title("Predictive distribution")
+axis[1].set_title("Uncertainty decomposition")
+axis[2].set_title("Inducing locations evolution")
+
 plt.show()

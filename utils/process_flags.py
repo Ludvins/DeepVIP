@@ -3,8 +3,6 @@ import argparse
 import numpy as np
 import torch
 
-from src.generative_functions import BayesLinear, SimplerBayesLinear
-from src.likelihood import BroadcastedLikelihood, Gaussian, MultiClass, Bernoulli
 from utils.metrics import MetricsClassification, MetricsRegression
 from .dataset import get_dataset
 
@@ -29,34 +27,14 @@ def manage_experiment_configuration(args=None):
 
     FLAGS["metrics_type"] = args.dataset.type
     if args.dataset.type == "regression":
-        args.likelihood = Gaussian(dtype=args.dtype, device=args.device)
         args.metrics = MetricsRegression
-    elif args.dataset.type == "multiclass":
-        mc = MultiClass(
-            num_classes=args.dataset.classes, device=args.device, dtype=args.dtype
-        )
-        args.likelihood = BroadcastedLikelihood(mc)
-        args.metrics = MetricsClassification
-
-    elif args.dataset.type == "binaryclass":
-        mc = Bernoulli(device=args.device, dtype=args.dtype)
-        args.likelihood = BroadcastedLikelihood(mc)
-        args.metrics = MetricsClassification
 
     FLAGS["activation_str"] = args.activation
 
     # Manage Generative function
-    if args.bnn_structure == [0]:
-        args.bnn_structure = []
-    FLAGS["bnn_structure"] = args.bnn_structure
-
-    FLAGS["bnn_layer_str"] = args.bnn_layer
-    if args.bnn_layer == "BayesLinear":
-        FLAGS["bnn_layer"] = BayesLinear
-    elif args.bnn_layer == "SimplerBayesLinear":
-        FLAGS["bnn_layer"] = SimplerBayesLinear
-    else:
-        raise ValueError("Invalid BNN layer type.")
+    if args.structure == [0]:
+        args.structure = []
+    FLAGS["structure"] = args.structure
 
     if args.activation == "tanh":
         FLAGS["activation"] = torch.tanh
@@ -221,7 +199,7 @@ def get_parser():
     )
 
     parser.add_argument(
-        "--bnn_structure",
+        "--structure",
         type=int,
         default=[10, 10],
         nargs="+",

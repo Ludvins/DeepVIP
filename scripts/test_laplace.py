@@ -6,18 +6,14 @@ from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
 
-from laplace.curvature import AsdlInterface, BackPackInterface
-from laplace import Laplace
-
 from scipy.cluster.vq import kmeans2
 sys.path.append(".")
 
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit_map, fit
+from utils.pytorch_learning import fit_map
 from scripts.filename import create_file_name
 from src.generative_functions import *
-from src.sparseLA import SparseLA
-from src.likelihood import Gaussian
+from laplace import Laplace
 
 args = manage_experiment_configuration()
 
@@ -34,9 +30,11 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-Z = kmeans2(train_dataset.inputs, 20, minit='points', seed = args.seed)[0]
+Z = kmeans2(train_dataset.inputs, args.num_inducing, minit='points', seed = args.seed)[0]
 
 print(train_dataset.inputs.dtype)
+
+
 
 def get_model():
     torch.manual_seed(711)
@@ -48,10 +46,10 @@ def get_model():
         torch.nn.Linear(10, 1, device = args.device, dtype = args.dtype)
     )
 f = get_model()
-setattr(f, 'output_size', 1)
+
 
 # Define optimizer and compile model
-opt = torch.optim.Adam(f.parameters(), lr=args.lr)
+opt = torch.optim.Adam(f.parameters(), lr=0.01)
 criterion = torch.nn.MSELoss()
 
 # Set the number of training samples to generate
@@ -70,21 +68,23 @@ loss = fit_map(
 )
 end = timer()
 
+
 X = test_dataset.inputs
-backend = BackPackInterface(f, "regression")
-Jx, _ = backend.jacobians(x = torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype))
-Jz, _ = backend.jacobians(x = torch.tensor(test_dataset.inputs, device = args.device, dtype = args.dtype))
+la = Laplace(f, 'regression', subset_of_weights='all', hessian_structure='full')
+la.fit(train_loader)
 
-
-prior_std = torch.tensor(2.4607, dtype = args.dtype)
-ll_std = torch.tensor(0.1965, dtype = args.dtype)
-Kxx = torch.einsum("nds, mds -> dnm", Jx, Jx)
-Kzz = torch.einsum("nds, mds -> dnm", Jz, Jz)
-Kxz = torch.einsum("nds, mds -> dnm", Jx, Jz)
-
-inv = torch.inverse(
-    Kxx + ll_std**2/prior_std**2 * torch.eye(Kxx.shape[1], dtype = args.dtype).unsqueeze(0))
-KLLA = prior_std**2 * (Kzz - Kxz.transpose(1, 2) @ inv @Kxz)
+#la.optimize_prior_precision(method='CV', val_loader=train_loader)
+log_prior, log_sigma = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+hyper_optimizer = torch.optim.Adam([log_prior, log_sigma], lr=1e-1)
+for i in range(100):
+    hyper_optimizer.zero_grad()
+    neg_marglik = - la.log_marginal_likelihood(log_prior.exp(), log_sigma.exp())
+    neg_marglik.backward()
+    hyper_optimizer.step()
+    
+    
+print("Optimal prior std: ", torch.sqrt(torch.exp(log_prior)**-1))
+print("Optimal noise std: ", torch.exp(log_sigma))
 
 import matplotlib.pyplot as plt
 
@@ -92,25 +92,25 @@ import matplotlib.pyplot as plt
 fig, axis = plt.subplots(2, 1, gridspec_kw = {'height_ratios':[2,1]})
 
 axis[0].scatter(train_dataset.inputs, train_dataset.targets, label = "Training points")
-#plt.scatter(test_dataset.inputs, test_dataset.targets, label = "Test points")
 
 
+X = test_dataset.inputs
 
-
-f_mu = f(torch.tensor(X, dtype = torch.float64, device=args.device))
+f_mu, f_var = la(torch.tensor(X, dtype = torch.float64, device=args.device))
 f_mu = f_mu.squeeze().detach().cpu().numpy()
-f_var = torch.diagonal(KLLA, dim1 = 1, dim2 = 2)
-pred_std = np.sqrt(f_var + ll_std**2).flatten().detach().cpu().numpy()
+f_sigma = f_var.squeeze().sqrt().cpu().numpy()
+pred_std = np.sqrt(f_sigma**2 + la.sigma_noise.item()**2)
 
 
 sort = np.argsort(X.flatten())
+
 
 axis[0].plot(X.flatten()[sort], f_mu.flatten()[sort], label = "Predictions")
 axis[0].fill_between(X.flatten()[sort],
                  f_mu.flatten()[sort] - 2*pred_std[sort],
                   f_mu.flatten()[sort] + 2*pred_std[sort],
                   alpha = 0.1,
-                  label = "GP_LA uncertainty")
+                  label = "Laplace uncertainty")
 
 
 axis[0].legend()
@@ -119,10 +119,10 @@ axis[1].fill_between(X.flatten()[sort],
                  np.zeros(X.shape[0]),
                  pred_std[sort],
                   alpha = 0.1,
-                  label = "GP uncertainty (std)")
+                  label = "Laplace uncertainty (std)")
 axis[1].fill_between(X.flatten()[sort],
                  np.zeros(X.shape[0]),
-                 ll_std.detach().cpu().numpy(),
+                 la.sigma_noise.detach().cpu().numpy(),
                   alpha = 0.1,
                   label = "Likelihood uncertainty (std)")
 

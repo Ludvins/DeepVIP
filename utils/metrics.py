@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score
+from properscoring import crps_gaussian
 
 
 class Metrics:
@@ -34,9 +35,7 @@ class Metrics:
     def compute_nll(self, y, mean_pred, std_pred, likelihood):
         l = likelihood.logdensity(mean_pred, std_pred ** 2, y)
         l = torch.sum(l, -1)
-        log_num_samples = torch.log(torch.tensor(mean_pred.shape[0]))
-        lse = torch.logsumexp(l, axis=0) - log_num_samples
-        return -torch.mean(lse)
+        return -torch.mean(l)
 
 
 class MetricsRegression(Metrics):
@@ -80,84 +79,27 @@ class MetricsRegression(Metrics):
         self.loss += scale * loss
         # The RMSE is computed using the mean prediction of the Gaussian
         #  Mixture, that is, the mean of the mean predictions.
-        self.mse += scale * self.compute_mse(y, mean_pred.mean(0))
+        self.mse += scale * self.compute_mse(y, mean_pred)
         self.nll += scale * self.compute_nll(y, mean_pred, std_pred, likelihood)
         # Update heavy metrics
         if not light:
             self.crps += scale * self.compute_crps(y, mean_pred, std_pred)
+
 
     def compute_mse(self, y, prediction):
         """Computes the root mean squared error for the given predictions."""
         return torch.nn.functional.mse_loss(prediction, y)
 
     def compute_crps(self, y, mean_pred, std_pred):
-
-        if mean_pred.shape[-1] != 1:
-            # Multidimensional output not implemented yet
-            return 0
-
-        mean_pred = mean_pred.squeeze(-1)
-        std_pred = std_pred.squeeze(-1)
-
-        # Define the auxiliary function to help with the calculations
-        def A(mu, sigma_2):
-
-            norm = torch.distributions.normal.Normal(
-                torch.zeros_like(mu), torch.ones_like(mu)
-            )
-            first_term = (
-                2
-                * torch.sqrt(sigma_2)
-                * torch.exp(norm.log_prob(mu / torch.sqrt(sigma_2)))
-            )
-            sec_term = mu * (2 * norm.cdf(mu / torch.sqrt(sigma_2)) - 1)
-            return first_term + sec_term
-
-        # Estimate the differences between means and variances for each sample, batch-wise
-        var_pred = std_pred ** 2
-        n_mixtures = mean_pred.shape[0]
-        batch_size = mean_pred.shape[1]
-        crps_exact = 0.0
-
-        for i in range(batch_size):
-            means_vec = mean_pred[:, i]
-            vars_vec = var_pred[:, i]
-
-            means_diff = torch.zeros(
-                (n_mixtures, n_mixtures),
-                dtype=torch.float64,
-                device=self.device,
-            )
-            vars_sum = torch.zeros(
-                (n_mixtures, n_mixtures),
-                dtype=torch.float64,
-                device=self.device,
-            )
-            ru, cu = torch.triu_indices(n_mixtures, n_mixtures, 1)
-            rl, cl = torch.tril_indices(n_mixtures, n_mixtures, 1)
-
-            means_diff[ru, cu] = means_vec[ru] - means_vec[cu]
-            means_diff[rl, cl] = means_vec[rl] - means_vec[cl]
-            vars_sum[ru, cu] = vars_vec[ru] + vars_vec[cu]
-            vars_sum[rl, cl] = vars_vec[rl] + vars_vec[cl]
-
-            # Term only depending on the means and vars
-            fixed_term = 1 / 2 * torch.mean(A(means_diff, vars_sum))
-
-            # Term that depends on the real value of the data
-            dev_mean = y[i] - means_vec
-            data_term = torch.mean(A(dev_mean, vars_vec))
-
-            crps_exact += data_term - fixed_term
-
-        return crps_exact / batch_size
+        crps= crps_gaussian(y.detach().cpu(), mean_pred.detach().cpu(), std_pred.detach().cpu())
+        return np.mean(np.sum(crps, -1))
 
     def get_dict(self):
         return {
             "LOSS": float(self.loss.detach().cpu().numpy()),
             "RMSE": np.sqrt(self.mse.detach().cpu().numpy()),
             "NLL": float(self.nll.detach().cpu().numpy()),
-            "CRPS": float(self.crps.detach().cpu().numpy()),
+            "CRPS": float(self.crps),
         }
 
 

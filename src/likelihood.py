@@ -13,16 +13,11 @@ class Likelihood(torch.nn.Module):
         """
         Represents a probability distribution of the target values
         given the model predictions
-
             P( y | f )
-
         Given that the latent function f follows a Gaussian distribution
-
             Q(f) = N(Fmu, Fvar)
-
         Contains the necesarry methods to perform variational inference
         and likelihood computations.
-
         Parameters
         ----------
         dtype : torch type
@@ -37,11 +32,8 @@ class Likelihood(torch.nn.Module):
     def logdensity(self, x, mu, var):
         """
         Given a datum Y compute the (log) predictive density of Y.
-
         This method computes the predictive density
-
            p(y=Y).
-
         """
         raise NotImplementedError(
             "Implement the logdensity function for this likelihood"
@@ -51,22 +43,16 @@ class Likelihood(torch.nn.Module):
         """
         Given the latent function value and a datum Y,
         compute the (log) predictive density of Y.
-
         This method computes the predictive density
-
            p(y=Y|f=F).
-
         Parameters
         ----------
         Y : torch tensor of shape (batch_size, output_dim)
             Contains the true target values.
-
         F : torch tensor of shape (batch_size, output_dim)
             Contains the values from the latent function.
-
         Returns
         -------
-
         logdensity : torch tensor of shape (batch_size)
                      Contains the log probability of each target value.
         """
@@ -75,19 +61,14 @@ class Likelihood(torch.nn.Module):
     def conditional_mean(self, F):
         """
         Given a value of the latent function, compute the mean of the data
-
         This method computes
-
             \int y p(y|f) dy.
-
         Parameters
         ----------
         F : torch tensor of shape (batch_size, output_dim)
             Contains the values from the latent function.
-
         Returns
         -------
-
         mean : torch tensor of shape (batch_size, output_dim)
                Contains the mean of the data.
         """
@@ -100,14 +81,11 @@ class Likelihood(torch.nn.Module):
         """
         Given a value of the latent function, compute the variance of the data
         This method computes
-
             \int y^2 p(y|f) dy  - [\int y p(y|f) dy] ^ 2
-
         Parameters
         ----------
         F : torch tensor of shape (batch_size, output_dim)
             Contains the values from the latent function.
-
         Returns
         -------
         var : torch tensor of shape (batch_size, output_dim)
@@ -120,32 +98,23 @@ class Likelihood(torch.nn.Module):
     def predict_mean_and_var(self, Fmu, Fvar):
         """
         This method computes the predictive mean
-
            \int\int y p(y|f)q(f) df dy
-
         and the predictive variance
-
            \int\int y^2 p(y|f)q(f) df dy  - [ \int\int y^2 p(y|f)q(f) df dy ]^2
-
         Parameters
         ----------
         Fmu : torch tensor of shape (batch_size, output_dim)
               Contains the mean values of the latent function Gaussian
               distribution.
-
         Fvar : torch tenor of shape (batch_size, output_dim)
                Contains the standard devation of the latent function
                Gaussian at each data point.
-
         Returns
         -------
-
         mean : torch tensor of shape (batch_size, output_dim)
                Contains the predictive mean of the data.
-
         var : torch tensor of shape (batch_size, output_dim)
               Contains the predictive variance of the data.
-
         """
         raise NotImplementedError(
             "Implement the predict_mean_and_var function for this likelihood"
@@ -155,28 +124,20 @@ class Likelihood(torch.nn.Module):
         """
         Given a Normal distribution for the latent function, and a datum Y,
         compute the (log) predictive density of Y.
-
         This method computes the predictive density
-
            \int p(y=Y|f)q(f) df.
-
         where
-
             Q(f) = N(Fmu, Fvar)
-
         Parameters
         ----------
         Y : torch tensor of shape (batch_size, output_dim)
             Contains the true target values.
-
         Fmu : torch tensor of shape (batch_size, output_dim)
               Contains the mean values of the latent function Gaussian
               distribution.
-
         Fvar : torch tenor of shape (batch_size, output_dim)
                Contains the standard devation of the latent function
                Gaussian at each data point.
-
         Returns
         -------
         logdensity : torch tensor of shape (batch_size)
@@ -190,29 +151,22 @@ class Likelihood(torch.nn.Module):
         """
         Compute the expected log density of the data, given a Gaussian
         distribution for the function values.
-
         This method computes
-
            \int (\log p(y|f)) q(f) df.
-
         Parameters
         ----------
         Y : torch tensor of shape (batch_size, output_dim)
             Contains the true target values.
-
         Fmu : torch tensor of shape (batch_size, output_dim)
               Contains the mean values of the latent function Gaussian
               distribution.
-
         Fvar : torch tenor of shape (batch_size, output_dim)
                Contains the standard devation of the latent function
                Gaussian at each data point.
-
         Returns
         -------
         var_exp : torch tensor of shape (batch_size)
                   Contains the log probability of each target value.
-
         """
         raise NotImplementedError(
             "Implement the variational_expectation function for this likelihood"
@@ -223,7 +177,6 @@ class Gaussian(Likelihood):
     def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None):
         """Gaussian Likelihood. Encapsulates the likelihood noise
         as a parameter.
-
         Arguments
         ---------
         log_variance : float of type self.dtype
@@ -232,7 +185,6 @@ class Gaussian(Likelihood):
                 Type of the log-variance parameter.
         device : torch device
                  Device in which to store the parameter.
-
         """
         super().__init__(dtype, device)
         # initialize parameter
@@ -243,7 +195,7 @@ class Gaussian(Likelihood):
         """Computes the log density of a one dimensional Gaussian distribution
         of mean mu and variance var, evaluated on x.
         """
-        logp = -0.5 * (np.log(2 * np.pi) + var.log() + (mu - x).square() / var)
+        logp = -0.5 * (np.log(2 * np.pi) + torch.log(var) + (mu - x)**2 / var)
         return logp
 
     def logp(self, F, Y):
@@ -259,20 +211,19 @@ class Gaussian(Likelihood):
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
         """Computes the variational expectation, i.e, the expectation under
         Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f).
-
         As both distributions are Gaussian this can be computed in closed form.
         """
+
         if alpha == 0:
             logpdf = (
                 -0.5 * np.log(2 * np.pi)
                 - 0.5 * self.log_variance
-                - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
+                - 0.5 * ((Y - Fmu) **2 + Fvar) / self.log_variance.exp()
             )
-            return torch.mean(logpdf, dim=0)
+            return torch.sum(logpdf, -1)
+        
+        
         # Black-box alpha-energy
-        # Number of predictive mixtures
-        S = torch.tensor(Fmu.shape[0])
-
         variance = torch.exp(self.log_variance)
         # Proportionality constant
         C = (
@@ -281,7 +232,7 @@ class Gaussian(Likelihood):
         )
 
         logpdf = self.logdensity(Fmu, Fvar + variance / alpha, Y)
-        logpdf = torch.logsumexp(logpdf, dim=0) + torch.log(C) - torch.log(S)
+        logpdf = logpdf + torch.log(C)
         return logpdf / alpha
 
 
@@ -289,7 +240,6 @@ class QuadratureGaussian(Gaussian):
     def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None):
         """Gaussian Likelihood. Encapsulates the likelihood noise
         as a parameter.
-
         Arguments
         ---------
         log_variance : float of type self.dtype
@@ -298,7 +248,6 @@ class QuadratureGaussian(Gaussian):
                 Type of the log-variance parameter.
         device : torch device
                  Device in which to store the parameter.
-
         """
         self.generator = torch.Generator(device)
         self.generator.manual_seed(123)
@@ -416,24 +365,18 @@ class MultiClass(Likelihood):
         Computes the probability of the true class Y of being chosen as the
         final prediction. The latent function is supposed to follow a Gaussian
         distribution.
-
         Computes this probability using Gauss-Hermite quadrature.
-
         Reference: [http://mlg.eng.cam.ac.uk/matthews/thesis.pdf]
-
         Arguments
         ---------
         Y : torch tensor of shape (batch_size, output_dim)
             Contains the true target values.
-
         Fmu : torch tensor of shape (batch_size, output_dim)
               Contains the mean values of the latent function Gaussian
               distribution.
-
         Fvar : torch tensor of shape (batch_size, output_dim)
                Contains the variance of the latent function Gaussian
                distribution.
-
         Returns
         -------
         cdf : torch tensor of shape (batch_size, output_dim)
@@ -531,7 +474,6 @@ class Bernoulli(Likelihood):
     def predict_mean_and_var(self, Fmu, Fvar):
         """
         p = \int\int y p(y|f)q(f) df dy
-
         """
         p = self.inv_probit(Fmu / torch.sqrt(1 + Fvar))
         return p, p - torch.square(p)
