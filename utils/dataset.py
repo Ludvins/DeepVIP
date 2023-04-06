@@ -8,7 +8,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from sklearn.model_selection import train_test_split
-
+import torchvision.transforms as trn
 
 class Training_Dataset(Dataset):
     def __init__(
@@ -101,9 +101,9 @@ class DVIPDataset(Dataset):
             self.targets[train_indexes],
             normalize_targets=self.type == "regression",
         )
-        train_test_dataset = Test_Dataset(
-            self.inputs[train_indexes],
-            self.targets[train_indexes],
+        full_dataset = Test_Dataset(
+            self.inputs,
+            self.targets,
             train_dataset.inputs_mean,
             train_dataset.inputs_std,
         )
@@ -114,7 +114,7 @@ class DVIPDataset(Dataset):
             train_dataset.inputs_std,
         )
 
-        return train_dataset, train_test_dataset, test_dataset
+        return train_dataset, full_dataset, test_dataset
 
     def __getitem__(self, index):
         return self.inputs[index], self.targets[index]
@@ -138,7 +138,7 @@ class SPGP_Dataset(DVIPDataset):
         targets = np.loadtxt("data/SPGP_dist/train_outputs")
         test_inputs = np.loadtxt("data/SPGP_dist/test_inputs")
         #test_inputs = np.linspace(-40, 50, 200)
-        mask = ((inputs < 1.5) | (inputs > 3.5)).flatten()
+        mask = ...#((inputs < 1.5) | (inputs > 3.5)).flatten()
 
         
         
@@ -149,7 +149,7 @@ class SPGP_Dataset(DVIPDataset):
             normalize_inputs=True,
         )
 
-        self.train_test = Test_Dataset(
+        self.full = Test_Dataset(
             inputs[mask, np.newaxis],
             targets[mask, np.newaxis],
             self.train.inputs_mean,
@@ -166,7 +166,7 @@ class SPGP_Dataset(DVIPDataset):
         return 200
 
     def get_split(self, *args):
-        return self.train, self.train_test, self.test
+        return self.train, self.full, self.test
 
     def len_train(self, test_size):
         return 200
@@ -181,9 +181,9 @@ class Synthetic_Dataset(DVIPDataset):
         def f(x):
             return np.cos(5 * x) / (np.abs(x) + 1)
 
-        # inputs = rng.standard_normal(300)
-        inputs = np.linspace(-1.0, 1.0, 300)
-        targets = f(inputs) + rng.standard_normal(inputs.shape)
+        inputs = rng.standard_normal(300)
+        #inputs = np.linspace(-1.0, 1.0, 300)
+        targets = f(inputs) + rng.standard_normal(inputs.shape)*0.1 * inputs
 
         self.inputs = inputs[..., np.newaxis]
         self.targets = targets[..., np.newaxis]
@@ -212,9 +212,9 @@ class Synthetic_Dataset(DVIPDataset):
             normalize_inputs=False,
         )
 
-        self.train_test = Test_Dataset(
-            inputs[mask, np.newaxis],
-            targets[mask, np.newaxis],
+        self.full = Test_Dataset(
+            inputs[..., np.newaxis],
+            targets[..., np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
@@ -229,324 +229,113 @@ class Synthetic_Dataset(DVIPDataset):
         return 300
 
     def get_split(self, *args):
-        return self.train, self.train_test, self.test
+        return self.train, self.full, self.test
 
     def len_train(self, test_size):
-        return 200
+        return 200 
 
 
-class Constant_Dataset(DVIPDataset):
+
+class Synthetic2_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "regression"
         self.output_dim = 1
 
-        rng = np.random.default_rng(seed=1234)
+        data = np.load("data/data.npy")
+        inputs, targets = data[:, 0], data[:, 1]
 
-        n = rng.poisson(3, 1)[0]
-        locations = rng.uniform(0, 1, n)
-        values = rng.uniform(0, 1, n + 1)
-
-        sort = np.argsort(locations)
-        locations = locations[sort]
-
-        def f(x):
-            y = x * 0 + values[0]
-            for i in range(n):
-                a = np.where(x > locations[i])
-                y[a] = values[i + 1]
-
-            return y
-
-        # inputs = rng.standard_normal(300)
-        inputs = np.linspace(0, 0.2, 50)
-        inputs = np.concatenate([inputs, np.linspace(0.8, 1, 50)], axis=-1)
-        targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.01
-
-        test_inputs = np.linspace(0, 1.0, 300)
-        test_targets = f(test_inputs) + rng.standard_normal(test_inputs.shape) * 0.01
-
-        targets = targets[..., np.newaxis]
-        inputs = inputs[..., np.newaxis]
-        test_inputs = test_inputs[..., np.newaxis]
-        test_targets = test_targets[..., np.newaxis]
+        test_inputs = np.linspace(np.min(inputs)-5, np.max(inputs)+5, 200)
 
         self.train = Training_Dataset(
-            inputs,
-            targets,
-            normalize_targets=False,
+            inputs[..., np.newaxis],
+            targets[..., np.newaxis],
+            normalize_targets=True,
             normalize_inputs=False,
         )
 
-        self.train_test = Test_Dataset(
-            inputs,
-            targets,
+        self.full = Test_Dataset(
+            inputs[..., np.newaxis],
+            targets[..., np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            test_inputs,
-            test_targets,
+            test_inputs[..., np.newaxis],
+            None,
             self.train.inputs_mean,
             self.train.inputs_std,
         )
 
     def __len__(self):
-        return 100
+        return 400
 
     def get_split(self, *args):
-        return self.train, self.train_test, self.test
+        return self.train, self.full, self.test
 
     def len_train(self, test_size):
-        return 100
+        return 400 
+    
 
 
-class Linear_Dataset(DVIPDataset):
+class SyntheticBinary_Dataset(DVIPDataset):
     def __init__(self):
-        self.type = "regression"
+        self.type = "binary"
         self.output_dim = 1
 
         rng = np.random.default_rng(seed=0)
 
-        n = rng.poisson(3, 1)[0]
-        locations = np.append(rng.uniform(0, 1, n), [0, 1])
-        values = rng.uniform(0, 1, n + 2)
-
-        sort = np.argsort(locations)
-        locations = locations[sort]
-
         def f(x):
-            y = x * 0 + values[0]
-            a = (x.reshape(-1, 1) > locations.reshape(1, -1)).sum(axis=1) - 1
-            y = (values[a + 1] - values[a]) / (locations[a + 1] - locations[a]) * (
-                x - locations[a]
-            ) + values[a]
+            y = np.zeros_like(x)
+            mask1 = ((x >= -3) * (x < -1)) |((x >= 1) * (x < 4)) 
+            mask2 = ((x >= -1) * (x < -0)) 
+            mask3 = ((x >= 0) * (x < 2)) 
+            
+            y[mask1] = 0.
+            y[mask2] = 1.
+
+            r = rng.uniform(-1, 1, size = x[mask3].shape[0])
+            y[mask3] = np.sign(r)
+            y[y == -1] = 0
             return y
+            
+ 
 
         # inputs = rng.standard_normal(300)
-        inputs = np.linspace(0 + 1e-6, 0.2, 50)
-        inputs = np.concatenate([inputs, np.linspace(0.8, 1 - 1e-6, 50)], axis=-1)
-        targets = f(inputs) + rng.standard_normal(inputs.shape) * 0.01
-
-        test_inputs = np.linspace(0, 1.0, 300)
-        test_targets = f(test_inputs) + rng.standard_normal(test_inputs.shape) * 0.01
-
-        targets = targets[..., np.newaxis]
-        inputs = inputs[..., np.newaxis]
-        test_inputs = test_inputs[..., np.newaxis]
-        test_targets = test_targets[..., np.newaxis]
-
+        inputs = np.linspace(-3.0,4.0, 300)
+        targets = f(inputs)
+        
+        mask = (((inputs > -3) * (inputs < 1)) | ((inputs < 4) * (inputs > 3))).flatten()
+                
         self.train = Training_Dataset(
-            inputs,
-            targets,
+            inputs[mask, np.newaxis],
+            targets[mask, np.newaxis],
             normalize_targets=False,
             normalize_inputs=False,
         )
 
-        self.train_test = Test_Dataset(
-            inputs,
-            targets,
+        self.full = Test_Dataset(
+            inputs[..., np.newaxis],
+            targets[..., np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            test_inputs,
-            test_targets,
+            inputs[..., np.newaxis],
+            targets[..., np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
 
     def __len__(self):
-        return 100
+        return 300
 
     def get_split(self, *args):
-        return self.train, self.train_test, self.test
+        return self.train, self.full, self.test
 
     def len_train(self, test_size):
-        return 100
+        return 200 
 
-
-class Bimodal_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        rng = np.random.default_rng(0)
-
-        n = 2000
-        x = rng.uniform(size=n) * 8 - 4
-        epsilon = rng.normal(size=n)
-
-        y = np.zeros_like(x)
-        y[: n // 2] = 20 * np.cos(x[: n // 2] - 0.5) + epsilon[: n // 2]
-
-        y[n // 2 :] = 20 * np.sin(x[n // 2 :] - 0.5) + epsilon[n // 2 :]
-        self.inputs = x[..., np.newaxis]
-        self.targets = y[..., np.newaxis]
-
-
-class Heterocedastic_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        rng = np.random.default_rng(0)
-
-        x = rng.uniform(size=2000) * 8 - 4
-        epsilon = rng.normal(size=2000) * 2
-
-        sin = np.sin(x)
-
-        y = 7 * sin + epsilon * sin + 10
-
-        self.inputs = x[..., np.newaxis]
-        self.targets = y[..., np.newaxis]
-
-
-class Boston_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-
-        data_url = "{}{}".format(uci_base, "housing/housing.data")
-        raw_df = pd.read_fwf(data_url, header=None).to_numpy()
-        self.split_data(raw_df)
-
-
-class Energy_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        url = "{}{}".format(uci_base, "00242/ENB2012_data.xlsx")
-        data = pd.read_excel(url).values
-        data = data[:, :9]
-        self.split_data(data)
-
-
-class Concrete_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        url = "{}{}".format(uci_base, "concrete/compressive/Concrete_Data.xls")
-        data = pd.read_excel(url).values
-        self.split_data(data)
-
-
-class Naval_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        try:
-            data = pd.read_fwf("./data/UCI CBM Dataset/data.txt", header=None).values
-        except:
-            url = "{}{}".format(uci_base, "00316/UCI%20CBM%20Dataset.zip")
-            with urlopen(url) as zipresp:
-                with ZipFile(BytesIO(zipresp.read())) as zfile:
-                    zfile.extractall("./data/")
-
-            data = pd.read_fwf("./data/UCI CBM Dataset/data.txt", header=None).values
-        data = data[:, :-1]
-        self.split_data(data)
-
-
-class Power_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        try:
-            data = pd.read_excel("./data/CCPP//Folds5x2_pp.xlsx").values
-        except:
-            url = "{}{}".format(uci_base, "00294/CCPP.zip")
-            with urlopen(url) as zipresp:
-                with ZipFile(BytesIO(zipresp.read())) as zfile:
-                    zfile.extractall("./data/")
-
-            data = pd.read_excel("./data/CCPP//Folds5x2_pp.xlsx").values
-        self.split_data(data)
-
-
-class Protein_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        url = "{}{}".format(uci_base, "00265/CASP.csv")
-        data = pd.read_csv(url).values
-        data = np.concatenate([data[:, 1:], data[:, 0, None]], 1)
-        self.split_data(data)
-
-
-class Kin8nm_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        url = "https://www.openml.org/data/get_csv/3626/dataset_2175_kin8nm.arff"
-        data = pd.read_csv(url, dtype=float).values
-        self.split_data(data)
-
-
-class Yatch_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        url = "{}{}".format(uci_base, "00243/yacht_hydrodynamics.data")
-        data = pd.read_csv(url, header=None).values
-        self.split_data(data)
-
-
-class WineRed_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        url = "{}{}".format(uci_base, "wine-quality/winequality-red.csv")
-        data = pd.read_csv(url, delimiter=";").values
-        self.split_data(data)
-
-
-class CO2_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        url = "https://scrippsco2.ucsd.edu/assets/data/atmospheric/stations/in_situ_co2/monthly/monthly_in_situ_co2_mlo.csv"
-        data = pd.read_csv(url, comment='"', header=[0, 1, 2], dtype=float).values[
-            :, [3, 4]
-        ]
-        mask = (data == -99.99).any(1)
-        self.data = data[~mask]
-        self.len_data = self.data.shape[0]
-
-        split = self.len_data // 5
-        test_indexes = np.concatenate(
-            (np.arange(split, 2 * split), np.arange(3 * split, 4 * split)), axis=0
-        )
-        train_indexes = np.setdiff1d(np.arange(self.len_data), test_indexes)
-
-        train_data = self.data[train_indexes, :1]
-        test_data = self.data[test_indexes, :1]
-        train_targets = self.data[train_indexes, 1:]
-        test_targets = self.data[test_indexes, 1:]
-
-        self.train = Training_Dataset(train_data, train_targets)
-
-        self.train_test = Test_Dataset(
-            self.data[:, :1],
-            self.data[:, 1:],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            test_data,
-            test_targets,
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return 778
-
-    def len_train(self, test_size):
-        return len(self.train)
-
-    def get_split(self, seed, *args):
-        return self.train, self.train_test, self.test
-
-
+    
 class MNIST_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "multiclass"
@@ -575,7 +364,7 @@ class MNIST_Dataset(DVIPDataset):
             normalize_inputs=False,
         )
 
-        self.train_test = Test_Dataset(
+        self.full = Test_Dataset(
             train_data.numpy(),
             train_targets.numpy(),
             self.train.inputs_mean,
@@ -592,405 +381,115 @@ class MNIST_Dataset(DVIPDataset):
         return 70000
 
     def get_split(self, *args):
-        return self.train, self.train_test, self.test
+        return self.train, self.full, self.test
 
     def len_train(self, test_size):
         return 60000
 
 
-class MNIST_regression_Dataset(DVIPDataset):
+class Banana_Dataset(DVIPDataset):
     def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        train = datasets.MNIST(
-            root="./data", train=True, download=True, transform=transforms.ToTensor()
-        )
-        test = datasets.MNIST(
-            root="./data",
-            train=False,
-            download=True,
-            transform=transforms.ToTensor(),
-        )
-
-        train_data = train.data / 255.0
-        test_data = test.data / 255.0
-
-        # train_data = train.data.reshape(60000, -1)
-        # test_data = test.data.reshape(10000, -1)
-
-        train_targets = train_data
-        test_targets = test_data
-
-        self.train = Training_Dataset(
-            train_data.numpy(),
-            train_targets.numpy(),
-            normalize_targets=False,
-            normalize_inputs=False,
-        )
-
-        self.train_test = Test_Dataset(
-            train_data.numpy(),
-            train_targets.numpy(),
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            test_data.numpy(),
-            test_targets.numpy(),
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return 70000
-
-    def get_split(self, *args):
-        return self.train, self.train_test, self.test
-
-    def len_train(self, test_size):
-        return 60000
-
-
-class Rectangles_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "binaryclass"
+        self.type = "multiclass"
         self.classes = 2
         self.output_dim = 1
+        
+        data = pd.read_csv("./data/banana.csv",sep=",").to_numpy()
+        inputs, targets = data[:, :-1], data[:, -1]
+        
+        targets[targets == -1] = 0
+        self.inputs = inputs
+        self.targets = targets[..., np.newaxis]
+        
 
-        train_data = np.loadtxt("data/rectangles/rectangles_im_train.amat")
-        test_data = np.loadtxt("data/rectangles/rectangles_im_test.amat")
-
-        self.len_data = train_data.shape[0] + test_data.shape[0]
-        self.train = Training_Dataset(
-            train_data[:, :-1],
-            train_data[:, -1].reshape(-1, 1),
-            normalize_targets=False,
-            normalize_inputs=False,
-        )
-
-        self.train_test = Test_Dataset(
-            train_data[:, :-1],
-            train_data[:, -1].reshape(-1, 1),
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            test_data[:, :-1],
-            test_data[:, -1].reshape(-1, 1),
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return self.len_data
-
-    def len_train(self, test_size):
-        return len(self.train)
-
-    def get_split(self, split, *args):
-        return self.train, self.train_test, self.test
-
-
-class Year_Dataset(DVIPDataset):
+class Two_Moons(DVIPDataset):
     def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-        try:
-            data = pd.read_csv(
-                "./data/YearPredictionMSD.txt", header=None, delimiter=","
-            ).values
-        except:
-            url = "{}{}".format(uci_base, "00203/YearPredictionMSD.txt.zip")
-            with urlopen(url) as zipresp:
-                with ZipFile(BytesIO(zipresp.read())) as zfile:
-                    zfile.extractall("./data/")
-
-            data = pd.read_csv(
-                "/data/YearPredictionMSD.txt", header=None, delimiter=","
-            ).values
-
-        self.len_data = data.shape[0]
-
-        X = data[:, 1:]
-        Y = data[:, 0].reshape(-1, 1)
-
-        self.n_train = 463715
-        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
-        self.train_test = Test_Dataset(
-            X[: self.n_train],
-            Y[: self.n_train],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            X[self.n_train :],
-            Y[self.n_train :],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return self.len_data
-
-    def len_train(self, test_size):
-        return self.n_train
-
-    def get_split(self, split, *args):
-        return self.train, self.train_test, self.test
-
-
-class Airline_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "regression"
-        self.output_dim = 1
-
-        data = pd.read_csv("./data/airline.csv")
-        # Convert time of day from hhmm to minutes since midnight
-        data.ArrTime = 60 * np.floor(data.ArrTime / 100) + np.mod(data.ArrTime, 100)
-        data.DepTime = 60 * np.floor(data.DepTime / 100) + np.mod(data.DepTime, 100)
-
-        # Pick out the data
-        Y = data["ArrDelay"].values[:800000].reshape(-1, 1)
-        names = [
-            "Month",
-            "DayofMonth",
-            "DayOfWeek",
-            "plane_age",
-            "AirTime",
-            "Distance",
-            "ArrTime",
-            "DepTime",
-        ]
-        X = data[names].values[:800000]
-
-        self.n_train = 700000
-        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
-
-        self.train_test = Test_Dataset(
-            X[: self.n_train],
-            Y[: self.n_train],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            X[self.n_train :],
-            Y[self.n_train :],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return self.len_data
-
-    def len_train(self, test_size):
-        return self.n_train
-
-    def get_split(self, split, *args):
-        return self.train, self.train_test, self.test
-
-
-class HIGGS_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "binaryclass"
+        self.type = "multiclass"
         self.classes = 2
         self.output_dim = 1
-
-        if os.path.exists("data/HIGGS.csv"):
-            print("HIGGS csv file found.")
-            data = pd.read_csv("data/HIGGS.csv", header=None).values
-        elif os.path.exists("data/HIGGS.csv.gz"):
-            print("HIGGS gzip file found.")
-            data = pd.read_csv(
-                "data/HIGGS.csv.gz", header=None, compression="gzip"
-            ).values
-        else:
-            print("Downloading HIGGS Dataset...")
-            url = "{}{}".format(uci_base, "00280/HIGGS.csv.gz")
-            import wget
-
-            wget.download(url, out="data/" + url.split("/")[-1])
-            data = pd.read_csv(
-                "data/HIGGS.csv.gz", header=None, compression="gzip"
-            ).values
-
-        print("HIGGS data loaded. Data shape: ", end="")
-        print(data.shape)
-        X = data[:, 1:]
-        Y = data[:, 0].reshape(-1, 1)
-
-        self.len_data = 11000000
-        test_size = 500000
-        self.train = Training_Dataset(
-            X[: self.len_data - test_size],
-            Y[: self.len_data - test_size],
-            normalize_targets=False,
-            normalize_inputs=False,
-        )
-
-        self.train_test = Test_Dataset(
-            X[: self.len_data - test_size],
-            Y[: self.len_data - test_size],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            X[self.len_data - test_size :],
-            Y[self.len_data - test_size :],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return self.len_data
-
-    def len_train(self, test_size):
-        return len(self.train)
-
-    def get_split(self, split, *args):
-        return self.train, self.train_test, self.test
-
-
-class SUSY_Dataset(DVIPDataset):
+        
+        from sklearn.datasets import make_moons
+        
+        inputs, targets = make_moons(1000, random_state = 0, noise = 0.2)
+                
+        targets[targets == -1] = 0
+        self.inputs = inputs
+        self.targets = targets[..., np.newaxis]
+        
+class Spiral3(DVIPDataset):
     def __init__(self):
-        self.type = "binaryclass"
+        self.type = "binary"
+        self.classes = 3
+        self.output_dim = 3
+        
+        from numpy import pi
+        rng = np.random.default_rng(1234)
+        N = 200
+        theta = np.sqrt(rng.random(N))*1*pi # np.linspace(0,2*pi,100)
+
+        r_a = 1.5*theta + pi
+        data_a = np.array([np.cos(theta)*r_a, np.sin(theta)*r_a]).T
+        x_a = data_a + rng.random((N,2)) * 3
+
+        r_b = 1.5*theta
+        data_b = np.array([np.cos(theta)*r_b, np.sin(theta)*r_b]).T
+        x_b = data_b + rng.random((N,2)) * 3
+        
+        r_c = 1.5*theta - pi
+        data_c = np.array([np.cos(theta)*r_c, np.sin(theta)*r_c]).T
+        x_c = data_c + rng.random((N,2)) * 3
+
+        res_a = np.append(x_a, np.zeros((N,1)), axis=1)
+        res_b = np.append(x_b, np.ones((N,1)), axis=1)
+        res_c = np.append(x_c, np.ones((N,1))+1, axis=1)
+        
+        res = np.concatenate([res_a, res_b, res_c], axis=0)
+        rng.shuffle(res)
+        
+        self.inputs = res[:, :-1]
+        self.targets = res[:, -1][:, np.newaxis]
+
+class Spiral(DVIPDataset):
+    def __init__(self):
+        self.type = "binary"
         self.classes = 2
         self.output_dim = 1
+        
+        from numpy import pi
+        rng = np.random.default_rng(1234)
+        N = 400
+        theta = np.sqrt(rng.random(N))*4*pi # np.linspace(0,2*pi,100)
 
-        if os.path.exists("data/SUSY.csv"):
-            print("SUSSY csv file found.")
-            data = pd.read_csv("data/SUSY.csv", header=None).values
-        elif os.path.exists("data/SUSY.csv.gz"):
-            print("SUSY gzip file found.")
-            data = pd.read_csv(
-                "data/SUSY.csv.gz", header=None, compression="gzip"
-            ).values
-        else:
-            print("Downloading SUSY Dataset...")
-            url = "{}{}".format(uci_base, "00279/SUSY.csv.gz")
-            import wget
+        r_a = 2*theta + pi
+        data_a = np.array([np.cos(theta)*r_a, np.sin(theta)*r_a]).T
+        x_a = data_a + rng.random((N,2)) * 6
 
-            wget.download(url, out="data/" + url.split("/")[-1])
-            data = pd.read_csv(
-                "data/SUSY.csv.gz", header=None, compression="gzip"
-            ).values
+        r_b = -2*theta - pi
+        data_b = np.array([np.cos(theta)*r_b, np.sin(theta)*r_b]).T
+        x_b = data_b + rng.random((N,2)) * 6
 
-        print("SUSY data loaded. Data shape: ", end="")
-        print(data.shape)
-        X = data[:, 1:]
-        Y = data[:, 0].reshape(-1, 1)
-
-        self.len_data = 5000000
-        test_size = 500000
-        self.train = Training_Dataset(
-            X[: self.len_data - test_size],
-            Y[: self.len_data - test_size],
-            normalize_targets=False,
-            normalize_inputs=True,
-        )
-
-        self.train_test = Test_Dataset(
-            X[: self.len_data - test_size],
-            Y[: self.len_data - test_size],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            X[self.len_data - test_size :],
-            Y[self.len_data - test_size :],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return self.len_data
-
-    def len_train(self, test_size):
-        return len(self.train)
-
-    def get_split(self, split, *args):
-        return self.train, self.train_test, self.test
-
-
-class Taxi_Dataset(DVIPDataset):
-    def __init__(self, year=2020):
-        self.type = "regression"
-        self.output_dim = 1
-
-        if os.path.exists("data/taxi.csv"):
-            print("Taxi csv file found.")
-            data = pd.read_csv("data/taxi.csv")
-        elif os.path.exists("data/taxi.zip"):
-            print("Taxi zip file found.")
-            data = pd.read_csv("data/taxi.zip", compression="zip", dtype=object)
-        else:
-            print("Downloading Taxi Dataset...")
-            url = (
-                "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2015-01.csv"
-            )
-            data = pd.read_csv(url)
-            data.to_csv("data/taxi.csv")
-
-        print(data.columns)
-        data["tpep_pickup_datetime"] = pd.to_datetime(data["tpep_pickup_datetime"])
-        data["tpep_dropoff_datetime"] = pd.to_datetime(data["tpep_dropoff_datetime"])
-        print(data)
-        data["day_of_week"] = data["tpep_pickup_datetime"].dt.dayofweek
-        data["day_of_month"] = data["tpep_pickup_datetime"].dt.day
-        data["month"] = data["tpep_pickup_datetime"].dt.month
-        data["time_of_day"] = (
-            data["tpep_pickup_datetime"] - data["tpep_pickup_datetime"].dt.normalize()
-        ) / pd.Timedelta(seconds=1)
-        data["trip_duration"] = (
-            data["tpep_dropoff_datetime"] - data["tpep_pickup_datetime"]
-        ).dt.total_seconds()
-        data = data[
-            [
-                "time_of_day",
-                "day_of_week",
-                "day_of_month",
-                "month",
-                "pickup_latitude",
-                "pickup_longitude",
-                "dropoff_longitude",
-                "dropoff_latitude",
-                "trip_distance",
-                "trip_duration",
-            ]
-        ]
-        data = data[data["trip_duration"] >= 10]
-        data = data[data["trip_duration"] <= 5 * 3600]
-        data = data.astype(float)
-        print(data)
-        data = data.values
-        self.split_data(data)
-
-
+        res_a = np.append(x_a, np.zeros((N,1)), axis=1)
+        res_b = np.append(x_b, np.ones((N,1)), axis=1)
+        
+        res = np.append(res_a, res_b, axis=0)
+        rng.shuffle(res)
+        
+        
+        self.inputs = res[:, :-1]
+        self.targets = res[:, -1][:, np.newaxis]
+        
+        
+        
 def get_dataset(dataset_name):
     d = {
         "SPGP": SPGP_Dataset,
-        "bimodal": Bimodal_Dataset,
         "synthetic": Synthetic_Dataset,
-        "constant": Constant_Dataset,
-        "linear": Linear_Dataset,
-        "heterocedastic": Heterocedastic_Dataset,
-        "boston": Boston_Dataset,
-        "energy": Energy_Dataset,
-        "concrete": Concrete_Dataset,
-        "naval": Naval_Dataset,
-        "kin8nm": Kin8nm_Dataset,
-        "yatch": Yatch_Dataset,
-        "power": Power_Dataset,
-        "protein": Protein_Dataset,
-        "winered": WineRed_Dataset,
-        "CO2": CO2_Dataset,
+        "synthetic2": Synthetic2_Dataset,
+        "syntheticBinary": SyntheticBinary_Dataset,
         "MNIST": MNIST_Dataset,
-        "MNIST2": MNIST_regression_Dataset,
-        "Rectangles": Rectangles_Dataset,
-        "Year": Year_Dataset,
-        "Airline": Airline_Dataset,
-        "HIGGS": HIGGS_Dataset,
-        "SUSY": SUSY_Dataset,
-        "taxi": Taxi_Dataset,
+        "Banana": Banana_Dataset,
+        "Moons": Two_Moons,
+        "Spiral": Spiral,
+        "Spiral3": Spiral3
     }
 
     return d[dataset_name]()

@@ -13,16 +13,19 @@ from scipy.cluster.vq import kmeans2
 sys.path.append(".")
 
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit_map, fit
+from utils.pytorch_learning import fit_map, fit, predict
 from scripts.filename import create_file_name
 from src.generative_functions import *
-from src.sparseLA import SparseLA
 from src.likelihood import Gaussian
+from utils.dataset import get_dataset
+from src.sparseLA import GPLLA
+from utils.models import get_mlp
 
 args = manage_experiment_configuration()
 
 args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
+args.dataset = get_dataset(args.dataset_name)
 
 train_dataset, train_test_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
@@ -34,21 +37,9 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-Z = kmeans2(train_dataset.inputs, 20, minit='points', seed = args.seed)[0]
+f = get_mlp(train_dataset.inputs.shape[1], train_dataset.targets.shape[1], [50, 50],
+            torch.nn.Tanh, device =  args.device, dtype = args.dtype)
 
-print(train_dataset.inputs.dtype)
-
-def get_model():
-    torch.manual_seed(711)
-    return torch.nn.Sequential(
-        torch.nn.Linear(1, 10, device = args.device, dtype = args.dtype), 
-        torch.nn.Tanh(),
-        torch.nn.Linear(10, 10, device = args.device, dtype = args.dtype), 
-        torch.nn.Tanh(),
-        torch.nn.Linear(10, 1, device = args.device, dtype = args.dtype)
-    )
-f = get_model()
-setattr(f, 'output_size', 1)
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.lr)
@@ -65,26 +56,24 @@ loss = fit_map(
     criterion = torch.nn.MSELoss(),
     use_tqdm=True,
     return_loss=True,
-    iterations=1000,
+    iterations=args.MAP_iterations,
     device=args.device,
 )
 end = timer()
 
-X = test_dataset.inputs
-backend = BackPackInterface(f, "regression")
-Jx, _ = backend.jacobians(x = torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype))
-Jz, _ = backend.jacobians(x = torch.tensor(test_dataset.inputs, device = args.device, dtype = args.dtype))
+lla = GPLLA(f, 
+            prior_std = 2.183941,
+            likelihood_hessian=lambda x,y: torch.ones_like(y).unsqueeze(-1).permute(1, 2, 0) / 0.11669471**2,
+            likelihood=Gaussian(device=args.device, 
+                        log_variance=np.log(0.11669471**2),
+                        dtype = args.dtype), 
+            backend = BackPackInterface(f, "classification"),
+            device = args.device,
+            dtype = args.dtype)
 
 
-prior_std = torch.tensor(2.4607, dtype = args.dtype)
-ll_std = torch.tensor(0.1965, dtype = args.dtype)
-Kxx = torch.einsum("nds, mds -> dnm", Jx, Jx)
-Kzz = torch.einsum("nds, mds -> dnm", Jz, Jz)
-Kxz = torch.einsum("nds, mds -> dnm", Jx, Jz)
-
-inv = torch.inverse(
-    Kxx + ll_std**2/prior_std**2 * torch.eye(Kxx.shape[1], dtype = args.dtype).unsqueeze(0))
-KLLA = prior_std**2 * (Kzz - Kxz.transpose(1, 2) @ inv @Kxz)
+lla.fit(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype),
+        torch.tensor(train_dataset.targets, device = args.device, dtype = args.dtype))
 
 import matplotlib.pyplot as plt
 
@@ -95,37 +84,26 @@ axis[0].scatter(train_dataset.inputs, train_dataset.targets, label = "Training p
 #plt.scatter(test_dataset.inputs, test_dataset.targets, label = "Test points")
 
 
+lla_mean, lla_var = predict(lla, test_loader)
+lla_std = np.sqrt(lla_var).flatten()
 
+sort = np.argsort(test_dataset.inputs.flatten())
 
-f_mu = f(torch.tensor(X, dtype = torch.float64, device=args.device))
-f_mu = f_mu.squeeze().detach().cpu().numpy()
-f_var = torch.diagonal(KLLA, dim1 = 1, dim2 = 2)
-pred_std = np.sqrt(f_var + ll_std**2).flatten().detach().cpu().numpy()
-
-
-sort = np.argsort(X.flatten())
-
-axis[0].plot(X.flatten()[sort], f_mu.flatten()[sort], label = "Predictions")
-axis[0].fill_between(X.flatten()[sort],
-                 f_mu.flatten()[sort] - 2*pred_std[sort],
-                  f_mu.flatten()[sort] + 2*pred_std[sort],
+axis[0].plot(test_dataset.inputs.flatten()[sort], lla_mean.flatten()[sort], label = "Predictions")
+axis[0].fill_between(test_dataset.inputs.flatten()[sort],
+                 lla_mean.flatten()[sort] - 2*lla_std[sort],
+                  lla_mean.flatten()[sort] + 2*lla_std[sort],
                   alpha = 0.1,
                   label = "GP_LA uncertainty")
 
 
 axis[0].legend()
 
-axis[1].fill_between(X.flatten()[sort],
-                 np.zeros(X.shape[0]),
-                 pred_std[sort],
+axis[1].fill_between(test_dataset.inputs.flatten()[sort],
+                 np.zeros(test_dataset.inputs.shape[0]),
+                 lla_std[sort],
                   alpha = 0.1,
                   label = "GP uncertainty (std)")
-axis[1].fill_between(X.flatten()[sort],
-                 np.zeros(X.shape[0]),
-                 ll_std.detach().cpu().numpy(),
-                  alpha = 0.1,
-                  label = "Likelihood uncertainty (std)")
-
 
 axis[1].legend()
 plt.show()

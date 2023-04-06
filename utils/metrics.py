@@ -81,10 +81,6 @@ class MetricsRegression(Metrics):
         #  Mixture, that is, the mean of the mean predictions.
         self.mse += scale * self.compute_mse(y, mean_pred)
         self.nll += scale * self.compute_nll(y, mean_pred, std_pred, likelihood)
-        # Update heavy metrics
-        if not light:
-            self.crps += scale * self.compute_crps(y, mean_pred, std_pred)
-
 
     def compute_mse(self, y, prediction):
         """Computes the root mean squared error for the given predictions."""
@@ -113,7 +109,7 @@ class MetricsClassification(Metrics):
         self.acc = torch.tensor(0.0, device=self.device)
         self.auc = torch.tensor(0.0, device=self.device)
 
-    def update(self, y, loss, mean_pred, std_pred, likelihood, light=True):
+    def update(self, y, loss, F, likelihood):
         """Updates all the metrics given the results in the parameters.
 
         Arguments
@@ -123,12 +119,7 @@ class MetricsClassification(Metrics):
             Contains the true targets of the data.
         loss : torch tensor of shape ()
                Contains the loss value for the given batch.
-        mean_pred : torch tensor of shape (S, batch_size, output_dim)
-                    Contains the mean predictions for each sample
-                    in the batch.
-        std_pred : torch tensor of shape (S, batch_size, output_dim)
-                   Contains the std predictions for each sample
-                   in the batch.
+
         likelihood : instance of Likelihood
                      Usable to compute the log likelihood metric.
         """
@@ -140,7 +131,10 @@ class MetricsClassification(Metrics):
             scale = batch_size / self.num_data
         # Update light metrics
         self.loss += scale * loss
-        self.acc += scale * self.compute_acc(y, mean_pred)
+        
+        mean, var = likelihood.conditional_mean_and_var(F)
+        
+        self.acc += scale * self.compute_acc(y, mean)
         self.nll += scale * self.compute_nll(y, mean_pred, std_pred, likelihood)
         self.auc += scale * self.compute_auc(y, mean_pred)
 

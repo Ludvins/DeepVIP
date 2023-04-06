@@ -95,6 +95,31 @@ class Likelihood(torch.nn.Module):
             "Implement the conditional variance function for this likelihood"
         )
 
+    def conditional_mean_and_var(self, F):
+        """
+        Given a value of the latent function, compute the mean of the data
+        This method computes
+            \int y p(y|f) dy.
+        and compute the variance of the data
+        This method computes
+            \int y^2 p(y|f) dy  - [\int y p(y|f) dy] ^ 2
+        Parameters
+        ----------
+        F : torch tensor of shape (batch_size, output_dim)
+            Contains the values from the latent function.
+        Returns
+        -------
+        mean : torch tensor of shape (batch_size, output_dim)
+               Contains the mean of the data.
+        var : torch tensor of shape (batch_size, output_dim)
+              Contains the variance of the data.
+        """
+
+        raise NotImplementedError(
+            "Implement the conditional_mean function for this likelihood"
+        )
+
+
     def predict_mean_and_var(self, Fmu, Fvar):
         """
         This method computes the predictive mean
@@ -189,7 +214,7 @@ class Gaussian(Likelihood):
         super().__init__(dtype, device)
         # initialize parameter
         self.log_variance = torch.tensor(log_variance, dtype=dtype, device=self.device)
-        self.log_variance = torch.nn.Parameter(self.log_variance)
+        #self.log_variance = torch.nn.Parameter(self.log_variance)
 
     def logdensity(self, mu, var, x):
         """Computes the log density of a one dimensional Gaussian distribution
@@ -213,12 +238,13 @@ class Gaussian(Likelihood):
         Q(f) ~ N(Fmu, Fvar) of the log likelihood P(y | f).
         As both distributions are Gaussian this can be computed in closed form.
         """
-
+        if Fvar.shape[2] != 1 or Fvar.shape[1] != 1:
+            raise ValueError("Only 1D regression is supported.")
         if alpha == 0:
             logpdf = (
                 -0.5 * np.log(2 * np.pi)
                 - 0.5 * self.log_variance
-                - 0.5 * ((Y - Fmu) **2 + Fvar) / self.log_variance.exp()
+                - 0.5 * ((Y - Fmu) **2 + Fvar.squeeze(-1)) / self.log_variance.exp()
             )
             return torch.sum(logpdf, -1)
         
@@ -236,79 +262,6 @@ class Gaussian(Likelihood):
         return logpdf / alpha
 
 
-class QuadratureGaussian(Gaussian):
-    def __init__(self, log_variance=-5.0, dtype=torch.float64, device=None):
-        """Gaussian Likelihood. Encapsulates the likelihood noise
-        as a parameter.
-        Arguments
-        ---------
-        log_variance : float of type self.dtype
-                       Initial value for the logarithm of the variance.
-        dtype : data-type
-                Type of the log-variance parameter.
-        device : torch device
-                 Device in which to store the parameter.
-        """
-        self.generator = torch.Generator(device)
-        self.generator.manual_seed(123)
-
-        self.num_gauss_hermite_points = 200
-        super().__init__(log_variance, dtype, device)
-
-    def forward(self, x):
-        z = torch.randn(
-            x.shape,
-            generator=self.generator,
-            dtype=self.dtype,
-            device=self.device,
-        )
-        return reparameterize(x, torch.sqrt(torch.exp(self.log_variance)), z)
-
-    def variational_expectations(self, Fmu, Fvar, Y, alpha, func):
-        if Fvar.dim() == 3:
-            Fvar = torch.diagonal(Fvar, dim1=0, dim2=1).T
-
-        # logpdf = (
-        #     -0.5 * np.log(2 * np.pi)
-        #     - 0.5 * self.log_variance
-        #     - 0.5 * ((Y - Fmu).square() + Fvar) / self.log_variance.exp()
-        # )
-
-        # # print(logpdf)
-        # S = torch.tensor(Fmu.shape[0])
-
-        # variance = torch.exp(self.log_variance)
-        # # Proportionality constant
-        # C = (
-        #     torch.sqrt(2 * torch.pi * variance / alpha)
-        #     / torch.sqrt(2 * torch.pi * variance) ** alpha
-        # )
-
-        # logpdf = self.logdensity(Fmu, Fvar + variance / alpha, Y) + torch.log(C)
-        if alpha == 0:
-            logpdf = hermgaussquadrature(
-                lambda x, y: self.logp(func(x), y),
-                self.num_gauss_hermite_points,
-                Fmu,
-                Fvar,
-                Y,
-                self.dtype,
-                self.device,
-            )
-            return logpdf
-        pdf = hermgaussquadrature(
-            lambda x, y: torch.exp(alpha * self.logp(func(x), y)),
-            self.num_gauss_hermite_points,
-            Fmu,
-            Fvar,
-            Y,
-            self.dtype,
-            self.device,
-        )
-        logpdf = torch.log(pdf) / alpha
-        return logpdf
-
-
 class MultiClass(Likelihood):
     def __init__(self, num_classes, dtype, device, epsilon=1e-3):
         super().__init__(dtype, device)
@@ -324,15 +277,18 @@ class MultiClass(Likelihood):
         #  contains only the probability of the given targets.
         p = torch.sum(oh_on * p, -1)
         return torch.log(p * (1 - self.epsilon) + (1.0 - p) * (self.K1))
-
-    def logp(self, F, Y):
+    
+    def p(self, F, Y):
         # Tensor of shape (num_data, 1), with 1 if the prediction is correct
         # and 0 otherwise.
         hits = torch.eq(torch.unsqueeze(torch.argmax(F, -1), -1), Y.type(torch.int))
         yes = torch.ones_like(Y, dtype=self.dtype) - self.epsilon
         no = torch.zeros_like(Y, dtype=self.dtype) + self.K1
         p = torch.where(hits, yes, no)
-        return torch.log(p)
+        return p
+    
+    def logp(self, F, Y):
+        return torch.log(self.p(F, Y))
 
     def conditional_mean(self, F):
         # Compute predictions as maximal scores
@@ -348,6 +304,10 @@ class MultiClass(Likelihood):
     def conditional_variance(self, F):
         p = self.conditional_mean(F)
         return p - torch.square(p)
+    
+    def conditional_mean_and_var(self, F):
+        p = self.conditional_mean(F)
+        return p, p - torch.square(p)
 
     def predict_mean_and_var(self, Fmu, Fvar):
         # Size (n_classes, n_data)
@@ -433,18 +393,67 @@ class MultiClass(Likelihood):
         return torch.sum(ve, dim=-1)
 
 
+class MultiClass(Likelihood):
+    def __init__(self, num_classes, dtype, device):
+        super().__init__(dtype, device)
+        self.num_classes = num_classes
+        
+    def p(self, F, Y):
+        torch.exp(self.logp(F, Y))
+        
+    def logp(self, F, Y):
+        oh_on = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
+
+        true = torch.sum(F * oh_on, -1)
+        c = torch.logsumexp(F, -1)
+
+        return true - c
+
+    """     def p(self, F, Y):
+        p = torch.nn.functional.softmax(F, dim=-1)
+        oh = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
+        reg = torch.ones_like(F, dtype=self.dtype) * oh * (1- self.epsilon)
+        reg = reg + torch.ones_like(F, dtype=self.dtype) * (1 - oh) * self.K1
+        p = p * reg
+        p = torch.sum(p, -1)
+        return p
+
+        
+    def logp(self, F, Y):
+        
+        oh = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
+        reg = torch.ones_like(F, dtype=self.dtype) * oh * (1- self.epsilon)
+        reg = reg + torch.ones_like(F, dtype=self.dtype) * (1 - oh) * self.K1
+        
+        logp = F - torch.logsumexp(F, -1).unsqueeze(-1)
+        logp = logp + torch.log(reg)
+        return torch.logsumexp(logp, -1)
+        
+        def conditional_mean(self, F):
+
+        def conditional_variance(self, F):
+        
+        def conditional_mean_and_var(self, F):
+
+        def predict_mean_and_var(self, Fmu, Fvar):
+
+
+        def variational_expectations(self, Fmu, Fvar, Y, alpha): """
+
+
+
 class Bernoulli(Likelihood):
-    def __init__(self, dtype, device, epsilon=1e-3):
+    def __init__(self, dtype, device, epsilon=1e-5):
         super().__init__(dtype, device)
         self.num_gauss_hermite_points = 20
-        self.epsilon = torch.tensor(epsilon)
+        self.epsilon = epsilon
 
     def density(self, p, var, y):
         """
         p(y|p) =  Bernoulli(y | p)
         """
         p = p * y + (1 - p) * (1 - y)
-        return p  # * (1 - self.epsilon) + (1.0 - p) * self.epsilon
+        return p * (1 - self.epsilon) + (1.0 - p) * self.epsilon
 
     def logdensity(self, p, var, y):
         """
@@ -452,40 +461,51 @@ class Bernoulli(Likelihood):
         """
         return torch.log(self.density(p, var, y))
 
-    def inv_probit(self, x):
-        """Gaussian inverse cdf function evaluated at x"""
-        jitter = 1e-3  # ensures output is strictly between 0 and 1
-        return 0.5 * (1.0 + torch.erf(x / np.sqrt(2.0))) * (1 - 2 * jitter) + jitter
-
     def p(self, F, Y):
         """
         p(y=Y|f=F) = Bernoulli (y | inv(F))
         """
-        p = self.inv_probit(F)
+        p = torch.sigmoid(F)
         return self.density(p, None, Y)
 
     def logp(self, F, Y):
         """
         log p(y=Y|f=F) = log Bernoulli (y | inv(F))
         """
-        p = self.inv_probit(F)
+        p = torch.sigmoid(F)
         return self.logdensity(p, None, Y)
 
     def predict_mean_and_var(self, Fmu, Fvar):
         """
         p = \int\int y p(y|f)q(f) df dy
         """
-        p = self.inv_probit(Fmu / torch.sqrt(1 + Fvar))
+        if Fvar.shape[2] != 1 or Fvar.shape[1] != 1:
+            raise ValueError("Only 1D Binary Classification is supported.")
+        
+        Fvar = Fvar.squeeze(-1)
+        p = hermgaussquadrature(
+            self.p,
+            self.num_gauss_hermite_points,
+            Fmu,
+            Fvar,
+            torch.ones(*Fmu.shape),
+            self.dtype,
+            self.device,
+        )
         return p, p - torch.square(p)
 
     def conditional_mean(self, F):
-        return self.inv_probit(F)
+        return torch.sigmoid(F)
 
     def conditional_variance(self, F):
         p = self.conditional_mean(F)
         return p - torch.square(p)
 
     def variational_expectations(self, Fmu, Fvar, Y, alpha):
+        if Fvar.shape[2] != 1 or Fvar.shape[1] != 1:
+            raise ValueError("Only 1D Binary Classification is supported.")
+        
+        Fvar = Fvar.squeeze(-1)
         return hermgaussquadrature(
             self.logp,
             self.num_gauss_hermite_points,
@@ -495,54 +515,3 @@ class Bernoulli(Likelihood):
             self.dtype,
             self.device,
         )
-
-
-class BroadcastedLikelihood(Likelihood):
-    def __init__(self, likelihood):
-        super().__init__(likelihood.dtype, likelihood.device)
-        self.likelihood = likelihood
-
-    def _broadcast(self, f, vars_SND, vars_ND):
-        S, N, D = vars_SND[0].size()
-        vars_tiled = [torch.tile(x[None, :, :], [S, 1, 1]) for x in vars_ND]
-
-        flattened_SND = [torch.reshape(x, [S * N, D]) for x in vars_SND]
-        flattened_tiled = [torch.reshape(x, [S * N, -1]) for x in vars_tiled]
-
-        flattened_result = f(flattened_SND, flattened_tiled)
-        if isinstance(flattened_result, tuple):
-            return [torch.reshape(x, [S, N, -1]) for x in flattened_result]
-        else:
-            return torch.reshape(flattened_result, [S, N, -1])
-
-    def logdensity(self, p, q, x):
-        f = lambda vars_SND, vars_ND: self.likelihood.logdensity(
-            vars_SND[0],
-            vars_SND[1],
-            vars_ND[0],
-        )
-        return self._broadcast(f, [p, q], [x])
-
-    def variational_expectations(self, Fmu, Fvar, Y, alpha):
-        f = lambda vars_SND, vars_ND: self.likelihood.variational_expectations(
-            vars_SND[0], vars_SND[1], vars_ND[0], alpha
-        )
-        return self._broadcast(f, [Fmu, Fvar], [Y])
-
-    def logp(self, F, Y):
-        f = lambda vars_SND, vars_ND: self.likelihood.logp(vars_SND[0], vars_ND[0])
-        return self._broadcast(f, [F], [Y])
-
-    def conditional_mean(self, F):
-        f = lambda vars_SND, vars_ND: self.likelihood.conditional_mean(vars_SND[0])
-        return self._broadcast(f, [F], [])
-
-    def conditional_variance(self, F):
-        f = lambda vars_SND, vars_ND: self.likelihood.conditional_variance(vars_SND[0])
-        return self._broadcast(f, [F], [])
-
-    def predict_mean_and_var(self, Fmu, Fvar):
-        f = lambda vars_SND, vars_ND: self.likelihood.predict_mean_and_var(
-            vars_SND[0], vars_SND[1]
-        )
-        return self._broadcast(f, [Fmu, Fvar], [])

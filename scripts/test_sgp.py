@@ -17,6 +17,7 @@ from src.generative_functions import *
 from src.sparseLA import SparseLA
 from src.likelihood import Gaussian
 from src.backpack_interface import BackPackInterface
+from utils.models import get_mlp
 
 args = manage_experiment_configuration()
 
@@ -34,21 +35,11 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
 
+f = get_mlp(train_dataset.inputs.shape[1], train_dataset.targets.shape[1], [50, 50], args.seed, torch.nn.Tanh, args.device, args.dtype)
 
-def get_model():
-    torch.manual_seed(711)
-    return torch.nn.Sequential(
-        torch.nn.Linear(1, 10, device = args.device, dtype = args.dtype), 
-        torch.nn.Tanh(),
-        torch.nn.Linear(10, 10, device = args.device, dtype = args.dtype), 
-        torch.nn.Tanh(),
-        torch.nn.Linear(10, 1, device = args.device, dtype = args.dtype)
-    )
-f = get_model()
-setattr(f, 'output_size', 1)
 
 # Define optimizer and compile model
-opt = torch.optim.Adam(f.parameters(), lr=0.01)
+opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr)
 criterion = torch.nn.MSELoss()
 
 # Set the number of training samples to generate
@@ -62,19 +53,21 @@ loss = fit_map(
     criterion = torch.nn.MSELoss(),
     use_tqdm=True,
     return_loss=True,
-    iterations=1000,
+    iterations=args.MAP_iterations,
     device=args.device,
 )
 end = timer()
 
-Z = kmeans2(train_dataset.inputs, 10, minit="points", seed=args.seed)[0]
+Z = kmeans2(train_dataset.inputs, 20, minit="points", seed=args.seed)[0]
 
 sparseLA = SparseLA(
     f.forward,
     Z, 
     alpha = args.bb_alpha,
-    prior_variance_init=1,
-    likelihood=Gaussian(device=args.device, 
+    prior_variance=2.2026465**2,
+    likelihood=Gaussian(
+        log_variance=np.log(0.11802231**2),
+        device=args.device, 
                         dtype = args.dtype), 
     num_data = train_dataset.inputs.shape[0],
     output_dim = 1,
@@ -85,6 +78,7 @@ sparseLA = SparseLA(
     device=args.device,
     dtype=args.dtype,)
 
+sparseLA.freeze_ll()
 sparseLA.print_variables()
 
 opt = torch.optim.Adam(sparseLA.parameters(), lr=args.lr)
@@ -122,12 +116,11 @@ plt.show()
 
 
 import matplotlib.pyplot as plt
-fig, axis = plt.subplots(3, 1, gridspec_kw = {'height_ratios':[2,1, 1]})
+fig, axis = plt.subplots(2, 1, gridspec_kw = {'height_ratios':[2,1]}, figsize=(16, 10))
 
 
-axis[0].scatter(train_dataset.inputs, train_dataset.targets, label = "Training points")
-
-
+axis[0].scatter(train_dataset.inputs, train_dataset.targets, label = "Training points", 
+                color = "black", alpha = 0.9)
 
 
 
@@ -150,7 +143,7 @@ axis[0].plot(X.flatten()[sort], f_mu.flatten()[sort], label = "Predictions")
 axis[0].fill_between(X.flatten()[sort],
                  f_mu.flatten()[sort] - 2*pred_std[sort],
                   f_mu.flatten()[sort] + 2*pred_std[sort],
-                  alpha = 0.1,
+                  alpha = 0.2,
                   label = "SparseLA uncertainty")
 
 m = f(sparseLA.inducing_locations).flatten().detach().cpu().numpy()
@@ -162,28 +155,24 @@ axis[0].scatter(sparseLA.inducing_locations.detach().cpu().numpy(), m, label = "
 axis[1].fill_between(X.flatten()[sort],
                  np.zeros(X.shape[0]),
                  pred_std[sort],
-                  alpha = 0.1,
+                  alpha = 0.2,
                   label = "SparseLA uncertainty (std)")
 axis[1].fill_between(X.flatten()[sort],
                  np.zeros(X.shape[0]),
                  torch.sqrt(torch.exp(sparseLA.likelihood.log_variance)).detach().cpu().numpy(),
-                  alpha = 0.1,
+                  alpha = 0.2,
                   label = "Likelihood uncertainty (std)")
 
 axis[0].set_xlim(left = xlims[0], right = xlims[1])
 
-inducing_history = np.stack(sparseLA.inducing_history)
-import matplotlib.cm as cm
-colors = cm.rainbow(np.linspace(0, 1, inducing_history.shape[1]))
-for i in np.arange(inducing_history.shape[1]):
-    axis[2].plot(inducing_history[:, i], np.arange(len(inducing_history[:, i])), alpha = 0.5)
-axis[2].set_xlim(left = xlims[0], right = xlims[1])
+axis[0].xaxis.set_tick_params(labelsize=20)
+axis[0].yaxis.set_tick_params(labelsize=20)
+axis[1].xaxis.set_tick_params(labelsize=20)
+axis[1].yaxis.set_tick_params(labelsize=20)
+axis[0].legend(prop={'size': 14}, loc = 'upper left')
+axis[1].legend(prop={'size': 14}, loc = 'upper left')
 
-axis[0].legend()
-axis[1].legend()
-
-axis[0].set_title("Predictive distribution")
-axis[1].set_title("Uncertainty decomposition")
-axis[2].set_title("Inducing locations evolution")
+axis[0].set_ylim(-3, 3)
+plt.savefig("SparseLA M={}.pdf".format(Z.shape[0]), format="pdf")
 
 plt.show()
