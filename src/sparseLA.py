@@ -2,18 +2,6 @@ import torch
 from .utils import reparameterize
 import numpy as np
 
-from backpack import backpack, extend, memory_cleanup
-from backpack.extensions import  BatchGrad
-from backpack.context import CTX
-
-def _cleanup(module):
-        for child in module.children():
-            _cleanup(child)
-
-        setattr(module, "_backpack_extend", False)
-        memory_cleanup(module)
-        
-        
 class VaLLA(torch.nn.Module):
     """
     Defines a Sparse Linearized Laplace Approximation model.
@@ -254,11 +242,11 @@ class VaLLA(torch.nn.Module):
             Contains the Jacobians
         """
         if dims is None:
-            Js, f = self.backend.jacobians(x = X)
+            Js = self.backend.jacobians(x = X)
         else:
-            Js, f = self.backend.jacobians_on_outputs(x = X, outputs = dims)
+            Js = self.backend.jacobians_on_outputs(x = X, outputs = dims)
             
-        return Js * self.prior_std, f
+        return Js * self.prior_std
 
 
     def forward_prior(self, X):
@@ -296,6 +284,7 @@ class VaLLA(torch.nn.Module):
                    Contains the covariance matrix of the model for each element on 
                    the batch.
         """
+        F_mean = self.net(X)
         # Transform flattened cholesky decomposition parameter into matrix
         L = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
         li, lj = torch.tril_indices(self.num_inducing, self.num_inducing)
@@ -303,11 +292,10 @@ class VaLLA(torch.nn.Module):
         L[li, lj] = self.L
 
         # Compute feature vectors (Gradients) Shape (batch_size, output_dim, n_params)
-        phi_x, F_mean = self.jacobian_features(X)
+        phi_x  = self.jacobian_features(X)
 
         # Compute feature vector of inducing locations  Shape (n_inducing, n_params)
-        phi_z, _ = self.jacobian_features(self.inducing_locations, self.inducing_class)
-
+        phi_z = self.jacobian_features(self.inducing_locations, self.inducing_class)
         # Clean gradients of inducing locations
         self.inducing_locations.grad = None
         
@@ -539,10 +527,11 @@ class VaLLASampling(VaLLA):
         
         # log density of the targets given the samples 
         # Shape (num_samples, batch_size)
-        log_p = self.likelihood.logp(F, y)
+        log_p = self.likelihood.logp(X, F, y)
         # Shape (batch_size)
         ell = torch.mean(log_p, 0)
-
+        print(ell[:10])
+        input()
         # Aggregate on data dimension
         ell = torch.sum(ell)
 
@@ -798,7 +787,7 @@ class GPLLA(torch.nn.Module):
         self.dtype = dtype
     
     def jacobian_features(self, X):
-        Js, _ = self.backend.jacobians(x = X)
+        Js = self.backend.jacobians(x = X)
         return Js * self.prior_std
     
     def fit(self, X_train, y_train):
@@ -904,7 +893,7 @@ class ELLA(torch.nn.Module):
                              replace = False)
         self.Xz = X_train[indexes]
         
-        phi_z, _ = self.backend.jacobians(self.Xz)
+        phi_z  = self.backend.jacobians(self.Xz)
         c = torch.nn.functional.one_hot(y_train[indexes].to(torch.long).squeeze(), phi_z.shape[1]).unsqueeze(-1)
         phi_z = torch.sum(phi_z * c, 1)
         
@@ -934,7 +923,7 @@ class ELLA(torch.nn.Module):
 
     def forward(self, X_test):
 
-        Jz, _ = self.backend.jacobians(x = X_test)
+        Jz  = self.backend.jacobians(x = X_test)
 
         phi = torch.einsum("mds, sk -> dmk", Jz, self.v)
 

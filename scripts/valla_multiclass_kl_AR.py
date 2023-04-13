@@ -18,7 +18,7 @@ from utils.pytorch_learning import fit_map_crossentropy, fit, predict, forward, 
 from scripts.filename import create_file_name
 from src.generative_functions import *
 from src.sparseLA import VaLLASampling, GPLLA
-from src.likelihood import MultiClass
+from src.likelihood import ARMultiClass, MultiClass, AR2MultiClass
 from src.jacobian_interface import TorchJacobian
 from utils.models import get_mlp
 from utils.dataset import get_dataset, Test_Dataset
@@ -96,9 +96,11 @@ sparseLA = VaLLASampling(
     alpha = args.bb_alpha,
     prior_std=2.7209542,
     n_samples = 1000,
-    likelihood=MultiClass(num_classes = args.dataset.classes,
-                          device=args.device, 
-                        dtype = args.dtype), 
+    likelihood=AR2MultiClass(num_classes = args.dataset.classes,
+                             input_dim = train_dataset.inputs.shape[1],
+                            seed = args.seed,
+                            device=args.device,
+                            dtype = args.dtype),
     num_data = train_dataset.inputs.shape[0],
     output_dim = args.dataset.output_dim,
     backend = TorchJacobian(f[:-1]),
@@ -146,7 +148,7 @@ else:
     plt.show()
     plt.clf()
 
-    torch.save(sparseLA.state_dict(), path)
+    # torch.save(sparseLA.state_dict(), path)
     
 
 sparseLA.print_variables()

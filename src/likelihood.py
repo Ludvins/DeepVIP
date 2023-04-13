@@ -409,36 +409,143 @@ class MultiClass(Likelihood):
 
         return true - c
 
-    """     def p(self, F, Y):
-        p = torch.nn.functional.softmax(F, dim=-1)
-        oh = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
-        reg = torch.ones_like(F, dtype=self.dtype) * oh * (1- self.epsilon)
-        reg = reg + torch.ones_like(F, dtype=self.dtype) * (1 - oh) * self.K1
-        p = p * reg
-        p = torch.sum(p, -1)
-        return p
 
-        
+class ARMultiClass(Likelihood):
+    def __init__(self, num_classes, seed, dtype, device):
+        super().__init__(dtype, device)
+        self.num_classes = num_classes
+        self.eta_inv = torch.nn.Parameter(torch.tensor(1., dtype = dtype, device = device))
+        self.rng = np.random.default_rng(seed)
+
+    def p(self, F, Y):
+        torch.exp(self.logp(F, Y))
+
     def logp(self, F, Y):
-        
-        oh = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
-        reg = torch.ones_like(F, dtype=self.dtype) * oh * (1- self.epsilon)
-        reg = reg + torch.ones_like(F, dtype=self.dtype) * (1 - oh) * self.K1
-        
-        logp = F - torch.logsumexp(F, -1).unsqueeze(-1)
-        logp = logp + torch.log(reg)
-        return torch.logsumexp(logp, -1)
-        
-        def conditional_mean(self, F):
+        """
 
-        def conditional_variance(self, F):
-        
-        def conditional_mean_and_var(self, F):
+        Arguments
+        ---------
 
-        def predict_mean_and_var(self, Fmu, Fvar):
+        F : torch.tensor of shape (mc_samples, batch_size, output_dim)
+            Contains the function values
+        Y : torch.tensor of shape (batch_size, 1)
+            Contains the true class
+        """
+
+        # Create a random value between [1, num_classes-1] for each input
+        addition = torch.tensor(
+            self.rng.choice(self.num_classes-1, size = Y.shape) + 1,
+            device = self.device)
+
+        # Add the true label with the random one
+        other = Y + addition
+
+        # Take the remainder of dividing by the number of classes
+        # Given the range of the random addition, other is ensured to be different than Y.
+        other = torch.remainder(other, self.num_classes)
+
+        # Create both one-hot encodings
+        oh_on = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
+        oh_on2 = one_hot(other.long().flatten(), self.num_classes).unsqueeze(0)
+
+        # Create the difference between the corresponding function values
+        diff = torch.sum(F * oh_on2, 2) - torch.sum(F * oh_on, 2)
+
+        # Compute approximation,
+        return  1 + torch.log(self.eta_inv) \
+            - self.eta_inv * (1 + (self.num_classes -1 ) * torch.exp(diff))
+
+    def logp(self, X, F, Y):
+        """
+
+        Arguments
+        ---------
+
+        F : torch.tensor of shape (mc_samples, batch_size, output_dim)
+            Contains the function values
+        Y : torch.tensor of shape (batch_size, 1)
+            Contains the true class
+        """
+
+        # Create a random value between [1, num_classes-1] for each input
+        addition = torch.tensor(
+            self.rng.choice(self.num_classes-1, size = Y.shape) + 1,
+            device = self.device)
+
+        # Add the true label with the random one
+        other1 = Y + 1
+        other2 = Y + 2
+
+        # Take the remainder of dividing by the number of classes
+        # Given the range of the random addition, other is ensured to be different than Y.
+        other1 = torch.remainder(other1, self.num_classes)
+        other2 = torch.remainder(other2, self.num_classes)
+
+        # Create both one-hot encodings
+        oh_on = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
+        oh_on1 = one_hot(other1.long().flatten(), self.num_classes).unsqueeze(0)
+        oh_on2 = one_hot(other2.long().flatten(), self.num_classes).unsqueeze(0)
+
+        # Create the difference between the corresponding function values
+        diff1 = torch.sum(F * oh_on1, 2) - torch.sum(F * oh_on, 2)
+        diff2 = torch.sum(F * oh_on2, 2) - torch.sum(F * oh_on, 2)
+
+        eta = 1 + torch.exp(diff1) + torch.exp(diff2)
+
+        print(eta[0, :10])
+        input()
+
+        return -torch.log(eta)
 
 
-        def variational_expectations(self, Fmu, Fvar, Y, alpha): """
+class AR2MultiClass(Likelihood):
+    def __init__(self, num_classes, input_dim, seed, dtype, device):
+        super().__init__(dtype, device)
+        self.num_classes = num_classes
+        self.rng = np.random.default_rng(seed)
+        from utils.models import get_mlp
+
+        self.net = get_mlp(input_dim, 1, [20, 20], torch.nn.Tanh, device = device, dtype = dtype)
+
+    def p(self, F, Y):
+        torch.exp(self.logp(F, Y))
+
+    def logp(self, X, F, Y):
+        """
+
+        Arguments
+        ---------
+
+        F : torch.tensor of shape (mc_samples, batch_size, output_dim)
+            Contains the function values
+        Y : torch.tensor of shape (batch_size, 1)
+            Contains the true class
+        """
+
+        # Create a random value between [1, num_classes-1] for each input
+        addition = torch.tensor(
+            self.rng.choice(self.num_classes-1, size = Y.shape) + 1,
+            device = self.device)
+
+        # Add the true label with the random one
+        other = Y + addition
+
+        # Take the remainder of dividing by the number of classes
+        # Given the range of the random addition, other is ensured to be different than Y.
+        other = torch.remainder(other, self.num_classes)
+
+        # Create both one-hot encodings
+        oh_on = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
+        oh_on2 = one_hot(other.long().flatten(), self.num_classes).unsqueeze(0)
+
+        # Create the difference between the corresponding function values
+        diff = torch.sum(F * oh_on2, 2) - torch.sum(F * oh_on, 2)
+        # Compute approximation,
+        eta_log = self.net(X).T
+        eta = torch.exp(eta_log)
+        return  1 - torch.log(eta) \
+            - 1/eta * (1 + (self.num_classes -1 ) * torch.exp(diff))
+
 
 
 

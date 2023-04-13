@@ -14,12 +14,11 @@ from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit_map, fit, predict
 from scripts.filename import create_file_name
 from src.generative_functions import *
-from src.sparseLA import SparseLA
+from src.sparseLA import VaLLA
 from src.likelihood import Bernoulli
-from src.backpack_interface import BackPackInterface
+from src.backpack_interface import FunctorchInterface
 from utils.models import get_mlp
 from utils.dataset import get_dataset, Test_Dataset
-from torchsummary import summary
 args = manage_experiment_configuration()
 
 args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -67,7 +66,7 @@ end = timer()
 
 Z = kmeans2(train_dataset.inputs, args.num_inducing, minit="points", seed=args.seed)[0]
 
-sparseLA = SparseLA(
+sparseLA = VaLLA(
     f[:-1].forward,
     Z, 
     alpha = args.bb_alpha,
@@ -76,7 +75,7 @@ sparseLA = SparseLA(
                         dtype = args.dtype), 
     num_data = train_dataset.inputs.shape[0],
     output_dim = 1,
-    backend = BackPackInterface(f, "classification"),
+    backend = FunctorchInterface(f[:-1]),
     track_inducing_locations=True,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,

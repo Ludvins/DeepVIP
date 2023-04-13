@@ -7,7 +7,6 @@ from backpack.context import CTX
 from laplace.curvature import CurvatureInterface, GGNInterface, EFInterface
 from laplace.utils import Kron
 
-
 class BackPackInterface(CurvatureInterface):
     """Interface for Backpack backend.
     """
@@ -61,7 +60,7 @@ class BackPackInterface(CurvatureInterface):
             return torch.stack(to_stack, dim=2).transpose(1, 2), f
         else:
             return Jk.unsqueeze(-1).transpose(1, 2), f
-        
+
     def jacobians_on_outputs(self, x, outputs):
         """Compute Jacobians \\(\\nabla_{\\theta} f(x;\\theta)\\) at current parameter \\(\\theta\\)
         using backpack's BatchGrad per given output dimension.
@@ -83,7 +82,7 @@ class BackPackInterface(CurvatureInterface):
             output function `(batch)`
         """
         model = extend(self.model)
-        
+
         model.zero_grad()
         out = model(x)
         with backpack(BatchGrad(), retain_graph=True):
@@ -103,7 +102,7 @@ class BackPackInterface(CurvatureInterface):
         CTX.remove_hooks()
         _cleanup(model)
         return Jk, out
-        
+
 def _cleanup(module):
     for child in module.children():
         _cleanup(child)

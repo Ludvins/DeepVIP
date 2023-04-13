@@ -178,6 +178,7 @@ def fit(
         inputs = inputs.to(device)
         target = target.to(device)
         loss = model.train_step(optimizer, inputs, target)
+        print(loss)
         if return_loss:
             losses.append(loss.detach().cpu().numpy())
 
