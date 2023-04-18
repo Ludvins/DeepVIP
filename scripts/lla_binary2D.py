@@ -35,9 +35,7 @@ train_dataset, full_dataset, test_dataset = args.dataset.get_split(
 )
 
 # Initialize DataLoader
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-full_loader = DataLoader(full_dataset, batch_size=args.batch_size)
-test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+train_loader = DataLoader(train_dataset, batch_size=100, shuffle=True)
 
 
 
@@ -70,29 +68,18 @@ print("MAP Loss: ", loss[-1])
 end = timer()
 
 
-ella = ELLA(f[:-1], 
-            args.num_inducing,
-            np.min([args.num_inducing, 20]),
-            prior_std = 1.0,
-            likelihood_hessian=lambda x,y:  (f(x)*(1-f(x))).unsqueeze(-1).permute(1, 2, 0),
-            likelihood=Bernoulli(device=args.device, 
-                        dtype = args.dtype), 
-            backend = BackPackInterface(f, "classification"),
-            seed = args.seed,
-            device = args.device,
-            dtype = args.dtype)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+full_loader = DataLoader(full_dataset, batch_size=args.batch_size)
+test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-
-ella.fit(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype),
-         torch.tensor(train_dataset.targets, device = args.device, dtype = args.dtype))
 
 
 lla = GPLLA(f[:-1], 
-            prior_std = 1.0,
+            prior_std = args.prior_std,
             likelihood_hessian=lambda x,y: (f(x)*(1-f(x))).unsqueeze(-1).permute(1, 2, 0),
             likelihood=Bernoulli(device=args.device, 
                         dtype = args.dtype), 
-            backend = BackPackInterface(f, "classification"),
+            backend = BackPackInterface(f[:-1], f.output_size),
             device = args.device,
             dtype = args.dtype)
 
@@ -108,7 +95,7 @@ def sigmoid(x):
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 plt.rcParams['pdf.fonttype'] = 42
-fig, axis = plt.subplots(4, 2, figsize=(15, 15))
+fig, axis = plt.subplots(3, 2, figsize=(15, 15))
 
 color_map = plt.get_cmap('coolwarm') 
 axis[0][0].scatter(train_dataset.inputs[:, 0], train_dataset.inputs[:, 1], c = color_map(train_dataset.targets), alpha = 0.8, label = "Training Dataset")
@@ -118,7 +105,7 @@ ylims = axis[0][0].get_ylim()
 
 
 
-n_samples = 100
+n_samples = 50
 x_vals = np.linspace(xlims[0], xlims[1], n_samples)
 y_vals = np.linspace(ylims[0], ylims[1], n_samples)
 X, Y = np.meshgrid(x_vals, y_vals)
@@ -128,14 +115,10 @@ grid_dataset = Test_Dataset(positions)
 grid_loader = torch.utils.data.DataLoader(grid_dataset, batch_size = args.batch_size, shuffle = False)
 
 
-mean, var = predict(ella, grid_loader)
+mean, var = predict(lla, grid_loader)
 
 mean = mean.reshape(n_samples, n_samples)
 var = var.reshape(n_samples, n_samples)
-
-
-cbarticks = np.arange(0.0,1.5,0.5)
-cp = axis[1][1].contourf(X, Y, mean, cbarticks, cmap = color_map, vmin = 0, vmax = 1)
 
 
 map_pred_grid = f(torch.tensor(positions, dtype = args.dtype, device=args.device)).squeeze().detach().cpu().numpy().reshape(n_samples, n_samples)
@@ -169,58 +152,37 @@ map_pred = (1. * (sigmoid(map_pred) >= 0.5))
 
 
 
-axis[0][1].scatter(full_dataset.inputs[:, 0], full_dataset.inputs[:, 1], c= color_map(map_pred),  alpha = 0.8, label = "Predictions")
-axis[0][1].set_title("MAP predictions")
-
-
-
-mean, _ = predict(ella, full_loader)
-
-
-pred = (1. * (mean >= 0.5))
-axis[1][1].scatter(full_dataset.inputs[:, 0], full_dataset.inputs[:, 1], c= color_map(pred),  alpha = 0.8, label = "Predictions")
-axis[1][1].set_title("LLA predictions")
-
-
-colors = cm.rainbow(np.linspace(0, 1, ella.Xz.shape[0]))
-axis[1][0].scatter(ella.Xz[:, 0], ella.Xz[:, 1], c = colors,  alpha = 0.8, label = "Nystrom Locations")
-axis[1][0].set_xlim(xlims[0], xlims[1])
-axis[1][0].set_ylim(ylims[0], ylims[1])
-axis[1][0].set_title("Nystrom locations")
-
 
 
 axis[2][0].scatter(train_dataset.inputs[:, 0], train_dataset.inputs[:, 1], c = color_map(train_dataset.targets), alpha = 0.2)
 axis[2][1].scatter(train_dataset.inputs[:, 0], train_dataset.inputs[:, 1], c = color_map(train_dataset.targets), alpha = 0.2)
 
 
-
-
-_, ella_var = forward(ella, grid_loader)
-ella_std = np.sqrt(ella_var.reshape(n_samples, n_samples))
-
-_, lla_var = forward(lla, grid_loader)
+lla_mean, lla_var = forward(lla, grid_loader)
 lla_std = np.sqrt(lla_var.reshape(n_samples, n_samples))
 
 
-levels = np.linspace(0,12,13)
-cp = axis[3][0].contourf(X, Y, ella_std, levels = levels, cmap = cm.gray)
-divider = make_axes_locatable(axis[3][0])
+
+cp = axis[1][0].contourf(X, Y, lla_mean.reshape(n_samples, n_samples), cmap = plt.get_cmap('coolwarm') )
+divider = make_axes_locatable(axis[1][0])
 cax = divider.append_axes('right', size='5%', pad=0.05)
 
 fig.colorbar(cp, cax=cax, orientation='vertical')
-axis[3][0].set_title(r"ELLA Latent std")
+axis[1][0].set_title(r"LLA Latent mean")
 
 
-
-cp = axis[3][1].contourf(X, Y, lla_std, levels = levels, cmap = cm.gray)
-divider = make_axes_locatable(axis[3][1])
+cp = axis[1][1].contourf(X, Y, lla_std, cmap = cm.gray)
+divider = make_axes_locatable(axis[1][1])
 cax = divider.append_axes('right', size='5%', pad=0.05)
 
 fig.colorbar(cp, cax=cax, orientation='vertical')
-axis[3][1].set_title(r"LLA Latent std")
+axis[1][1].set_title(r"LLA Latent std")
 
 
-plt.savefig("ELLA_{}=M={}_K={}.pdf".format(args.dataset_name, args.num_inducing, ella.K), format="pdf")
 
-plt.show()
+axis[0][1].scatter(full_dataset.inputs[:, 0], full_dataset.inputs[:, 1], c= color_map(map_pred),  alpha = 0.2, label = "Predictions")
+axis[0][1].set_title("MAP predictions")
+
+
+
+plt.savefig("LLA_{}_prior={}.pdf".format(args.dataset_name, str(args.prior_std)), format="pdf")

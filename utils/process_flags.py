@@ -105,6 +105,12 @@ def get_parser():
         default=0.1,
         help="Test proportion for datasets with non defined train test splits.",
     )
+
+    parser.add_argument(
+        "--prior_std",
+        type=float,
+        default=1,
+    )
     
     parser.add_argument(
         "--fix_inducing",

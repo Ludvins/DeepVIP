@@ -8,7 +8,7 @@ import pandas as pd
 os.chdir(".")
 
 
-res1 = [i for i in glob.glob('results/ELLA_dataset=Spiral*')]
+res1 = [i for i in glob.glob('results/ELLA_dataset=Spiral3*')]
 df = []
 for f in res1:
     try: 
@@ -18,7 +18,8 @@ for f in res1:
 df = pd.concat(df)
 ELLA = df.loc[:, (df != df.iloc[0]).any()] 
 
-res1 = [i for i in glob.glob('results/VaLLA_dataset=Spiral*')]
+
+res1 = [i for i in glob.glob('results/VaLLA_dataset=Spiral3*')]
 df = []
 for f in res1:
     try: 
@@ -41,7 +42,8 @@ ELLA["model"] = "ELLA"
 df = pd.concat([VaLLA, ELLA])
 
 print(df)
-
+print(df.groupby(["model", "prior_std", "M"]).mean())
+input()
 lm = sns.catplot(data = df, x = "M", y="KL", palette="YlGnBu_d", hue="model", errorbar="se", kind="point", height=6, aspect=.75, legend = False)
 lm.fig.set_size_inches(16,10)
 

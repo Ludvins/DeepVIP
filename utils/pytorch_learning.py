@@ -31,12 +31,12 @@ def fit_map(
 
     for _ in iters:
         try:
-            inputs, target = next(data_iter)
+            inputs, target, _ = next(data_iter)
         except StopIteration:
             # StopIteration is thrown if dataset ends
             # reinitialize data loader
             data_iter = iter(training_generator)
-            inputs, target = next(data_iter)
+            inputs, target, _ = next(data_iter)
         inputs = inputs.to(device)
         target = target.to(device)
         
@@ -169,16 +169,15 @@ def fit(
 
     for _ in iters:
         try:
-            inputs, target = next(data_iter)
+            inputs, target, indexes = next(data_iter)
         except StopIteration:
             # StopIteration is thrown if dataset ends
             # reinitialize data loader
             data_iter = iter(training_generator)
-            inputs, target = next(data_iter)
+            inputs, target, indexes = next(data_iter)
         inputs = inputs.to(device)
         target = target.to(device)
-        loss = model.train_step(optimizer, inputs, target)
-        print(loss)
+        loss = model.train_step(optimizer, inputs, target, indexes= indexes)
         if return_loss:
             losses.append(loss.detach().cpu().numpy())
 
@@ -266,7 +265,7 @@ def predict(model, generator, device=None):
     for idx, data in enumerate(generator):
         # Consider datasets with no targets, just input values.
         try:
-            batch_x, _ = data
+            batch_x, _, _ = data
         except:
             batch_x = data
         # Create batched predictions

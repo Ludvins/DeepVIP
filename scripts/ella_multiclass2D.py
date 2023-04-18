@@ -90,14 +90,15 @@ def hessian(x, y):
 
 
 ella = ELLA(f[:-1], 
+            f.output_size,
             args.num_inducing,
             np.min([args.num_inducing, 20]),
-            prior_std = 2.7209542,
+            prior_std = args.prior_std,
             likelihood_hessian=lambda x,y: hessian(x, y),
             likelihood=MultiClass(num_classes = args.dataset.classes,
                           device=args.device, 
                         dtype = args.dtype), 
-            backend = BackPackInterface(f, "classification"),
+            backend = BackPackInterface(f[:-1], f.output_size),
             seed = args.seed,
             device = args.device,
             dtype = args.dtype)
@@ -107,6 +108,19 @@ ella.fit(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.d
          torch.tensor(train_dataset.targets, device = args.device, dtype = args.dtype))
 
 
+lla = GPLLA(f[:-1], 
+            prior_std = args.prior_std,
+            likelihood_hessian=lambda x,y: hessian(x, y),
+            likelihood=MultiClass(num_classes = args.dataset.classes,
+                          device=args.device, 
+                        dtype = args.dtype), 
+            backend = BackPackInterface(f[:-1], f.output_size),
+            device = args.device,
+            dtype = args.dtype)
+
+
+lla.fit(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype),
+        torch.tensor(train_dataset.targets, device = args.device, dtype = args.dtype))
 
 
 import matplotlib.pyplot as plt
@@ -154,8 +168,8 @@ grid_loader = torch.utils.data.DataLoader(grid_dataset, batch_size = args.batch_
 
 
 _, ella_var = forward(ella, grid_loader)
-print(ella_var[0])
-print(ella_var.shape)
+_, lla_var = forward(lla, grid_loader)
+
 #lla_var = lla_var.reshape(n_samples, n_samples, 3, 3)
 color_map = plt.get_cmap('coolwarm') 
 
@@ -174,4 +188,47 @@ for i in range(3):
             fig.colorbar(cp, cax=cax, orientation='vertical')
 
 
-plt.savefig("ELLA_{}_M={}.pdf".format(args.dataset_name, args.num_inducing), bbox_inches='tight')
+plt.savefig("ELLA_{}_M={}_prior={}.pdf".format(args.dataset_name, args.num_inducing, args.prior_std), bbox_inches='tight')
+
+
+def kl(sigma1, sigma2):
+    L1 = np.linalg.cholesky(sigma1 + 1e-3 * np.eye(sigma1.shape[-1]))
+    L2 = np.linalg.cholesky(sigma2 + 1e-3 * np.eye(sigma2.shape[-1]))
+    M = np.linalg.solve(L2, L1)
+    a = 0.5 * np.sum(M**2)
+    b = - 0.5 * sigma1.shape[-1] 
+    c = np.sum(np.log(np.diagonal(L2, axis1= 1, axis2 = 2))) - np.sum(np.log(np.diagonal(L1, axis1= 1, axis2 = 2)))
+    return a + b + c
+    
+def w2(sigma1, sigma2):
+    a = sigma1 @ sigma2
+    u, s, vh = np.linalg.svd(a, full_matrices=True)
+    sqrt = u * np.sqrt(s)[..., np.newaxis] @ vh
+    w = np.trace(sigma1, axis1 = 1, axis2 = 2) + np.trace(sigma2, axis1 = 1, axis2 = 2) - 2*np.trace(sqrt, axis1 = 1, axis2 = 2)
+    return np.sum(w)
+
+KL1 = kl(ella_var, lla_var)/(n_samples*n_samples)
+KL2 = kl(lla_var, ella_var)/(n_samples*n_samples)
+W2 = w2(ella_var, lla_var)
+
+
+MAE = np.mean(np.abs(ella_var - lla_var))
+
+d = {
+    "M": args.num_inducing,
+    "seed": args.seed,
+    "KL": 0.5*KL1 + 0.5*KL2,
+    "W2": W2,
+    "MAE": MAE,
+    "map_iterations": args.MAP_iterations,
+    "prior_std": args.prior_std
+}
+
+df = pd.DataFrame.from_dict(d, orient="index").transpose()
+
+print(df)
+
+df.to_csv(
+    path_or_buf="results/ELLA_dataset={}_M={}_prior={}_seed={}.csv".format(args.dataset_name,args.num_inducing, str(args.prior_std), args.seed),
+    encoding="utf-8",
+)

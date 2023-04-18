@@ -50,7 +50,7 @@ class Training_Dataset(Dataset):
             print("Labels standard deviation: ", self.targets_std)
 
     def __getitem__(self, index):
-        return self.inputs[index], self.targets[index]
+        return self.inputs[index], self.targets[index], index
 
     def __len__(self):
         return len(self.inputs)
@@ -68,7 +68,7 @@ class Test_Dataset(Dataset):
     def __getitem__(self, index):
         if self.targets is None:
             return self.inputs[index]
-        return self.inputs[index], self.targets[index]
+        return self.inputs[index], self.targets[index], index
 
     def __len__(self):
         return len(self.inputs)
@@ -415,6 +415,19 @@ class Two_Moons(DVIPDataset):
         self.inputs = inputs
         self.targets = targets[..., np.newaxis]
         
+class Three_Blobs(DVIPDataset):
+    def __init__(self):
+        self.type = "multiclass"
+        self.classes = 3
+        self.output_dim = 3
+        
+        from sklearn.datasets import make_blobs
+        
+        inputs, targets = make_blobs(1000, centers = 3, random_state = 0, cluster_std = 0.2)
+                
+        self.inputs = inputs
+        self.targets = targets[..., np.newaxis]
+        
 class Spiral3(DVIPDataset):
     def __init__(self):
         self.type = "binary"
@@ -489,7 +502,8 @@ def get_dataset(dataset_name):
         "Banana": Banana_Dataset,
         "Moons": Two_Moons,
         "Spiral": Spiral,
-        "Spiral3": Spiral3
+        "Spiral3": Spiral3,
+        "Blobs": Three_Blobs,
     }
 
     return d[dataset_name]()

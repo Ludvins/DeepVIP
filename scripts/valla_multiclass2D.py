@@ -40,18 +40,13 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-print(train_dataset[0])
-
 def s():
     return torch.nn.Softmax(dim = -1)
 
-print(args.dataset.output_dim)
 
 f = get_mlp(train_dataset.inputs.shape[1], args.dataset.output_dim, 
             [50, 50], torch.nn.Tanh, s,
             args.device, args.dtype)
-
-print(f)
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr)
@@ -95,20 +90,21 @@ sparseLA = VaLLASampling(
     Z, 
     inducing_classes = classes,
     alpha = args.bb_alpha,
-    prior_std=2.7209542,
+    prior_std=args.prior_std,
     n_samples = 1,
     likelihood=MultiClass(num_classes = args.dataset.classes,
                           device=args.device, 
                         dtype = args.dtype), 
     num_data = train_dataset.inputs.shape[0],
     output_dim = args.dataset.output_dim,
-    backend = BackPackInterface(f, "classification"),
+    backend = BackPackInterface(f[:-1], f.output_size),
     fix_inducing_locations=False,
     track_inducing_locations=True,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
     device=args.device,
     dtype=args.dtype,)
+
 
 sparseLA.print_variables()
 
@@ -144,14 +140,38 @@ else:
     axis[2].plot(sparseLA.kl_history)
     axis[2].set_title("KL")
 
-    plt.show()
+    #plt.show()
     plt.clf()
 
-    torch.save(sparseLA.state_dict(), path)
+    #torch.save(sparseLA.state_dict(), path)
     
 
 sparseLA.print_variables()
 
+
+def hessian(x, y):
+    #oh = torch.nn.functional.one_hot(y.long().flatten(), args.dataset.classes).type(args.dtype)
+    out = f(x)
+    a = torch.einsum("na, nb -> abn", out, out)
+    b = torch.diag_embed(out).permute(1,2,0)
+    #b = torch.sum(out * oh, -1)
+    return - a + b
+
+
+
+lla = GPLLA(f[:-1], 
+            prior_std = args.prior_std,
+            likelihood_hessian=lambda x,y: hessian(x, y),
+            likelihood=MultiClass(num_classes = args.dataset.classes,
+                          device=args.device, 
+                        dtype = args.dtype), 
+            backend = BackPackInterface(f[:-1], f.output_size),
+            device = args.device,
+            dtype = args.dtype)
+
+
+lla.fit(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype),
+        torch.tensor(train_dataset.targets, device = args.device, dtype = args.dtype))
 
 
 
@@ -199,6 +219,7 @@ grid_loader = torch.utils.data.DataLoader(grid_dataset, batch_size = args.batch_
 
 
 _, valla_var = forward(sparseLA, grid_loader)
+_, lla_var = forward(lla, grid_loader)
 #lla_var = lla_var.reshape(n_samples, n_samples, 3, 3)
 color_map = plt.get_cmap('coolwarm') 
 
@@ -218,32 +239,46 @@ for i in range(3):
 
 
 
-plt.savefig("VaLLA_{}_M={}.pdf".format(args.dataset_name, args.num_inducing), bbox_inches='tight')
-plt.clf()
+plt.savefig("VaLLA_{}_M={}_prior={}.pdf".format(args.dataset_name, args.num_inducing, args.prior_std), bbox_inches='tight')
+
+def kl(sigma1, sigma2):
+    L1 = np.linalg.cholesky(sigma1 + 1e-3 * np.eye(sigma1.shape[-1]))
+    L2 = np.linalg.cholesky(sigma2 + 1e-3 * np.eye(sigma2.shape[-1]))
+    M = np.linalg.solve(L2, L1)
+    a = 0.5 * np.sum(M**2)
+    b = - 0.5 * sigma1.shape[-1] 
+    c = np.sum(np.log(np.diagonal(L2, axis1= 1, axis2 = 2))) - np.sum(np.log(np.diagonal(L1, axis1= 1, axis2 = 2)))
+    return a + b + c
+    
+def w2(sigma1, sigma2):
+    a = sigma1 @ sigma2
+    u, s, vh = np.linalg.svd(a, full_matrices=True)
+    sqrt = u * np.sqrt(s)[..., np.newaxis] @ vh
+    w = np.trace(sigma1, axis1 = 1, axis2 = 2) + np.trace(sigma2, axis1 = 1, axis2 = 2) - 2*np.trace(sqrt, axis1 = 1, axis2 = 2)
+    return np.sum(w)
+
+KL1 = kl(valla_var, lla_var)/(n_samples*n_samples)
+KL2 = kl(lla_var, valla_var)/(n_samples*n_samples)
+W2 = w2(valla_var, lla_var)
 
 
+MAE = np.mean(np.abs(valla_var - lla_var))
 
-plt.rcParams['pdf.fonttype'] = 42
-fig, axis = plt.subplots(4, 3, figsize=(15, 20))
+d = {
+    "M": args.num_inducing,
+    "seed": args.seed,
+    "KL": 0.5*KL1 + 0.5*KL2,
+    "W2": W2,
+    "MAE": MAE,
+    "map_iterations": args.MAP_iterations,
+    "prior_std": args.prior_std
+}
 
-valla_var = sparseLA.forward_prior(torch.tensor(positions, device= args.device, dtype = args.dtype))[1].detach().cpu().numpy()
-#lla_var = lla_var.reshape(n_samples, n_samples, 3, 3)
-color_map = plt.get_cmap('coolwarm') 
+df = pd.DataFrame.from_dict(d, orient="index").transpose()
 
+print(df)
 
-for i in range(3):
-    for j in range(i, 3):
-
-        cp = axis[1+i][j].contourf(X, Y, valla_var[:, i, j].reshape(n_samples, n_samples), cmap = color_map)
-        divider = make_axes_locatable(axis[i+1][j])
-        cax = divider.append_axes('right', size='5%', pad=0.05)
-        fig.colorbar(cp, cax=cax,  orientation='vertical')
-        if i != j:
-            cp = axis[1+j][i].contourf(X, Y, valla_var[:, j, i].reshape(n_samples, n_samples),  cmap = color_map)
-            divider = make_axes_locatable(axis[j+1][i])
-            cax = divider.append_axes('right', size='5%', pad=0.05)
-            fig.colorbar(cp, cax=cax, orientation='vertical')
-
-
-plt.savefig("VaLLA_prior_{}_M={}.pdf".format(args.dataset_name, args.num_inducing), bbox_inches='tight')
-
+df.to_csv(
+    path_or_buf="results/VaLLA_dataset={}_M={}_prior={}_seed={}.csv".format(args.dataset_name,args.num_inducing, str(args.prior_std), args.seed),
+    encoding="utf-8",
+)

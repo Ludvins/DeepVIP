@@ -87,12 +87,12 @@ def hessian(x, y):
 
 
 lla = GPLLA(f[:-1], 
-            prior_std = 2.7209542,
+            prior_std = args.prior_std,
             likelihood_hessian=lambda x,y: hessian(x, y),
             likelihood=MultiClass(num_classes = args.dataset.classes,
                           device=args.device, 
                         dtype = args.dtype), 
-            backend = BackPackInterface(f, "classification"),
+            backend = BackPackInterface(f[:-1], f.output_size),
             device = args.device,
             dtype = args.dtype)
 
@@ -105,7 +105,7 @@ lla.fit(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dt
 
 
 plt.rcParams['pdf.fonttype'] = 42
-fig, axis = plt.subplots(4, 3, figsize=(15, 20))
+fig, axis = plt.subplots(5, 3, figsize=(15, 20))
 
 color_map = plt.get_cmap('tab10') 
 axis[0][0].scatter(train_dataset.inputs[:, 0], train_dataset.inputs[:, 1], c = color_map(train_dataset.targets.astype(np.int32)), alpha = 0.8, label = "Training Dataset")
@@ -116,18 +116,29 @@ ylims = axis[0][0].get_ylim()
 
 
 n_samples = 50
-x_vals = np.linspace(xlims[0], xlims[1], n_samples)
-y_vals = np.linspace(ylims[0], ylims[1], n_samples)
+x_vals = np.linspace(-3, 3, n_samples)
+y_vals = np.linspace(-3, 3, n_samples)
 X, Y = np.meshgrid(x_vals, y_vals)
 positions = np.vstack([X.ravel(), Y.ravel()]).T
 
 def sigmoid(x):
     return (1/(1 + np.exp(-x)))
-map_pred_pos = f(torch.tensor(positions, device = args.device, dtype = args.dtype)).detach().cpu().numpy().reshape(n_samples, n_samples, 3)
+map_pred_pos = f[:-1](torch.tensor(positions, device = args.device, dtype = args.dtype)).detach().cpu().numpy().reshape(n_samples, n_samples, 3)
 
-axis[0][1].contourf(X, Y, sigmoid(map_pred_pos[:, :, 0]), cmap = plt.get_cmap('Blues'), alpha = 0.33)
-axis[0][1].contourf(X, Y, sigmoid(map_pred_pos[:, :, 1]), cmap = plt.get_cmap('Oranges'), alpha = 0.33)
-axis[0][1].contourf(X, Y, sigmoid(map_pred_pos[:, :, 2]), cmap = plt.get_cmap('Greens'), alpha = 0.33)
+cp = axis[1][0].contourf(X, Y, map_pred_pos[:, :, 0], cmap = plt.get_cmap('Blues'))
+divider = make_axes_locatable(axis[1][0])
+cax = divider.append_axes('right', size='5%', pad=0.05)
+fig.colorbar(cp, cax=cax, orientation='vertical')
+
+cp = axis[1][1].contourf(X, Y, map_pred_pos[:, :, 1], cmap = plt.get_cmap('Oranges'))
+divider = make_axes_locatable(axis[1][1])
+cax = divider.append_axes('right', size='5%', pad=0.05)
+fig.colorbar(cp, cax=cax, orientation='vertical')
+
+cp = axis[1][2].contourf(X, Y, map_pred_pos[:, :, 2], cmap = plt.get_cmap('Greens'))
+divider = make_axes_locatable(axis[1][2])
+cax = divider.append_axes('right', size='5%', pad=0.05)
+fig.colorbar(cp, cax=cax, orientation='vertical')
 
 map_pred = f(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype)).detach().cpu().numpy()
 map_pred = np.argmax(map_pred, -1)
@@ -140,8 +151,7 @@ grid_loader = torch.utils.data.DataLoader(grid_dataset, batch_size = args.batch_
 
 
 _, lla_var = forward(lla, grid_loader)
-print(lla_var[0])
-print(lla_var.shape)
+
 #lla_var = lla_var.reshape(n_samples, n_samples, 3, 3)
 color_map = plt.get_cmap('coolwarm') 
 
@@ -149,15 +159,24 @@ color_map = plt.get_cmap('coolwarm')
 for i in range(3):
     for j in range(i, 3):
 
-        cp = axis[1+i][j].contourf(X, Y, lla_var[:, i, j].reshape(n_samples, n_samples), cmap = color_map)
-        divider = make_axes_locatable(axis[i+1][j])
+        cp = axis[2+i][j].contourf(X, Y, lla_var[:, i, j].reshape(n_samples, n_samples), cmap = color_map)
+        divider = make_axes_locatable(axis[2+i][j])
         cax = divider.append_axes('right', size='5%', pad=0.05)
         fig.colorbar(cp, cax=cax,  orientation='vertical')
+        
+        axis[2+i][j].scatter(train_dataset.inputs[:, 0], train_dataset.inputs[:, 1],
+                        c = plt.get_cmap('tab10')(train_dataset.targets.astype(np.int32)), 
+                        alpha = 0.2, label = "Training Dataset")
+        
         if i != j:
-            cp = axis[1+j][i].contourf(X, Y, lla_var[:, j, i].reshape(n_samples, n_samples),  cmap = color_map)
-            divider = make_axes_locatable(axis[j+1][i])
+            cp = axis[2+j][i].contourf(X, Y, lla_var[:, j, i].reshape(n_samples, n_samples),  cmap = color_map)
+            divider = make_axes_locatable(axis[j+2][i])
             cax = divider.append_axes('right', size='5%', pad=0.05)
             fig.colorbar(cp, cax=cax, orientation='vertical')
+            
+            axis[2+j][i].scatter(train_dataset.inputs[:, 0], train_dataset.inputs[:, 1],
+                        c = plt.get_cmap('tab10')(train_dataset.targets.astype(np.int32)), 
+                        alpha = 0.2, label = "Training Dataset")
 
 
-plt.savefig("LLA_{}.pdf".format(args.dataset_name), bbox_inches='tight')
+plt.savefig("LLA_{}_prior={}.pdf".format(args.dataset_name, str(args.prior_std)), bbox_inches='tight')
