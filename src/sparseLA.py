@@ -236,11 +236,43 @@ class VaLLA(torch.nn.Module):
         J : torch tensor of shape (barch_size, output_dim, n_parameters)
             Contains the Jacobians
         """
+        
+        if self.net.implements_jacobian:
+            if dims is None:
+                Js, f = self.net.jacobians(x = X)
+            else:
+                Js, f = self.net.jacobians_on_outputs(x = X, outputs = dims)
+        else:
+            if dims is None:
+                Js, f = self.backend.jacobians(x = X)
+            else:
+                Js, f = self.backend.jacobians_on_outputs(x = X, outputs = dims)
+                
+        return Js * self.prior_std, f
+
+    def jacobian_featu2res(self, X, dims = None):
+        """
+        Computes the Jacobian of the deep model w.r.t the parameters evaluated on
+        the input.
+        
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+            
+        Returns
+        -------
+        
+        J : torch tensor of shape (barch_size, output_dim, n_parameters)
+            Contains the Jacobians
+        """
+        
+
         if dims is None:
             Js, f = self.backend.jacobians(x = X)
         else:
             Js, f = self.backend.jacobians_on_outputs(x = X, outputs = dims)
-            
+                
         return Js * self.prior_std, f
 
 
@@ -312,16 +344,17 @@ class VaLLA(torch.nn.Module):
         # Shape [num_inducing, num_inducing]
         #H = I + L^T @ self.Kz @ L
         I = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
-        H = I + torch.einsum("mn, ml, lk -> nk", L, self.Kz, L)
-
+        
+        self.H = I + L. T @ self.Kz @ L
+        
         # Shape [num_inducing, num_inducing]
         #A = L @ H^{-1} @ L^T
-        A = torch.einsum("nm, ml, kl -> nk", L, torch.inverse(H), L)
+        self.A = L @ torch.linalg.solve(self.H, L.T)
 
         # Compute predictive diagonal
         # Shape [output_dim, output_dim, batch_size, batch_size]
         #K2 = Kxz @ A @ Kxz^T
-        K2 = torch.einsum("anm, ml, bkl -> abnk", Kxz, A, Kxz)
+        K2 = torch.einsum("anm, ml, bkl -> abnk", Kxz, self.A, Kxz)
 
         # Shape [output_dim, output_dim, batch_size]
         diag = torch.diagonal(K2, dim1=-2, dim2= -1)
@@ -330,7 +363,7 @@ class VaLLA(torch.nn.Module):
         Fvar =  (Kx_diag - diag).permute(2, 0, 1) 
         return F_mean, Fvar
     
-    def compute_KL(self):
+    def compute_KL_(self):
         """
         Computes the Kulback-Leibler divergence between the variational distribution
         and the prior.
@@ -354,9 +387,19 @@ class VaLLA(torch.nn.Module):
 
         trace = torch.sum(torch.diagonal(self.Kz @ A))
 
-
         KL = 0.5 * log_det - 0.5 * trace
-        
+        return torch.sum(KL)
+    
+
+    def compute_KL(self):
+        """
+        Computes the Kulback-Leibler divergence between the variational distribution
+        and the prior.
+        """
+
+        log_det = torch.logdet(self.H)
+        trace = torch.sum(torch.diagonal(self.Kz @ self.A))
+        KL = 0.5 * log_det - 0.5 * trace
         return torch.sum(KL)
     
 
@@ -383,7 +426,6 @@ class VaLLA(torch.nn.Module):
                                                             F_var, 
                                                             y,
                                                             alpha=self.alpha)
-        
 
         # Aggregate on data dimension
         bb_alpha = torch.sum(bb_alpha)
@@ -504,6 +546,7 @@ class VaLLASampling(VaLLA):
         # F_mean shape (batch_size, S)
         # F_var shape (batch_size, S, S)
         F_mean, F_var = self(X)
+
         # Shape (batch_size, S, S)
         cholesky = torch.linalg.cholesky(F_var + 1e-5 * torch.eye(F_var.shape[-1]))
         
@@ -518,9 +561,11 @@ class VaLLASampling(VaLLA):
     
     
     def nelbo(self, X, y):
+
+
         # Latent samples Shape (num_samples, batch_size, S)
         F = self.predict(X)
-        
+
         # log density of the targets given the samples 
         # Shape (num_samples, batch_size)
         log_p = self.likelihood.logp(F, y)
@@ -549,9 +594,112 @@ class VaLLASampling(VaLLA):
         raise NotImplementedError
     
 
-class VaLLASamplingAR(VaLLASampling):
+
+class VaLLAMultiClass(VaLLA):
     def name(self):
-        return "Subsampling AR VaLLA"
+        return "VaLLA MultiClass"
+
+    def compute_logp(self, X):
+        """
+        Performs the mean and covariance matrix of the given input.
+        
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+            
+        Returns
+        -------
+        mean_pred : torch tensor of size (batch_size, output_dim)
+                    Predictive mean of the model on the given batch
+        var_pred : torch tensor of size (batch_size, output_dim, output_dim)
+                   Contains the covariance matrix of the model for each element on 
+                   the batch.
+        """        
+        
+        # Transform flattened cholesky decomposition parameter into matrix
+        L = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
+        li, lj = torch.tril_indices(self.num_inducing, self.num_inducing)
+        # Shape (num_inducing, num_inducing)
+        L[li, lj] = self.L
+
+        # Compute feature vectors (Gradients) Shape (batch_size, output_dim, n_params)
+        phi_x, F_mean  = self.jacobian_features(X)
+        pi = torch.nn.Softmax(-1)(F_mean)
+        
+        # Shape (batch_size, n_params)
+        phi_x_pi = torch.sum(phi_x * pi.unsqueeze(-1), 1)
+        
+        # Compute feature vector of inducing locations  Shape (n_inducing, n_params)
+        phi_z, _ = self.jacobian_features(self.inducing_locations, self.inducing_class.unsqueeze(-1))
+        phi_z = phi_z.squeeze(1)
+
+        # Clean gradients of inducing locations
+        self.inducing_locations.grad = None
+        
+        # Compute full matrices
+        # n is the batch_size and m the number of inducing locations
+        # s is used for the number of parameters
+        # a and b are used for the output dimension
+        
+        # Shape (S, S, batch_size)
+        Kx = torch.einsum("ns, ns -> n", phi_x_pi, phi_x_pi) 
+        
+        # Shape (num_inducing, num_inducing)
+        self.Kz = torch.einsum("ns, ms -> nm", phi_z, phi_z) 
+        Kxz = torch.einsum("ncs, ms -> nmc", phi_x, phi_z) 
+        pi_Kxz =  torch.einsum("nc, nmc -> nm", pi, Kxz) 
+        
+        # Compute auxiliar matrices
+        # Shape [num_inducing, num_inducing]
+        #H = I + L^T @ self.Kz @ L
+        I = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
+        
+        self.H = I + L. T @ self.Kz @ L
+        
+        # Shape [num_inducing, num_inducing]
+        #A = L @ H^{-1} @ L^T
+        self.A = L @ torch.linalg.solve(self.H, L.T)
+
+        
+        # Shape (batch_size)
+        # K2 = (J_x pi_x)^T B J_x pi_x
+        K2 =  pi_Kxz @ self.A @ pi_Kxz.T
+
+        # Shape [batch_size, S, S]
+        second_term = Kx - K2
+        
+        Kx = torch.einsum("ncs, ncs -> nc", phi_x, phi_x) 
+        K2 =  torch.einsum("nac, ab, nbc -> nc", Kxz, self.A, Kxz)
+
+        first_term = torch.sum(pi * (Kx - K2), -1)
+
+        return - first_term + second_term 
+
+
+    def nelbo(self, X, y):
+        
+        log_p = self.compute_logp(X)
+
+        # Aggregate on data dimension
+        ell = torch.sum(log_p)
+
+        # Scale loss term corresponding to minibatch size
+        scale = self.num_data
+        scale /= X.shape[0]
+
+        # Compute KL term
+        KL = self.compute_KL()
+
+        
+        self.ell_history.append((-scale * ell).detach().cpu().numpy())
+        self.kl_history.append(KL.detach().cpu().numpy())
+        return -scale * ell + KL
+    
+
+class VaLLAMultiClassSampling(VaLLASampling):
+    def name(self):
+        return "Subsampling VaLLA"
     
     def __init__(
         self,
@@ -723,30 +871,25 @@ class VaLLASamplingAR(VaLLASampling):
         return F
     
     def nelbo(self, X, y, indexes):
-    
+        
         all = torch.arange(0, self.output_dim).repeat((y.shape[0], 1))
-
         
         others = all.masked_fill(all == y, -1)
 
+
+        mask = (others != -1).to(torch.float32)
+
         
-        chosen = torch.multinomial(others.float().sigmoid(), num_samples=2, replacement=False)
+        chosen = torch.multinomial(mask, num_samples=2, replacement=False, generator = self.generator)
 
         
         classes = torch.concat([y, chosen], dim = -1).to(torch.long)
 
-        # Latent samples Shape (num_samples, batch_size, S)
-        F = self.predict_subset(X, classes)
-
-        # log density of the targets given the samples 
-        # Shape (num_samples, batch_size)
-        log_p = self.likelihood.logp(F, y, indexes)
-
-        # Shape (batch_size)
-        ell = torch.mean(log_p, 0)
-
+        F_mean, F_var = self.forward_subset(X, classes)
+        log_p = self.likelihood.variational_expectations(X, F_mean, F_var, y, classes)
+        
         # Aggregate on data dimension
-        ell = torch.sum(ell)
+        ell = torch.sum(log_p)
 
         # Scale loss term corresponding to minibatch size
         scale = self.num_data

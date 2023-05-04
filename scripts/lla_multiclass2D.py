@@ -45,7 +45,7 @@ def s():
     return torch.nn.Softmax(dim = -1)
 
 f = get_mlp(train_dataset.inputs.shape[1], args.dataset.output_dim, 
-            [50, 50], torch.nn.Tanh, s,
+            [50, 50], torch.nn.Tanh,
             args.device, args.dtype)
 
 # Define optimizer and compile model
@@ -79,20 +79,20 @@ except:
 
 def hessian(x, y):
     #oh = torch.nn.functional.one_hot(y.long().flatten(), args.dataset.classes).type(args.dtype)
-    out = f(x)
+    out = torch.nn.Softmax(dim = -1)(f(x))
     a = torch.einsum("na, nb -> abn", out, out)
     b = torch.diag_embed(out).permute(1,2,0)
     #b = torch.sum(out * oh, -1)
     return - a + b
 
 
-lla = GPLLA(f[:-1], 
+lla = GPLLA(f, 
             prior_std = args.prior_std,
             likelihood_hessian=lambda x,y: hessian(x, y),
             likelihood=MultiClass(num_classes = args.dataset.classes,
                           device=args.device, 
                         dtype = args.dtype), 
-            backend = BackPackInterface(f[:-1], f.output_size),
+            backend = BackPackInterface(f, f.output_size),
             device = args.device,
             dtype = args.dtype)
 

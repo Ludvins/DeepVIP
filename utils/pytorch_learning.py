@@ -78,12 +78,12 @@ def fit_map_crossentropy(
 
     for _ in iters:
         try:
-            inputs, target = next(data_iter)
+            inputs, target, _ = next(data_iter)
         except StopIteration:
             # StopIteration is thrown if dataset ends
             # reinitialize data loader
             data_iter = iter(training_generator)
-            inputs, target = next(data_iter)
+            inputs, target, _ = next(data_iter)
         inputs = inputs.to(device).to(dtype)
         target = target.to(device).to(dtype)
         
@@ -97,6 +97,44 @@ def fit_map_crossentropy(
             losses.append(loss.detach().cpu().numpy())
 
     return losses
+
+def acc_multiclass(
+    model,
+    generator,
+    use_tqdm=False,
+    device=None,
+    dtype = None
+):
+    # Set model in training mode
+
+
+    model.eval()
+
+    if use_tqdm:
+        # Initialize TQDM bar
+        iters = tqdm(range(len(generator)), unit=" iteration")
+        iters.set_description("Evaluating ")
+    else:
+        iters = len(generator)
+    data_iter = iter(generator)
+    
+    correct = 0
+    total = 0
+    
+    for _ in iters:
+        inputs, target, _ = next(data_iter)
+        inputs = inputs.to(device).to(dtype)
+        target = target.to(device).to(dtype)
+        
+        output = model(inputs)
+        
+        prediction = torch.argmax(output, -1).unsqueeze(-1)
+
+        correct += torch.sum(prediction == target)
+    
+        total += prediction.shape[0]
+
+    return (correct/total).detach().cpu().numpy()
 
 
 def fit(

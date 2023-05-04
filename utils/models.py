@@ -1,6 +1,6 @@
 
 import torch
-
+from torch import nn
 
 def get_mlp(input_dim, output_dim, inner_dims, activation,
             final_layer_activation = None, device = None, dtype = None):
@@ -22,6 +22,141 @@ def get_mlp(input_dim, output_dim, inner_dims, activation,
     setattr(model, 'output_size', output_dim)
     return model
 
+
+class MLP(nn.Module):
+    def __init__(self, n_inputs, n_outputs, n_layers, n_units, 
+                 nonlinear, device, dtype):
+        """ The MLP must have the first and last layers as FC.
+        :param n_inputs: input dim
+        :param n_outputs: output dim
+        :param n_layers: layer num = n_layers + 2
+        :param n_units: the dimension of hidden layers
+        :param nonlinear: nonlinear function
+        """
+        super(MLP, self).__init__()
+        self.n_inputs = n_inputs
+        self.n_outputs = n_outputs
+        self.output_size = n_outputs
+        self.n_layers = n_layers
+        self.n_units = n_units
+        self.nonlinear = nonlinear
+        self.dtype = dtype
+        self.nonlinear_deriv = self.get_nonliner()
+        # create layers
+        layers = [nn.Linear(n_inputs, n_units, device = device, dtype = dtype)]
+        for i in range(n_layers):
+            layers.append(nonlinear())
+            layers.append(nn.Linear(n_units, n_units, device = device, dtype = dtype))
+        layers.append(nonlinear())
+        layers.append(nn.Linear(n_units, n_outputs, device = device, dtype = dtype))
+        self.layers = nn.Sequential(*layers)
+        self.implements_jacobian = True
+
+    def get_nonliner(self):
+        if self.nonlinear == nn.Tanh:
+            inv = lambda x: 1 - torch.tanh(x)**2
+        elif self.nonlinear == nn.ReLU:
+            inv = lambda x: (torch.sign(x) + 1) / 2
+        else:
+            assert False, '{} inverse function is not emplemented'.format(self.nonlinear)
+        return inv
+
+    def forward(self, x):
+        x = self.layers(x)
+        return x
+
+    def jacobians(self, x):
+        """
+        :param x: (bs, n_inputs)
+        :return: J (bs, n_outputs, n_inputs)
+        """
+        batch_size = x.shape[0]
+        # first do forward
+        intermediate_results = []
+        J = []
+        x_ = x
+        for layer_i, layer in enumerate(self.layers):
+            x = layer(x)
+            intermediate_results.append(x)
+
+        for i in range(len(self.layers)-1, -1, -2):    
+            if i == len(self.layers)-1:
+                a = torch.tile(torch.eye(self.output_size).unsqueeze(0), (batch_size, 1, 1)).to(self.dtype)
+                I2 = intermediate_results[i- 1]
+
+                J.append(a)
+                J.append(torch.flatten(a.unsqueeze(-1) * I2.unsqueeze(1).unsqueeze(2), start_dim=-2, end_dim=-1))
+                
+
+            elif i == 0:
+
+                W = self.layers[i + 2].weight
+                I = intermediate_results[i]
+                I2 = x_
+                a = a @ (self.nonlinear_deriv(I).unsqueeze(1) * W.unsqueeze(0))
+
+                J.append(a)
+                J.append(torch.flatten(a.unsqueeze(-1) * I2.unsqueeze(1).unsqueeze(2), start_dim=-2, end_dim=-1))
+
+
+            else:
+                W = self.layers[i + 2].weight
+                I = intermediate_results[i]
+                I2 = intermediate_results[i- 1]
+
+                a = a @ (self.nonlinear_deriv(I).unsqueeze(1) * W.unsqueeze(0))
+                J.append(a)
+                J.append(torch.flatten(a.unsqueeze(-1) * I2.unsqueeze(1).unsqueeze(2), start_dim=-2, end_dim=-1))
+                
+        return torch.cat(J, -1), intermediate_results[-1]
+
+    def jacobians_on_outputs(self, x, outputs):
+        """
+        :param x: (bs, n_inputs)
+        :return: J (bs, n_outputs, n_inputs)
+        """
+        batch_size = x.shape[0]
+        # first do forward
+        intermediate_results = []
+        J = []
+        x_ = x
+        for layer_i, layer in enumerate(self.layers):
+            x = layer(x)
+            intermediate_results.append(x)
+
+        for i in range(len(self.layers)-1, -1, -2):    
+            if i == len(self.layers)-1:
+                a = torch.tile(torch.eye(self.output_size).unsqueeze(0), (batch_size, 1, 1)).to(self.dtype)
+                I2 = intermediate_results[i- 1]
+
+                J.append(a)
+                J.append(torch.flatten(a.unsqueeze(-1) * I2.unsqueeze(1).unsqueeze(2), start_dim=-2, end_dim=-1))
+                
+
+            elif i == 0:
+
+                W = self.layers[i + 2].weight
+                I = intermediate_results[i]
+                I2 = x_
+                a = a @ (self.nonlinear_deriv(I).unsqueeze(1) * W.unsqueeze(0))
+
+                J.append(a)
+                J.append(torch.flatten(a.unsqueeze(-1) * I2.unsqueeze(1).unsqueeze(2), start_dim=-2, end_dim=-1))
+
+
+            else:
+                W = self.layers[i + 2].weight
+                I = intermediate_results[i]
+                I2 = intermediate_results[i- 1]
+
+                a = a @ (self.nonlinear_deriv(I).unsqueeze(1) * W.unsqueeze(0))
+                J.append(a)
+                J.append(torch.flatten(a.unsqueeze(-1) * I2.unsqueeze(1).unsqueeze(2), start_dim=-2, end_dim=-1))
+                
+        J = torch.cat(J, -1)
+        
+        J = torch.gather(J, 1, outputs.unsqueeze(-1))
+        return J, intermediate_results[-1]
 
 
 

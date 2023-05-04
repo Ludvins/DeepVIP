@@ -29,6 +29,7 @@ for f in res1:
 df = pd.concat(df)
 VaLLA = df.loc[:, (df != df.iloc[0]).any()] 
 
+
 def std(x):
     return np.std(x)/np.sqrt(len(x))
 
@@ -42,7 +43,7 @@ ELLA["model"] = "ELLA"
 df = pd.concat([VaLLA, ELLA])
 
 print(df)
-print(df.groupby(["model", "prior_std", "M"]).mean())
+print(df.groupby(["model", "M"]).mean())
 input()
 lm = sns.catplot(data = df, x = "M", y="KL", palette="YlGnBu_d", hue="model", errorbar="se", kind="point", height=6, aspect=.75, legend = False)
 lm.fig.set_size_inches(16,10)

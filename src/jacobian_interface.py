@@ -6,11 +6,12 @@ from torch.func import jacrev, jacfwd, vmap, functional_call
 import copy
 
 class TorchJacobian():
-    def __init__(self, model):
+    def __init__(self, model, *args):
         fmodel, params_values = self.make_functional(model)
-
+        self.raw_model = model
         self.model = fmodel
         self.params = params_values
+        self.jac = jacrev(self.model)
 
     def make_functional(self, mod, disable_autograd_tracking=False):
         params_dict = dict(mod.named_parameters())
@@ -30,18 +31,18 @@ class TorchJacobian():
 
 
     def jacobians(self, x):
-
-        jacobians = jacfwd(self.model)( self.params, x)
+        jacobians = self.jac( self.params, x)
         jacobians = torch.cat([J.flatten(2, -1) for J in jacobians], -1)
-        return jacobians
+        return jacobians, self.raw_model(x)
 
 
 
     def jacobians_on_outputs(self, x, outputs):
         # jacrev computes jacobians of argnums=0 by default.
         # We set it to 1 to compute jacobians of params
-        jacobians = jacfwd(self.model)( self.params, x)
+        jacobians = self.jac( self.params, x)
         jacobians = torch.cat([J.flatten(2, -1) for J in jacobians], -1)
-        oh = torch.nn.functional.one_hot(outputs, jacobians.shape[1]).unsqueeze(-1)
-        jacobians = torch.sum(jacobians * oh, 1)
-        return jacobians
+        jacobians = torch.gather(jacobians, 1, outputs.unsqueeze(-1))
+        f =  self.raw_model(x)
+
+        return jacobians, f

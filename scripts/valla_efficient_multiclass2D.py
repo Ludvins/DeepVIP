@@ -17,13 +17,11 @@ from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit_map_crossentropy, fit, predict, forward, score
 from scripts.filename import create_file_name
 from src.generative_functions import *
-from src.sparseLA import VaLLA, GPLLA
-from src.likelihood import GaussianMultiClass, MultiClass
+from src.sparseLA import VaLLAMultiClass, GPLLA
+from src.likelihood import ARMultiClass, MultiClass, GaussianMultiClass
 from src.backpack_interface import BackPackInterface
-#from src.jacobian_interface import TorchJacobian
 from utils.models import get_mlp
 from utils.dataset import get_dataset, Test_Dataset
-from laplace import Laplace
 args = manage_experiment_configuration()
 
 args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -41,13 +39,14 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
+
 def s():
     return torch.nn.Softmax(dim = -1)
 
-
 f = get_mlp(train_dataset.inputs.shape[1], args.dataset.output_dim, 
             [50, 50], torch.nn.Tanh,
-            device = args.device, dtype = args.dtype)
+            args.device, args.dtype)
+
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr)
@@ -86,18 +85,16 @@ indexes = rng.choice(np.arange(train_dataset.inputs.shape[0]),
 Z = train_dataset.inputs[indexes]
 classes = train_dataset.targets[indexes].flatten()
 
-sparseLA = VaLLA(
+sparseLA = VaLLAMultiClass(
     f.forward,
     Z, 
     inducing_classes = classes,
     alpha = args.bb_alpha,
     prior_std=args.prior_std,
-    likelihood=GaussianMultiClass(device=args.device, 
-                        dtype = args.dtype), 
+    likelihood=None,
     num_data = train_dataset.inputs.shape[0],
     output_dim = args.dataset.output_dim,
     backend = BackPackInterface(f, f.output_size),
-    fix_inducing_locations=False,
     track_inducing_locations=True,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
@@ -130,10 +127,21 @@ else:
     )
     end = timer()
     fig, axis = plt.subplots(3, 1, figsize=(15, 20))
-    axis[0].plot(loss)
+    def moving_average(a, n=3):
+        border = np.floor(n/2).astype(int)
+        new_a = np.zeros(len(a) + 2*border)
+        new_a[:border] = a[0]
+        new_a[-border:] = a[-1]
+        new_a[border:-border] = a
+        ret = np.cumsum(new_a, dtype=float)
+        ret[n:] = ret[n:] - ret[:-n]
+        return ret[n - 1:] / n
+    axis[0].plot(loss, color = "blue", alpha = 0.2)
+    axis[0].plot(moving_average(loss, 7), color = "blue")
     axis[0].set_title("Nelbo")
     
-    axis[1].plot(sparseLA.ell_history)    
+    axis[1].plot(sparseLA.ell_history, color = "blue", alpha = 0.2)
+    axis[1].plot(moving_average(sparseLA.ell_history, 7), color = "blue")
     axis[1].set_title("ELL")
 
     axis[2].plot(sparseLA.kl_history)
@@ -142,10 +150,12 @@ else:
     plt.show()
     #plt.clf()
 
-    #torch.save(sparseLA.state_dict(), path)
+    # torch.save(sparseLA.state_dict(), path)
     
 
 sparseLA.print_variables()
+
+
 
 
 def hessian(x, y):
@@ -156,14 +166,12 @@ def hessian(x, y):
     #b = torch.sum(out * oh, -1)
     return - a + b
 
-
-
 lla = GPLLA(f, 
-            prior_std = args.prior_std,
+            prior_std=args.prior_std,
             likelihood_hessian=lambda x,y: hessian(x, y),
             likelihood=MultiClass(num_classes = args.dataset.classes,
                           device=args.device, 
-                        dtype = args.dtype), 
+                        dtype = args.dtype),
             backend = BackPackInterface(f, f.output_size),
             device = args.device,
             dtype = args.dtype)
@@ -171,7 +179,6 @@ lla = GPLLA(f,
 
 lla.fit(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.dtype),
         torch.tensor(train_dataset.targets, device = args.device, dtype = args.dtype))
-
 
 
 plt.rcParams['pdf.fonttype'] = 42
@@ -238,7 +245,7 @@ for i in range(3):
 
 
 
-plt.savefig("VaLLA_{}_M={}_prior={}.pdf".format(args.dataset_name, args.num_inducing, args.prior_std), bbox_inches='tight')
+plt.savefig("VaLLA_AR_{}_M={}_prior={}.pdf".format(args.dataset_name, args.num_inducing, args.prior_std), bbox_inches='tight')
 
 def kl(sigma1, sigma2):
     L1 = np.linalg.cholesky(sigma1 + 1e-3 * np.eye(sigma1.shape[-1]))
@@ -270,7 +277,8 @@ d = {
     "W2": W2,
     "MAE": MAE,
     "map_iterations": args.MAP_iterations,
-    "prior_std": args.prior_std
+    "prior_std": args.prior_std,
+    "iterations": args.iterations
 }
 
 df = pd.DataFrame.from_dict(d, orient="index").transpose()
@@ -278,6 +286,6 @@ df = pd.DataFrame.from_dict(d, orient="index").transpose()
 print(df)
 
 df.to_csv(
-    path_or_buf="results/VaLLA_dataset={}_M={}_prior={}_seed={}.csv".format(args.dataset_name,args.num_inducing, str(args.prior_std), args.seed),
+    path_or_buf="results/VaLLA_MCGaussian_dataset={}_M={}_prior={}_seed={}.csv".format(args.dataset_name,args.num_inducing, str(args.prior_std), args.seed),
     encoding="utf-8",
 )

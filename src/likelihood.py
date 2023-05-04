@@ -406,19 +406,78 @@ class MultiClass(Likelihood):
 
         true = torch.sum(F * oh_on, -1)
         c = torch.logsumexp(F, -1)
-
         return true - c
 
+class GaussianMultiClass(Likelihood):
+
+    def variational_expectations(self, Fmu, Fvar, Y, alpha):
+        """
+        Compute the expected log density of the data, given a Gaussian
+        distribution for the function values.
+        We implement a Gauss-Hermite quadrature routine.
+        """
+        # Output probabilities of the network
+        pi = torch.nn.Softmax(-1)(Fmu)
+
+        # Get diagonal of latent covariance matrix
+        # Shape (batch_size, subset_classes)
+        diag = torch.diagonal(Fvar, dim1 = 1, dim2 = 2)
+        
+        first_term =  torch.sum(pi * diag, -1)
+        second_term = torch.einsum("na, nab, nb -> n", pi, Fvar, pi)
+
+        return - first_term + second_term 
+
+class GaussianMultiClassSubset(Likelihood):
+    def __init__(self, num_classes, net, dtype, device):
+        super().__init__(dtype, device)
+        self.num_classes = num_classes
+        self.net = net
+
+    def hessian(self, x):
+        #oh = torch.nn.functional.one_hot(y.long().flatten(), args.dataset.classes).type(args.dtype)
+        out = self.net(x)
+        a = torch.einsum("na, nb -> abn", out, out)
+        b = torch.diag_embed(out).permute(1,2,0)
+        #b = torch.sum(out * oh, -1)
+        return a - b
+
+    def variational_expectations(self, X, Fmu, Fvar, Y, indexes):
+        """
+        Compute the expected log density of the data, given a Gaussian
+        distribution for the function values.
+        We implement a Gauss-Hermite quadrature routine.
+        """
+        # Output probabilities of the network
+        pi = self.net(X)
+        # Select only a subset of classes especified in "indexes"
+        # Shape (batch_size, subset_classes)
+        pi = torch.gather(pi, 1, indexes)
+
+        # Scale factor
+        scale = pi.shape[-1] / self.num_classes
+        scale =  self.num_classes / pi.shape[-1]
+        #scale = 1
+        
+        # Get diagonal of latent covariance matrix
+        # Shape (batch_size, subset_classes)
+        diag = torch.diagonal(Fvar, dim1 = 1, dim2 = 2)
+        
+        first_term =  scale * torch.sum(pi * diag, -1)
+        second_term = scale * scale * torch.einsum("na, nab, nb -> n", pi, Fvar, pi)
+
+        return - first_term + second_term 
+    
 
 class ARMultiClass(Likelihood):
     def __init__(self, num_classes, input_dim, num_data, seed, dtype, device):
         super().__init__(dtype, device)
         self.num_classes = num_classes
         self.eta = torch.ones(num_data, dtype = dtype, device = device)
+        self.t = torch.zeros(num_data, dtype = dtype, device = device)
         self.rng = np.random.default_rng(seed)
-        self.t = torch.tensor(0, dtype = dtype, device = device)
 
-    def logp(self, F, Y, indexes):
+    def logp(self, X, F, Y, indexes):
         """
 
         Arguments
@@ -430,33 +489,38 @@ class ARMultiClass(Likelihood):
             Contains the true class
         """
 
+        if F.shape[0] != 1:
+            raise NotImplementedError("num samples must be 1")
+        
+
         # Create the difference between the corresponding function values
         diff = F[:, :, 1:] - F[:, :, 0].unsqueeze(-1)
         eta_new = 1 + (self.num_classes -1 ) / (F.shape[-1] - 1) * torch.sum(torch.exp(diff),-1)
-        
-        alpha = (self.t + 1)**(-0.9)
-        new = (1-alpha) * self.eta[indexes].detach() + alpha * eta_new
-        self.eta[indexes] = new.detach()
 
+        alpha = (self.t[indexes].detach() + 1)**(-0.9)
+        new = (1-alpha) * self.eta[indexes].detach() + alpha * eta_new.squeeze(0)
+        self.eta[indexes] = new.detach()
+        
+        self.t[indexes] = self.t[indexes].detach() + 1
+        
         # Compute approximation,
         return  1 - torch.log(new) - eta_new/new
     
 
 
-class AR2MultiClass(Likelihood):
+class ARAMMultiClass(Likelihood):
     def __init__(self, num_classes, input_dim, num_data, seed, dtype, device):
         super().__init__(dtype, device)
         self.num_classes = num_classes
         self.rng = np.random.default_rng(seed)
         from utils.models import get_mlp
-        print(self.num_classes)
 
-        self.net = get_mlp(input_dim, 1, [10, 10], torch.nn.ReLU, device = device, dtype = dtype)
+        self.net = get_mlp(input_dim, 1, [50, 50], torch.nn.ReLU, device = device, dtype = dtype)
 
     def p(self, F, Y):
         torch.exp(self.logp(F, Y))
 
-    def logp(self, X, F, Y):
+    def logp(self, X, F, Y, indexes):
         """
 
         Arguments
@@ -468,28 +532,14 @@ class AR2MultiClass(Likelihood):
             Contains the true class
         """
 
-        # Create a random value between [1, num_classes-1] for each input
-        addition = torch.tensor(
-            self.rng.choice(self.num_classes-1, size = Y.shape) + 1,
-            device = self.device)
-
-        # Add the true label with the random one
-        other = Y + addition
-
-        # Take the remainder of dividing by the number of classes
-        # Given the range of the random addition, other is ensured to be different than Y.
-        other = torch.remainder(other, self.num_classes)
-
-        # Create both one-hot encodings
-        oh_on = one_hot(Y.long().flatten(), self.num_classes).unsqueeze(0)
-        oh_on2 = one_hot(other.long().flatten(), self.num_classes).unsqueeze(0)
-
         # Create the difference between the corresponding function values
-        diff = torch.sum(F * oh_on2, 2) - torch.sum(F * oh_on, 2)
+        diff = F[:, :, 1:] - F[:, :, 0].unsqueeze(-1)
+        eta_new = 1 + (self.num_classes -1 ) / (F.shape[-1] - 1) * torch.sum(torch.exp(diff),-1)
+        
+        eta = 1 + torch.exp(self.net(X).T - 5)
         # Compute approximation,
-        eta = 1 + torch.exp(self.net(X).T)
-        return 1 - torch.log(eta) \
-            - 1/eta * (1 + (self.num_classes -1 ) * torch.exp(diff))
+        return  1 - torch.log(eta) - eta_new/eta
+    
 
 
 

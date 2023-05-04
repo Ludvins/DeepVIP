@@ -33,9 +33,10 @@ class BackPackInterface(CurvatureInterface):
         """
         model = extend(self.model)
         to_stack = []
+        out = model(x)
+
         for i in range(model.output_size):
             model.zero_grad()
-            out = model(x)
 
             with backpack(BatchGrad(), retain_graph=True):
                 if model.output_size > 1:
@@ -47,20 +48,17 @@ class BackPackInterface(CurvatureInterface):
                     to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
                     delattr(param, 'grad_batch')
                 Jk = torch.cat(to_cat, dim=1)
-                if self.subnetwork_indices is not None:
-                    Jk = Jk[:, self.subnetwork_indices]
+                
             to_stack.append(Jk)
-            if i == 0:
-                f = out
 
         model.zero_grad()
         x.grad = None
         CTX.remove_hooks()
         _cleanup(model)
         if model.output_size > 1:
-            return torch.stack(to_stack, dim=2).transpose(1, 2), f
+            return torch.stack(to_stack, dim=2).transpose(1, 2), out
         else:
-            return Jk.unsqueeze(-1).transpose(1, 2), f
+            return Jk.unsqueeze(-1).transpose(1, 2), out
 
     def jacobians_on_outputs(self, x, outputs):
         """Compute Jacobians \\(\\nabla_{\\theta} f(x;\\theta)\\) at current parameter \\(\\theta\\)

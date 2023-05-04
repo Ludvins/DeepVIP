@@ -41,14 +41,12 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-def s():
-    return torch.nn.Softmax(dim = -1)
 
 print(args.dataset.output_dim)
 
 f = get_mlp(train_dataset.inputs.shape[1], args.dataset.output_dim, 
-            [50, 50], torch.nn.Tanh, s,
-            args.device, args.dtype)
+            [50, 50], torch.nn.Tanh,
+            device = args.device, dtype = args.dtype)
 
 print(f)
 
@@ -82,14 +80,14 @@ except:
 
 def hessian(x, y):
     #oh = torch.nn.functional.one_hot(y.long().flatten(), args.dataset.classes).type(args.dtype)
-    out = f(x)
+    out = torch.nn.Softmax(dim = -1)(f(x))
     a = torch.einsum("na, nb -> abn", out, out)
     b = torch.diag_embed(out).permute(1,2,0)
     #b = torch.sum(out * oh, -1)
     return - a + b
 
 
-ella = ELLA(f[:-1], 
+ella = ELLA(f, 
             f.output_size,
             args.num_inducing,
             np.min([args.num_inducing, 20]),
@@ -98,7 +96,7 @@ ella = ELLA(f[:-1],
             likelihood=MultiClass(num_classes = args.dataset.classes,
                           device=args.device, 
                         dtype = args.dtype), 
-            backend = BackPackInterface(f[:-1], f.output_size),
+            backend = BackPackInterface(f, f.output_size),
             seed = args.seed,
             device = args.device,
             dtype = args.dtype)
@@ -108,13 +106,13 @@ ella.fit(torch.tensor(train_dataset.inputs, device = args.device, dtype = args.d
          torch.tensor(train_dataset.targets, device = args.device, dtype = args.dtype))
 
 
-lla = GPLLA(f[:-1], 
+lla = GPLLA(f, 
             prior_std = args.prior_std,
             likelihood_hessian=lambda x,y: hessian(x, y),
             likelihood=MultiClass(num_classes = args.dataset.classes,
                           device=args.device, 
                         dtype = args.dtype), 
-            backend = BackPackInterface(f[:-1], f.output_size),
+            backend = BackPackInterface(f, f.output_size),
             device = args.device,
             dtype = args.dtype)
 
