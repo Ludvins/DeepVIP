@@ -53,7 +53,7 @@ opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr)
 criterion = torch.nn.CrossEntropyLoss()
 
 try:
-    f.load_state_dict(torch.load("weights/multclass_weights_"+args.dataset_name))
+    f.load_state_dict(torch.load("weights/multiclass_weights_"+args.dataset_name))
 except:
     # Set the number of training samples to generate
     # Train the model
@@ -135,7 +135,7 @@ else:
     print("Pre-trained weights not found")
     start = timer()
     
-    with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
+    with profile(activities=[ProfilerActivity.CPU], record_shapes=True, with_modules = True) as prof:
         with record_function("model_inference"):
         
             loss = fit(
@@ -148,7 +148,7 @@ else:
                 device=args.device,
             )
             
-    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=30))
     exit()
     end = timer()
     fig, axis = plt.subplots(3, 1, figsize=(15, 20))

@@ -1,6 +1,8 @@
 import torch
 from .utils import reparameterize
 import numpy as np
+import torch.autograd.profiler as profiler
+
 
 class VaLLA(torch.nn.Module):
     """
@@ -236,21 +238,21 @@ class VaLLA(torch.nn.Module):
         J : torch tensor of shape (barch_size, output_dim, n_parameters)
             Contains the Jacobians
         """
-        
-        if self.net.implements_jacobian:
-            if dims is None:
-                Js, f = self.net.jacobians(x = X)
+        with profiler.record_function("Jacobian computation"):
+            if self.net.implements_jacobian:
+                if dims is None:
+                    Js, f = self.net.jacobians(x = X)
+                else:
+                    Js, f = self.net.jacobians_on_outputs(x = X, outputs = dims)
             else:
-                Js, f = self.net.jacobians_on_outputs(x = X, outputs = dims)
-        else:
-            if dims is None:
-                Js, f = self.backend.jacobians(x = X)
-            else:
-                Js, f = self.backend.jacobians_on_outputs(x = X, outputs = dims)
-                
-        return Js * self.prior_std, f
+                if dims is None:
+                    Js, f = self.backend.jacobians(x = X)
+                else:
+                    Js, f = self.backend.jacobians_on_outputs(x = X, outputs = dims)
+                    
+            return Js * self.prior_std, f
 
-    def jacobian_featu2res(self, X, dims = None):
+    def jacobian_features_old(self, X, dims = None):
         """
         Computes the Jacobian of the deep model w.r.t the parameters evaluated on
         the input.
@@ -332,20 +334,22 @@ class VaLLA(torch.nn.Module):
         # s is used for the number of parameters
         # a and b are used for the output dimension
         
-        # Shape (output_dim, output_dim, batch_size)
-        Kx_diag = torch.einsum("nas, nbs -> abn", phi_x, phi_x) 
-        
-        # Shape (output_dim, batch_size, num_inducing)
-        Kxz = torch.einsum("nas, ms -> anm", phi_x, phi_z)
-        # Shape (num_inducing, num_inducing)
-        self.Kz = torch.einsum("ns, ms -> nm", phi_z, phi_z) 
-        
+        with profiler.record_function("Kernel Matrix computation"):
+
+            # Shape (output_dim, output_dim, batch_size)
+            Kx_diag = torch.einsum("nas, nbs -> abn", phi_x, phi_x) 
+            
+            # Shape (output_dim, batch_size, num_inducing)
+            Kxz = torch.einsum("nas, ms -> anm", phi_x, phi_z)
+            # Shape (num_inducing, num_inducing)
+            self.Kz = torch.einsum("ns, ms -> nm", phi_z, phi_z) 
+            
         # Compute auxiliar matrices
         # Shape [num_inducing, num_inducing]
         #H = I + L^T @ self.Kz @ L
         I = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
         
-        self.H = I + L. T @ self.Kz @ L
+        self.H = I + L.T @ self.Kz @ L
         
         # Shape [num_inducing, num_inducing]
         #A = L @ H^{-1} @ L^T
@@ -419,13 +423,14 @@ class VaLLA(torch.nn.Module):
         elbo : float
                The nelbo of the model at the current state for the given inputs.
         """
+        with profiler.record_function("Forward Pass"):
+            F_mean, F_var = self(X)
 
-        F_mean, F_var = self(X)
-
-        bb_alpha = self.likelihood.variational_expectations(F_mean, 
-                                                            F_var, 
-                                                            y,
-                                                            alpha=self.alpha)
+        with profiler.record_function("ELL"):
+            bb_alpha = self.likelihood.variational_expectations(F_mean, 
+                                                                F_var, 
+                                                                y,
+                                                                alpha=self.alpha)
 
         # Aggregate on data dimension
         bb_alpha = torch.sum(bb_alpha)
@@ -435,7 +440,8 @@ class VaLLA(torch.nn.Module):
         scale /= X.shape[0]
 
         # Compute KL term
-        KL = self.compute_KL()
+        with profiler.record_function("KL"):
+            KL = self.compute_KL()
         
         self.ell_history.append((-scale * bb_alpha).detach().cpu().numpy())
         self.kl_history.append(KL.detach().cpu().numpy())
