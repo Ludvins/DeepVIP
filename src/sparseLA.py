@@ -129,7 +129,7 @@ class VaLLA(torch.nn.Module):
 
         
 
-    def train_step(self, optimizer, X, y, **kargs):
+    def train_step(self, optimizer, X, y):
         """
         Defines the training step for the DVIP model using a simple optimizer.
         This method illustrates a standard training step. If more complex
@@ -238,21 +238,20 @@ class VaLLA(torch.nn.Module):
         J : torch tensor of shape (barch_size, output_dim, n_parameters)
             Contains the Jacobians
         """
-        with profiler.record_function("Jacobian computation"):
-            if self.net.implements_jacobian:
-                if dims is None:
-                    Js, f = self.net.jacobians(x = X)
-                else:
-                    Js, f = self.net.jacobians_on_outputs(x = X, outputs = dims)
+        if self.net.implements_jacobian:
+            if dims is None:
+                Js, f = self.net.jacobians(x = X)
             else:
-                if dims is None:
-                    Js, f = self.backend.jacobians(x = X)
-                else:
-                    Js, f = self.backend.jacobians_on_outputs(x = X, outputs = dims)
-                    
-            return Js * self.prior_std, f
+                Js, f = self.net.jacobians_on_outputs(x = X, outputs = dims)
+        else:
+            if dims is None:
+                Js, f = self.backend.jacobians(x = X)
+            else:
+                Js, f = self.backend.jacobians_on_outputs(x = X, outputs = dims)
+                
+        return Js * self.prior_std, f
 
-    def jacobian_features_old(self, X, dims = None):
+    def jacobian_features(self, X, dims = None):
         """
         Computes the Jacobian of the deep model w.r.t the parameters evaluated on
         the input.
@@ -326,6 +325,7 @@ class VaLLA(torch.nn.Module):
         # Compute feature vector of inducing locations  Shape (n_inducing, n_params)
         phi_z, _ = self.jacobian_features(self.inducing_locations, self.inducing_class.unsqueeze(-1))
         phi_z = phi_z.squeeze(1)
+
         # Clean gradients of inducing locations
         self.inducing_locations.grad = None
         
@@ -334,15 +334,15 @@ class VaLLA(torch.nn.Module):
         # s is used for the number of parameters
         # a and b are used for the output dimension
         
-        with profiler.record_function("Kernel Matrix computation"):
 
-            # Shape (output_dim, output_dim, batch_size)
-            Kx_diag = torch.einsum("nas, nbs -> abn", phi_x, phi_x) 
+        # Shape (output_dim, output_dim, batch_size)
+        Kx_diag = torch.einsum("nas, nbs -> abn", phi_x, phi_x) 
+        
+        # Shape (output_dim, batch_size, num_inducing)
+        Kxz = torch.einsum("nas, ms -> anm", phi_x, phi_z)
+        # Shape (num_inducing, num_inducing)
+        self.Kz = torch.einsum("ns, ms -> nm", phi_z, phi_z) 
             
-            # Shape (output_dim, batch_size, num_inducing)
-            Kxz = torch.einsum("nas, ms -> anm", phi_x, phi_z)
-            # Shape (num_inducing, num_inducing)
-            self.Kz = torch.einsum("ns, ms -> nm", phi_z, phi_z) 
             
         # Compute auxiliar matrices
         # Shape [num_inducing, num_inducing]
@@ -423,25 +423,22 @@ class VaLLA(torch.nn.Module):
         elbo : float
                The nelbo of the model at the current state for the given inputs.
         """
-        with profiler.record_function("Forward Pass"):
-            F_mean, F_var = self(X)
+        F_mean, F_var = self(X)
 
-        with profiler.record_function("ELL"):
-            bb_alpha = self.likelihood.variational_expectations(F_mean, 
+        bb_alpha = self.likelihood.variational_expectations(F_mean, 
                                                                 F_var, 
                                                                 y,
                                                                 alpha=self.alpha)
 
         # Aggregate on data dimension
         bb_alpha = torch.sum(bb_alpha)
-
+        
         # Scale loss term corresponding to minibatch size
         scale = self.num_data
         scale /= X.shape[0]
 
         # Compute KL term
-        with profiler.record_function("KL"):
-            KL = self.compute_KL()
+        KL = self.compute_KL()
         
         self.ell_history.append((-scale * bb_alpha).detach().cpu().numpy())
         self.kl_history.append(KL.detach().cpu().numpy())
@@ -703,7 +700,7 @@ class VaLLAMultiClass(VaLLA):
         return -scale * ell + KL
     
 
-class VaLLAMultiClassSampling(VaLLASampling):
+class VaLLAMultiClassSubset(VaLLA):
     def name(self):
         return "Subsampling VaLLA"
     
@@ -714,7 +711,6 @@ class VaLLAMultiClassSampling(VaLLASampling):
         prior_std,
         likelihood,
         num_data,
-        n_samples,
         n_classes_subsampled,
         output_dim,
         backend,
@@ -728,60 +724,13 @@ class VaLLAMultiClassSampling(VaLLASampling):
         dtype=torch.float64,
         seed = 2147483647
     ):
-        super().__init__(net_forward, Z, prior_std, likelihood, num_data, n_samples, output_dim, 
-                         backend, track_inducing_locations, fix_inducing_locations,
-                         inducing_classes,
-                         alpha, y_mean, y_std, device, dtype, seed) 
+        super().__init__(net_forward, Z, prior_std, likelihood, num_data, output_dim,
+        backend, track_inducing_locations,fix_inducing_locations, inducing_classes,
+        alpha, y_mean, y_std, device, dtype) 
         
         self.n_classes_sub_sampled = n_classes_subsampled
-
-    def train_step(self, optimizer, X, y, **kwargs):
-        """
-        Defines the training step for the DVIP model using a simple optimizer.
-        This method illustrates a standard training step. If more complex
-        operations are needed, such as optimizers with double steps,
-        create your own training step, calling this one is not compulsory.
-        Parameters
-        ----------
-        optimizer : torch.optim
-                    The considered optimization algorithm.
-        X : torch tensor of shape (batch_size, data_dim)
-            Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input, must be standardized.
-        Returns
-        -------
-        loss : float
-               The nelbo of the model at the current state for the
-               given inputs.
-        """
-
-        # If targets are unidimensional,
-        # ensure there is a second dimension (N, 1)
-        if y.ndim == 1:
-            y = y.unsqueeze(-1)
-
-        # Transform inputs and largets to the model'd dtype
-        if self.dtype != X.dtype:
-            X = X.to(self.dtype)
-        if self.dtype != y.dtype:
-            y = y.to(self.dtype)
-
-        # Clear gradients
-        optimizer.zero_grad()
-
-        # Compute loss
-        loss = self.nelbo(X, y, kwargs["indexes"])
-        
-        # Create backpropagation graph
-        loss.backward()
-        
-        # Make optimization step
-        optimizer.step()
-        if self.track_inducing_locations:
-            self.inducing_history += [self.inducing_locations.clone().detach().cpu().numpy()]
-
-        return loss
+        self.generator = torch.Generator(device = device)
+        self.generator.manual_seed(seed)
 
 
     def forward_subset(self, X, classes):
@@ -835,16 +784,16 @@ class VaLLAMultiClassSampling(VaLLASampling):
         # Shape [num_inducing, num_inducing]
         #H = I + L^T @ self.Kz @ L
         I = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
-        H = I + torch.einsum("mn, ml, lk -> nk", L, self.Kz, L)
+        self.H = I + torch.einsum("mn, ml, lk -> nk", L, self.Kz, L)
 
         # Shape [num_inducing, num_inducing]
         #A = L @ H^{-1} @ L^T
-        A = torch.einsum("nm, ml, kl -> nk", L, torch.inverse(H), L)
+        self.A = torch.einsum("nm, ml, kl -> nk", L, torch.inverse(self.H), L)
 
         # Compute predictive diagonal
         # Shape [S, S, batch_size, batch_size]
         #K2 = Kxz @ A @ Kxz^T
-        K2 = torch.einsum("anm, ml, bkl -> abnk", Kxz, A, Kxz)
+        K2 = torch.einsum("anm, ml, bkl -> abnk", Kxz, self.A, Kxz)
 
         # Shape [S, output_dim, batch_size]
         diag = torch.diagonal(K2, dim1=-2, dim2= -1)
@@ -852,51 +801,35 @@ class VaLLAMultiClassSampling(VaLLASampling):
         # Shape [batch_size, S, S]
         Fvar =  (Kx_diag - diag).permute(2, 0, 1) 
         return F_mean, Fvar
-
-    def predict_subset(self, X, classes, n_samples = None):
-        
-        if n_samples is None:
-            n_samples = self.n_samples
-            
-
-        # Latent mean and covariance.
-        # F_mean shape (batch_size, S)
-        # F_var shape (batch_size, S, S)
-        F_mean, F_var = self.forward_subset(X, classes)
-
-        # Shape (batch_size, S, S)
-        cholesky = torch.linalg.cholesky(F_var + 1e-5 * torch.eye(F_var.shape[-1]))
-        
-        # Standard Gaussian samples 
-        # Shape (num_samples, batch_size, S)
-        z = torch.randn(size = (n_samples, F_mean.shape[0], F_mean.shape[1]), generator = self.generator).to(self.dtype)
-        
-        # Latent samples Shape (num_samples, batch_size, S)
-        F =  F_mean + torch.einsum("snd, nda -> sna", z, cholesky)
-
-        return F
     
-    def nelbo(self, X, y, indexes):
+    
+    def nelbo(self, X, y):
+        F_mean = self.net(X)
+        max_class = torch.argmax(F_mean, 1).unsqueeze(-1)
         
-        all = torch.arange(0, self.output_dim).repeat((y.shape[0], 1))
+        all = torch.arange(0, self.output_dim).repeat((max_class.shape[0], 1))
         
-        others = all.masked_fill(all == y, -1)
+        others = all.masked_fill(all == max_class, -1)
 
 
         mask = (others != -1).to(torch.float32)
 
         
-        chosen = torch.multinomial(mask, num_samples=2, replacement=False, generator = self.generator)
+        chosen = torch.multinomial(mask, num_samples=self.n_classes_sub_sampled, replacement=False, generator = self.generator)
 
         
-        classes = torch.concat([y, chosen], dim = -1).to(torch.long)
+        classes = torch.concat([max_class, chosen], dim = -1).to(torch.long)
 
-        F_mean, F_var = self.forward_subset(X, classes)
-        log_p = self.likelihood.variational_expectations(X, F_mean, F_var, y, classes)
+        _, F_var = self.forward_subset(X, classes)
         
+        
+        pi = torch.nn.Softmax(-1)(F_mean)
+        pi = torch.gather(pi,1, classes)
+
+        log_p = self.likelihood.variational_expectations(pi, F_var, y)
+
         # Aggregate on data dimension
         ell = torch.sum(log_p)
-
         # Scale loss term corresponding to minibatch size
         scale = self.num_data
         scale /= X.shape[0]

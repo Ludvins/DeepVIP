@@ -429,45 +429,24 @@ class GaussianMultiClass(Likelihood):
         return - first_term + second_term 
 
 class GaussianMultiClassSubset(Likelihood):
-    def __init__(self, num_classes, net, dtype, device):
-        super().__init__(dtype, device)
-        self.num_classes = num_classes
-        self.net = net
 
-    def hessian(self, x):
-        #oh = torch.nn.functional.one_hot(y.long().flatten(), args.dataset.classes).type(args.dtype)
-        out = self.net(x)
-        a = torch.einsum("na, nb -> abn", out, out)
-        b = torch.diag_embed(out).permute(1,2,0)
-        #b = torch.sum(out * oh, -1)
-        return a - b
-
-    def variational_expectations(self, X, Fmu, Fvar, Y, indexes):
+    def variational_expectations(self, pi, Fvar, Y):
         """
         Compute the expected log density of the data, given a Gaussian
         distribution for the function values.
         We implement a Gauss-Hermite quadrature routine.
         """
-        # Output probabilities of the network
-        pi = self.net(X)
-        # Select only a subset of classes especified in "indexes"
-        # Shape (batch_size, subset_classes)
-        pi = torch.gather(pi, 1, indexes)
-
-        # Scale factor
-        scale = pi.shape[-1] / self.num_classes
-        scale =  self.num_classes / pi.shape[-1]
-        #scale = 1
         
+        scale = 1/torch.sum(pi,1)
         # Get diagonal of latent covariance matrix
         # Shape (batch_size, subset_classes)
         diag = torch.diagonal(Fvar, dim1 = 1, dim2 = 2)
         
-        first_term =  scale * torch.sum(pi * diag, -1)
-        second_term = scale * scale * torch.einsum("na, nab, nb -> n", pi, Fvar, pi)
+        first_term = scale * torch.sum(pi * diag, -1)
+        second_term = scale ** 2 * torch.einsum("na, nab, nb -> n", pi, Fvar, pi)
 
         return - first_term + second_term 
-    
+
 
 class ARMultiClass(Likelihood):
     def __init__(self, num_classes, input_dim, num_data, seed, dtype, device):

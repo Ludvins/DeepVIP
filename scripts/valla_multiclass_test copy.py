@@ -17,11 +17,13 @@ from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit_map_crossentropy, fit, predict, forward, score, acc_multiclass
 from scripts.filename import create_file_name
 from src.generative_functions import *
-from src.sparseLA import VaLLA, GPLLA
+from src.sparseLA import VaLLAMultiClassSubset, GPLLA
 from src.likelihood import GaussianMultiClass, MultiClass
 from src.backpack_interface import BackPackInterface
 
-from utils.models import get_mlp, MLP
+from torch.profiler import profile, record_function, ProfilerActivity
+
+from utils.models import MLP
 from utils.dataset import get_dataset, Test_Dataset
 from laplace import Laplace
 args = manage_experiment_configuration()
@@ -42,18 +44,16 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-
 f = MLP(train_dataset.inputs.shape[1], args.dataset.output_dim, 1, 100,
             torch.nn.Tanh,
             device = args.device, dtype = args.dtype)
-
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr)
 criterion = torch.nn.CrossEntropyLoss()
 
 try:
-    f.load_state_dict(torch.load("weights/multiclass_weig2hts_"+args.dataset_name))
+    f.load_state_dict(torch.load("weights/multiclass_weights_"+args.dataset_name))
 except:
     # Set the number of training samples to generate
     # Train the model
@@ -89,6 +89,9 @@ except:
 
     torch.save(f.state_dict(), "weights/multiclass_weights_"+args.dataset_name)
 
+for param in f.parameters():
+    param.requires_grad = False
+
 #Z = kmeans2(train_dataset.inputs, args.num_inducing, minit="points", seed=args.seed)
 
 rng = np.random.default_rng(args.seed)
@@ -98,9 +101,10 @@ indexes = rng.choice(np.arange(train_dataset.inputs.shape[0]),
 Z = train_dataset.inputs[indexes]
 classes = train_dataset.targets[indexes].flatten()
 
-sparseLA = VaLLA(
-    f.forward,
+sparseLA = VaLLAMultiClassSubset(
+    f,
     Z, 
+    n_classes_subsampled=2,
     inducing_classes = classes,
     alpha = args.bb_alpha,
     prior_std=args.prior_std,
@@ -131,15 +135,17 @@ if os.path.isfile(path):
 else:
     print("Pre-trained weights not found")
     start = timer()
+
     loss = fit(
-        sparseLA,
-        train_loader,
-        opt,
-        use_tqdm=True,
-        return_loss=True,
-        iterations=args.iterations,
-        device=args.device,
-    )
+                sparseLA,
+                train_loader,
+                opt,
+                use_tqdm=True,
+                return_loss=True,
+                iterations=args.iterations,
+                device=args.device,
+            )
+            
     end = timer()
     fig, axis = plt.subplots(3, 1, figsize=(15, 20))
     axis[0].plot(loss)
@@ -151,7 +157,7 @@ else:
     axis[2].plot(sparseLA.kl_history)
     axis[2].set_title("KL")
 
-    #plt.show()
+    plt.show()
     #plt.clf()
 
     #torch.save(sparseLA.state_dict(), path)
@@ -161,9 +167,3 @@ sparseLA.print_variables()
 
 _, valla_var = forward(sparseLA, test_loader)
 
-
-
-df.to_csv(
-    path_or_buf="results/VaLLA_dataset={}_M={}_prior={}_seed={}.csv".format(args.dataset_name,args.num_inducing, str(args.prior_std), args.seed),
-    encoding="utf-8",
-)

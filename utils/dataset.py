@@ -50,7 +50,7 @@ class Training_Dataset(Dataset):
             print("Labels standard deviation: ", self.targets_std)
 
     def __getitem__(self, index):
-        return self.inputs[index], self.targets[index], index
+        return self.inputs[index], self.targets[index]
 
     def __len__(self):
         return len(self.inputs)

@@ -29,18 +29,30 @@ for f in res1:
 df = pd.concat(df)
 VaLLA = df.loc[:, (df != df.iloc[0]).any()] 
 
+res1 = [i for i in glob.glob('results/SubVaLLA_dataset=Spiral3*')]
+df = []
+for f in res1:
+    try: 
+        df.append(pd.read_csv(f))
+    except:
+        continue
+df = pd.concat(df)
+SVaLLA = df.loc[:, (df != df.iloc[0]).any()] 
 
 def std(x):
     return np.std(x)/np.sqrt(len(x))
 
 VaLLA = VaLLA.astype({'M':'int'})
+SVaLLA = SVaLLA.astype({'M':'int'})
+
 ELLA = ELLA.astype({'M':'int'})
 plt.rcParams['pdf.fonttype'] = 42
 
 VaLLA["model"] = "VaLLA"
+SVaLLA["model"] = "SVaLLA"
 ELLA["model"] = "ELLA"
 
-df = pd.concat([VaLLA, ELLA])
+df = pd.concat([SVaLLA, VaLLA, ELLA])
 
 print(df)
 print(df.groupby(["model", "M"]).mean())

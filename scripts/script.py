@@ -3,7 +3,7 @@ import subprocess
 inducing = [5, 10, 20, 30, 40, 50]
 
 a = "c:/Users/Ludvins/Documents/DeepVIP/.venv_laplace/Scripts/python.exe "
-b = "c:/Users/Ludvins/Documents/DeepVIP/scripts/valla_multiclass2D.py "
+b = "c:/Users/Ludvins/Documents/DeepVIP/scripts/ella_multiclass2D.py "
 d = "c:/Users/Ludvins/Documents/DeepVIP/scripts/valla_aram_multiclass2D.py "
 
 for i in inducing:

@@ -53,7 +53,7 @@ opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr)
 criterion = torch.nn.CrossEntropyLoss()
 
 try:
-    f.load_state_dict(torch.load("weights/multiclass_weights_"+args.dataset_name))
+    f.load_state_dict(torch.load("weights/multiclass_weig2hts_"+args.dataset_name))
 except:
     # Set the number of training samples to generate
     # Train the model
@@ -134,11 +134,8 @@ if os.path.isfile(path):
 else:
     print("Pre-trained weights not found")
     start = timer()
-    
-    with profile(activities=[ProfilerActivity.CPU], record_shapes=True, with_modules = True) as prof:
-        with record_function("model_inference"):
-        
-            loss = fit(
+
+    loss = fit(
                 sparseLA,
                 train_loader,
                 opt,
@@ -148,8 +145,6 @@ else:
                 device=args.device,
             )
             
-    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=30))
-    exit()
     end = timer()
     fig, axis = plt.subplots(3, 1, figsize=(15, 20))
     axis[0].plot(loss)
@@ -161,7 +156,7 @@ else:
     axis[2].plot(sparseLA.kl_history)
     axis[2].set_title("KL")
 
-    #plt.show()
+    plt.show()
     #plt.clf()
 
     #torch.save(sparseLA.state_dict(), path)
@@ -169,5 +164,6 @@ else:
 
 sparseLA.print_variables()
 
+input()
 _, valla_var = forward(sparseLA, test_loader)
 

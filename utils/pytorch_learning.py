@@ -78,12 +78,12 @@ def fit_map_crossentropy(
 
     for _ in iters:
         try:
-            inputs, target, _ = next(data_iter)
+            inputs, target = next(data_iter)
         except StopIteration:
             # StopIteration is thrown if dataset ends
             # reinitialize data loader
             data_iter = iter(training_generator)
-            inputs, target, _ = next(data_iter)
+            inputs, target = next(data_iter)
         inputs = inputs.to(device).to(dtype)
         target = target.to(device).to(dtype)
         
@@ -207,15 +207,15 @@ def fit(
 
     for _ in iters:
         try:
-            inputs, target, indexes = next(data_iter)
+            inputs, target = next(data_iter)
         except StopIteration:
             # StopIteration is thrown if dataset ends
             # reinitialize data loader
             data_iter = iter(training_generator)
-            inputs, target, indexes = next(data_iter)
+            inputs, target = next(data_iter)
         inputs = inputs.to(device)
         target = target.to(device)
-        loss = model.train_step(optimizer, inputs, target, indexes= indexes)
+        loss = model.train_step(optimizer, inputs, target)
         if return_loss:
             losses.append(loss.detach().cpu().numpy())
 
