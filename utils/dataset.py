@@ -68,7 +68,7 @@ class Test_Dataset(Dataset):
     def __getitem__(self, index):
         if self.targets is None:
             return self.inputs[index]
-        return self.inputs[index], self.targets[index], index
+        return self.inputs[index], self.targets[index]
 
     def __len__(self):
         return len(self.inputs)
@@ -138,26 +138,25 @@ class SPGP_Dataset(DVIPDataset):
         targets = np.loadtxt("data/SPGP_dist/train_outputs")
         test_inputs = np.loadtxt("data/SPGP_dist/test_inputs")
         #test_inputs = np.linspace(-40, 50, 200)
-        mask = ...#((inputs < 1.5) | (inputs > 3.5)).flatten()
-
-        
+        mask = ((inputs < 1.5) | (inputs > 3.5)).flatten()
+        mask2 = ((inputs >= 1.5) & (inputs <= 3.5)).flatten()
         
         self.train = Training_Dataset(
             inputs[mask, np.newaxis],
             targets[mask, np.newaxis],
-            normalize_targets=True,
-            normalize_inputs=True,
+            normalize_targets=False,
+            normalize_inputs=False,
         )
 
         self.full = Test_Dataset(
-            inputs[mask, np.newaxis],
-            targets[mask, np.newaxis],
+            inputs[:, np.newaxis],
+            targets[:, np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            test_inputs[..., np.newaxis],
-            None,
+            inputs[mask2, np.newaxis],
+            targets[mask2, np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
@@ -250,12 +249,12 @@ class Synthetic2_Dataset(DVIPDataset):
             inputs[..., np.newaxis],
             targets[..., np.newaxis],
             normalize_targets=True,
-            normalize_inputs=False,
+            normalize_inputs=True,
         )
 
         self.full = Test_Dataset(
-            inputs[..., np.newaxis],
-            targets[..., np.newaxis],
+            test_inputs[..., np.newaxis],
+            None,
             self.train.inputs_mean,
             self.train.inputs_std,
         )
@@ -353,7 +352,6 @@ class MNIST_Dataset(DVIPDataset):
 
         train_data = train.data.reshape(60000, -1) / 255.0
         test_data = test.data.reshape(10000, -1) / 255.0
-
         train_targets = train.targets.reshape(-1, 1)
         test_targets = test.targets.reshape(-1, 1)
 
@@ -385,7 +383,136 @@ class MNIST_Dataset(DVIPDataset):
 
     def len_train(self, test_size):
         return 60000
+    
 
+    
+class MNIST_FMNIST_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "multiclass"
+        self.classes = 10
+        self.output_dim = 10
+        train = datasets.MNIST(
+            root="./data", train=True, download=True, transform=transforms.ToTensor()
+        )
+        test2 = datasets.FashionMNIST(
+            root="./data",
+            train=False,
+            download=True,
+            transform=transforms.ToTensor(),
+        )
+        test1 = datasets.MNIST(
+            root="./data",
+            train=False,
+            download=True,
+            transform=transforms.ToTensor(),
+        )
+
+        train_data = train.data.reshape(60000, -1) / 255.0
+        test1_data = test1.data.reshape(10000, -1) / 255.0
+        test2_data = test2.data.reshape(10000, -1) / 255.0
+        
+        
+        test_data = np.concatenate([test1_data, test2_data])
+
+        train_targets = train.targets.reshape(-1, 1)
+        test1_targets = test1.targets.reshape(-1, 1)
+        
+        test_targets = np.concatenate([np.zeros(test1_data.shape[0]), np.ones(test2_data.shape[0])]).reshape(-1, 1)
+
+
+        self.train = Training_Dataset(
+            train_data.numpy(),
+            train_targets.numpy(),
+            normalize_targets=False,
+            normalize_inputs=False,
+        )
+
+        self.full = Test_Dataset(
+            test1_data.numpy(),
+            test1_targets.numpy(),
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_data,
+            test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return 70000
+
+    def get_split(self, *args):
+        return self.train, self.full, self.test
+
+    def len_train(self, test_size):
+        return 60000
+
+
+class CIFAR10_SVHN_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "multiclass"
+        self.classes = 10
+        self.output_dim = 10
+        train = datasets.CIFAR10(
+            root="./data", train=True, download=True, transform=transforms.ToTensor()
+        )
+        test2 = datasets.SVHN(
+            root="./data",
+            split="test",
+            download=True,
+            transform=transforms.ToTensor(),
+        )
+        test1 = datasets.CIFAR10(
+            root="./data",
+            train=False,
+            download=True,
+            transform=transforms.ToTensor(),
+        )
+
+
+        train_data = train.data.reshape(50000, -1) / 255.0
+        test1_data = test1.data.reshape(10000, -1) / 255.0
+        test2_data = test2.data.reshape(26032, -1) / 255.0
+    
+        
+        test_data = np.concatenate([test1_data, test2_data])
+
+        train_targets = np.array(train.targets).reshape(-1, 1)
+        test1_targets = np.array(test1.targets).reshape(-1, 1)
+        
+        
+        test_targets = np.concatenate([np.zeros(test1_data.shape[0]), np.ones(test2_data.shape[0])]).reshape(-1, 1)
+
+        self.train = Training_Dataset(
+            train_data,
+            train_targets,
+            normalize_targets=False,
+            normalize_inputs=False,
+        )
+
+        self.full = Test_Dataset(
+            test1_data,
+            test1_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_data,
+            test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return 60000
+
+    def get_split(self, *args):
+        return self.train, self.full, self.test
+
+    def len_train(self, test_size):
+        return 50000
 
 class Banana_Dataset(DVIPDataset):
     def __init__(self):
@@ -499,6 +626,8 @@ def get_dataset(dataset_name):
         "synthetic2": Synthetic2_Dataset,
         "syntheticBinary": SyntheticBinary_Dataset,
         "MNIST": MNIST_Dataset,
+        "MNIST_OOD": MNIST_FMNIST_Dataset,
+        "Cifar10_OOD": CIFAR10_SVHN_Dataset,
         "Banana": Banana_Dataset,
         "Moons": Two_Moons,
         "Spiral": Spiral,

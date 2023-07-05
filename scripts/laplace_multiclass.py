@@ -86,7 +86,7 @@ subset = "all"
 # 'full', 'kron', 'lowrank' and 'diag'
 hessian = "full"
 X = test_dataset.inputs
-la = Laplace(f[:-1], 'classification', subset_of_weights=subset, hessian_structure=hessian)
+la = Laplace(f[:-1], 'classification', subset_of_weights=subset, hessian_structure=hessian, prior_precision = 1/args.prior_std**2)
 train_dataset.targets = torch.tensor(train_dataset.targets.squeeze(-1)).to(torch.long)
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 

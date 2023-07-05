@@ -31,12 +31,12 @@ def fit_map(
 
     for _ in iters:
         try:
-            inputs, target, _ = next(data_iter)
+            inputs, target = next(data_iter)
         except StopIteration:
             # StopIteration is thrown if dataset ends
             # reinitialize data loader
             data_iter = iter(training_generator)
-            inputs, target, _ = next(data_iter)
+            inputs, target = next(data_iter)
         inputs = inputs.to(device)
         target = target.to(device)
         
@@ -122,7 +122,7 @@ def acc_multiclass(
     total = 0
     
     for _ in iters:
-        inputs, target, _ = next(data_iter)
+        inputs, target = next(data_iter)
         inputs = inputs.to(device).to(dtype)
         target = target.to(device).to(dtype)
         
@@ -222,7 +222,7 @@ def fit(
     return losses
 
 
-def score(model, generator, metrics, use_tqdm=False, device=None):
+def score(model, generator, metrics, use_tqdm=False, device=None, dtype = None, **kwargs):
     """
     Evaluates the given model using the arguments provided.
 
@@ -245,7 +245,7 @@ def score(model, generator, metrics, use_tqdm=False, device=None):
     # Set model in evaluation mode
     #model.eval()
     # Initialize metrics
-    metrics = metrics(len(generator.dataset), device=device)
+    metrics = metrics(len(generator.dataset), device=device, dtype = dtype, **kwargs)
 
     if use_tqdm:
         # Initialize TQDM bar
@@ -255,17 +255,17 @@ def score(model, generator, metrics, use_tqdm=False, device=None):
         iters = range(len(generator))
     data_iter = iter(generator)
 
-   
+
     # Batches evaluation
     for _ in iters:
         data, target = next(data_iter)
         data = data.to(device)
         target = target.to(device)
-        loss, F = model.test_step(data, target)
+        loss, Fmean, Fvar = model.test_step(data, target)
         # log_likelihood = model.predict_logdensity(data, target)
         # Update mertics using this batch
         metrics.update(
-            target, loss, F, model.likelihood
+            target, loss, Fmean, Fvar
         )
     # Return metrics as a dictionary
     return metrics.get_dict()
@@ -299,18 +299,19 @@ def predict(model, generator, device=None):
     # Create containers
     means, vars = [], []
 
-    # Look over batches of data.
-    for idx, data in enumerate(generator):
-        # Consider datasets with no targets, just input values.
-        try:
-            batch_x, _, _ = data
-        except:
-            batch_x = data
-        # Create batched predictions
-        batch_means, batch_vars = model.predict_mean_and_var(batch_x.to(device))
-        # Apped to the arrays
-        means.append(batch_means.detach().cpu().numpy())
-        vars.append(batch_vars.detach().cpu().numpy())
+    with torch.no_grad():
+        # Look over batches of data.
+        for idx, data in enumerate(generator):
+            # Consider datasets with no targets, just input values.
+            try:
+                batch_x, _, _ = data
+            except:
+                batch_x = data
+            # Create batched predictions
+            batch_means, batch_vars = model.predict_mean_and_var(batch_x.to(device))
+            # Apped to the arrays
+            means.append(batch_means.detach().cpu().numpy())
+            vars.append(batch_vars.detach().cpu().numpy())
 
     # Concatenate batches on second dimension, the first
     # corresponds to the mixture.

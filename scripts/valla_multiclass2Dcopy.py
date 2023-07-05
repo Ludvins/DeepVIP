@@ -46,7 +46,7 @@ def s():
 
 
 f = get_mlp(train_dataset.inputs.shape[1], args.dataset.output_dim, 
-            [50, 50], torch.nn.Tanh,
+            [1], torch.nn.Tanh,
             device = args.device, dtype = args.dtype)
 
 # Define optimizer and compile model
@@ -89,7 +89,7 @@ classes = train_dataset.targets[indexes].flatten()
 sparseLA = VaLLAMultiClassSubset(
     f.forward,
     Z, 
-    n_classes_subsampled = 1,
+    n_classes_subsampled = 2,
     inducing_classes = classes,
     prior_std=args.prior_std,
     likelihood=GaussianMultiClassSubset(device=args.device, 
@@ -105,8 +105,13 @@ sparseLA = VaLLAMultiClassSubset(
     dtype=args.dtype,)
 
 
+print(f)
+
 sparseLA.print_variables()
 
+torch.manual_seed(args.seed)
+# Initialize DataLoader
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 opt = torch.optim.Adam(sparseLA.parameters(), lr=args.lr)
 
 path = "weights/valla_multiclass_weights_{}_{}".format(str(args.num_inducing), str(args.iterations))

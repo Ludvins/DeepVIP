@@ -19,3 +19,4 @@ results/results4
 *.pdf
 demos/data/*
 .venv_laplace/*
+weights/multiclass_weights_Spiral3*

@@ -3,7 +3,6 @@ import argparse
 import numpy as np
 import torch
 
-from utils.metrics import MetricsClassification, MetricsRegression
 from .dataset import get_dataset
 
 
@@ -24,6 +23,12 @@ def manage_experiment_configuration(args=None):
 
     if args.dtype == "float64":
         FLAGS["dtype"] = torch.float64
+    if args.dtype == "float32":
+        FLAGS["dtype"] = torch.float32   
+
+    args.dataset = get_dataset(args.dataset_name)
+    
+    
 
     return args
 
@@ -110,6 +115,17 @@ def get_parser():
         "--prior_std",
         type=float,
         default=1,
+    )
+    
+    parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=0,
+    )
+    parser.add_argument(
+        "--sub_classes",
+        type=int,
+        default=-1,
     )
     
     parser.add_argument(

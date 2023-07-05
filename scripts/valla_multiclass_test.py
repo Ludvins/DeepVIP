@@ -44,9 +44,8 @@ train_test_loader = DataLoader(train_test_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-f = MLP(train_dataset.inputs.shape[1], args.dataset.output_dim, 1, 100,
-            torch.nn.Tanh,
-            device = args.device, dtype = args.dtype)
+f = MLP(train_dataset.inputs.shape[1], args.dataset.output_dim, 2, 100,
+            torch.nn.Tanh, args.device, args.dtype)
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr)

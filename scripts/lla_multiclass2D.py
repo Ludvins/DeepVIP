@@ -46,7 +46,7 @@ def s():
 
 f = get_mlp(train_dataset.inputs.shape[1], args.dataset.output_dim, 
             [50, 50], torch.nn.Tanh,
-            args.device, args.dtype)
+            device = args.device, dtype =args.dtype)
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr)
@@ -123,7 +123,7 @@ positions = np.vstack([X.ravel(), Y.ravel()]).T
 
 def sigmoid(x):
     return (1/(1 + np.exp(-x)))
-map_pred_pos = f[:-1](torch.tensor(positions, device = args.device, dtype = args.dtype)).detach().cpu().numpy().reshape(n_samples, n_samples, 3)
+map_pred_pos = f(torch.tensor(positions, device = args.device, dtype = args.dtype)).detach().cpu().numpy().reshape(n_samples, n_samples, 3)
 
 cp = axis[1][0].contourf(X, Y, map_pred_pos[:, :, 0], cmap = plt.get_cmap('Blues'))
 divider = make_axes_locatable(axis[1][0])
@@ -180,3 +180,4 @@ for i in range(3):
 
 
 plt.savefig("LLA_{}_prior={}.pdf".format(args.dataset_name, str(args.prior_std)), bbox_inches='tight')
+plt.show()

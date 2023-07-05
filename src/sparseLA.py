@@ -209,7 +209,7 @@ class VaLLA(torch.nn.Module):
         if self.dtype != y.dtype:
             y = y.to(self.dtype)
 
-        mean_pred, var_pred = self.predict_mean_and_var(X)  # Forward pass
+        Fmean, Fvar = self(X)  # Forward pass
 
         # Temporarily change the num data variable so that the
         # scale of the likelihood is correctly computed on the
@@ -220,7 +220,7 @@ class VaLLA(torch.nn.Module):
         loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
         self.num_data = num_data
 
-        return loss, mean_pred, var_pred
+        return loss, Fmean, Fvar
 
     def jacobian_features(self, X, dims = None):
         """
@@ -341,8 +341,7 @@ class VaLLA(torch.nn.Module):
         # Shape (output_dim, batch_size, num_inducing)
         Kxz = torch.einsum("nas, ms -> anm", phi_x, phi_z)
         # Shape (num_inducing, num_inducing)
-        self.Kz = torch.einsum("ns, ms -> nm", phi_z, phi_z) 
-            
+        self.Kz = torch.einsum("ns, ms -> nm", phi_z, phi_z)             
             
         # Compute auxiliar matrices
         # Shape [num_inducing, num_inducing]
@@ -503,6 +502,74 @@ class VaLLA(torch.nn.Module):
     
     def freeze_inducing(self):
         self.inducing_locations.requires_grad = False
+
+
+class VaLLA_Optimized(VaLLA):
+    
+    def compute_kernels(self, X):
+        
+        F_mean, Kx_diag, Kxz, Kz  = self.net.get_full_kernels(X, self.inducing_locations, self.inducing_class)
+        Kx_diag = self.prior_std ** 2 * Kx_diag
+        Kxz = self.prior_std ** 2 * Kxz
+        Kz = self.prior_std ** 2 * Kz
+        
+        return F_mean, Kx_diag, Kxz, Kz
+        
+    def forward(self, X):
+        """
+        Performs the mean and covariance matrix of the given input.
+        
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+            
+        Returns
+        -------
+        mean_pred : torch tensor of size (batch_size, output_dim)
+                    Predictive mean of the model on the given batch
+        var_pred : torch tensor of size (batch_size, output_dim, output_dim)
+                   Contains the covariance matrix of the model for each element on 
+                   the batch.
+        """
+
+        # Transform flattened cholesky decomposition parameter into matrix
+        L = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
+        li, lj = torch.tril_indices(self.num_inducing, self.num_inducing)
+        # Shape (num_inducing, num_inducing)
+        L[li, lj] = self.L
+        
+        F_mean, Kx_diag, Kxz, Kz = self.compute_kernels(X)
+        
+        # Clean gradients of inducing locations
+        self.inducing_locations.grad = None
+        
+        self.Kz = Kz
+            
+        # Compute auxiliar matrices
+        # Shape [num_inducing, num_inducing]
+        #H = I + L^T @ self.Kz @ L
+        I = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
+        
+        self.H = I + L.T @ self.Kz @ L
+        
+        # Shape [num_inducing, num_inducing]
+        #A = L @ H^{-1} @ L^T
+        self.A = L @ torch.linalg.solve(self.H, L.T)
+
+        # Compute predictive diagonal
+        # Shape [output_dim, output_dim, batch_size, batch_size]
+        #K2 = Kxz @ A @ Kxz^T
+        K2 = torch.einsum("nma, ml, klb -> abnk", Kxz, self.A, Kxz)
+
+        # Shape [output_dim, output_dim, batch_size]
+        diag = torch.diagonal(K2, dim1=-2, dim2= -1)
+
+        # Shape [batch_size, output_dim, output_dim]
+        Fvar =  (Kx_diag.permute(1,2,0) - diag).permute(2, 0, 1) 
+        return F_mean, Fvar
+    
+
 
 class VaLLASampling(VaLLA):
     def name(self):
@@ -728,7 +795,10 @@ class VaLLAMultiClassSubset(VaLLA):
         backend, track_inducing_locations,fix_inducing_locations, inducing_classes,
         alpha, y_mean, y_std, device, dtype) 
         
-        self.n_classes_sub_sampled = n_classes_subsampled
+        if n_classes_subsampled == -1:
+            self.n_classes_sub_sampled = output_dim - 1
+        else:
+            self.n_classes_sub_sampled = n_classes_subsampled
         self.generator = torch.Generator(device = device)
         self.generator.manual_seed(seed)
 
@@ -842,6 +912,473 @@ class VaLLAMultiClassSubset(VaLLA):
         self.kl_history.append(KL.detach().cpu().numpy())
         return -scale * ell + KL
     
+    
+
+
+class VaLLAMultiClassSubsetOptimized(VaLLAMultiClassSubset):
+    def name(self):
+        return "Subsampling VaLLA"
+    
+    def __init__(
+        self,
+        net_forward,
+        Z,
+        prior_std,
+        likelihood,
+        num_data,
+        n_classes_subsampled,
+        output_dim,
+        backend,
+        track_inducing_locations = False,
+        fix_inducing_locations = False,
+        inducing_classes = None,
+        alpha = 0.0,
+        y_mean=0.0,
+        y_std=1.0,
+        device=None,
+        dtype=torch.float64,
+        seed = 2147483647
+    ):
+        super().__init__(net_forward, Z, prior_std, likelihood, num_data, n_classes_subsampled, output_dim,
+        backend, track_inducing_locations,fix_inducing_locations, inducing_classes,
+        alpha, y_mean, y_std, device, dtype, seed) 
+
+    def compute_inducing_term(self, Kz):
+
+        # Transform flattened cholesky decomposition parameter into matrix
+        L = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
+        li, lj = torch.tril_indices(self.num_inducing, self.num_inducing)
+        # Shape (num_inducing, num_inducing)
+        L[li, lj] = self.L
+        
+        # Compute auxiliar matrices
+        # Shape [num_inducing, num_inducing]
+        #H = I + L^T @ self.Kz @ L
+        I = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
+        self.H = I + torch.einsum("mn, ml, lk -> nk", L, Kz, L)
+        # Shape [num_inducing, num_inducing]
+        #A = L @ H^{-1} @ L^T
+        #self.A = torch.einsum("nm, ml, kl -> nk", L, torch.inverse(self.H), L)
+        self.A = L @ torch.linalg.solve(self.H, L.T)
+
+
+    def compute_kernels(self, X, classes):
+        
+        Kxx_diagonal, Kxz, Kzz, piT_Kxx_pi, piT_Kxz, pi = self.net.NTK(X, self.inducing_locations, classes, self.inducing_class)
+        Kxx_diagonal = self.prior_std ** 2 * Kxx_diagonal
+        Kxz = self.prior_std ** 2 * Kxz
+        Kzz = self.prior_std ** 2 * Kzz
+        piT_Kxx_pi = self.prior_std ** 2 * piT_Kxx_pi
+        piT_Kxz = self.prior_std ** 2 * piT_Kxz
+        
+        return Kxx_diagonal, Kxz, Kzz, piT_Kxx_pi, piT_Kxz, pi
+        
+        
+    def nelbo(self, X, y):
+        
+        # Get clases
+        F_mean = self.net(X)
+        max_class = torch.argmax(F_mean, 1).unsqueeze(-1)
+        all = torch.arange(0, self.output_dim).repeat((max_class.shape[0], 1))
+        others = all.masked_fill(all == max_class, -1)
+        mask = (others != -1).to(torch.float32)
+        chosen = torch.multinomial(mask, num_samples=self.n_classes_sub_sampled, replacement=False, generator = self.generator)
+        classes = torch.concat([max_class, chosen], dim = -1).to(torch.long)
+
+        #classes = torch.tile(torch.arange(0, 10, 1).unsqueeze(0), [classes.shape[0], 1])
+
+
+        Kxx_diagonal, Kxz, Kzz, piT_Kxx_pi, piT_Kxz, pi = self.compute_kernels(X, classes)
+        # Clean gradients of inducing locations
+        self.inducing_locations.grad = None
+        
+        # Computes inducing term. It is stored in self.A
+        self.compute_inducing_term(Kzz)
+        self.Kz = Kzz
+
+        K2 = torch.einsum("nm, ml, nl -> n", piT_Kxz, self.A, piT_Kxz)
+
+        pi_Fvar_pi = piT_Kxx_pi - K2
+        
+        Fvar = Kxx_diagonal - torch.einsum("nma, ml, nla -> na", Kxz, self.A,Kxz)
+        
+        pi_subset = torch.gather(pi, 1, classes)
+        scale = 1 / torch.sum(pi, -1)
+        trace_pi_Fvar = scale * torch.sum(pi_subset * Fvar, -1)
+
+        log_p = - trace_pi_Fvar + pi_Fvar_pi
+
+        # Aggregate on data dimension
+        ell = torch.sum(log_p)
+        # Scale loss term corresponding to minibatch size
+        scale = self.num_data
+        scale /= X.shape[0]
+
+        # Compute KL term
+        KL = self.compute_KL()
+
+        
+        self.ell_history.append((-scale * ell).detach().cpu().numpy())
+        self.kl_history.append(KL.detach().cpu().numpy())
+        return -scale * ell + KL
+
+
+    def forward(self, X):
+        
+        x, Kx, Kxz, Kzz = self.net.get_full_kernels(X, self.inducing_locations, self.inducing_class)
+
+        # Computes inducing term. It is stored in self.A
+        self.compute_inducing_term(self.prior_std ** 2 * Kzz)
+
+        # Compute predictive diagonal
+        # Shape [output_dim, output_dim, batch_size, batch_size]
+        #K2 = Kxz @ A @ Kxz^T
+        K2 = torch.einsum("amb, ml, alk -> abk", self.prior_std ** 2 * Kxz, self.A, self.prior_std ** 2 * Kxz)
+
+
+        # Shape [batch_size, output_dim, output_dim]
+        Fvar = self.prior_std ** 2 *  Kx - K2 
+
+        return x, Fvar    
+
+
+
+class VaLLAMultiClassInducing(torch.nn.Module):
+    def name(self):
+        return "Subsampling VaLLA"
+    
+    def __init__(
+        self,
+        net_forward,
+        Z,
+        prior_std,
+        likelihood,
+        num_data,
+        n_classes_subsampled,
+        output_dim,
+        backend,
+        track_inducing_locations = False,
+        fix_inducing_locations = False,
+        alpha = 0.0,
+        y_mean=0.0,
+        y_std=1.0,
+        device=None,
+        dtype=torch.float64,
+        seed = 2147483647
+    ):
+        super().__init__()
+        # Store data information
+        self.num_data = num_data
+        self.output_dim = output_dim
+        # Store Black-Box alpha value
+        self.alpha = alpha
+
+        # Store targets mean and std.
+        self.y_mean = torch.tensor(y_mean, device=device)
+        self.y_std = torch.tensor(y_std, device=device)
+        
+        self.backend = backend
+        self.net = net_forward
+        self.num_inducing = Z.shape[1]
+        
+        self.prior_std = torch.tensor(
+            prior_std, 
+            device = device,  
+            dtype = dtype)
+        
+        self.inducing_locations = torch.tensor(Z, device = device, dtype = dtype)
+        if not fix_inducing_locations:
+            self.inducing_locations = torch.nn.Parameter(self.inducing_locations)
+        
+        self.track_inducing_locations = track_inducing_locations
+        if track_inducing_locations:
+            self.inducing_history = [self.inducing_locations.clone().detach().cpu().numpy()]
+
+        # Store likelihood and Variational Implicit layers
+        self.likelihood = likelihood
+
+        # Set device and data type (precision)
+        self.device = device
+        self.dtype = dtype
+        
+        # Initialize cholesky decomposition of identity
+        I = np.eye(self.num_inducing)
+        
+        li, lj = torch.tril_indices(self.num_inducing, self.num_inducing)
+        triangular_q_sqrt = I[li, lj]
+        L = torch.tensor(
+            triangular_q_sqrt,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        
+        L = torch.tile(L.unsqueeze(-1), [1, self.output_dim])
+
+        self.L = torch.nn.Parameter(L)
+        self.ell_history = []
+        self.kl_history = []
+        
+        if n_classes_subsampled == -1:
+            self.n_classes_sub_sampled = output_dim - 1
+        else:
+            self.n_classes_sub_sampled = n_classes_subsampled
+            
+        self.generator = torch.Generator(device = device)
+        self.generator.manual_seed(seed)
+
+
+    def compute_inducing_term(self, Kz):
+
+        # Transform flattened cholesky decomposition parameter into matrix
+        # Identity matrix shape (num_inducing, num_inducing)
+        I = torch.eye(self.num_inducing, dtype = self.dtype, device = self.device)
+        # Tiled Identity matrix shape (num_inducing, num_inducing, output_dim)
+        L = torch.tile(I.unsqueeze(-1), [1,1, self.output_dim])
+        # Lower triangular indices
+        li, lj = torch.tril_indices(self.num_inducing, self.num_inducing)
+        # Set lower triangular part to the variational paramater
+        L[li, lj] = self.L
+        
+        # Compute auxiliar matrices
+        # H = I + L^T @ self.Kz @ L
+        #  c is classes dimension and n,m,l,k are used for inducing points
+        self.H = torch.eye(self.num_inducing).unsqueeze(0) + torch.einsum("mnc, mlc, lkc -> cnk", L, Kz, L)
+        
+        # A = L @ H^{-1} @ L^T
+        # Permute L from (num_inducing, num_inducing, class) to (class, num_inducing, num_inducing)
+        #  and solve X = H^{-1} L^T
+        # Lastly permute to set the class dimension to the end again
+        self.A = (L.permute(2, 0, 1) @ torch.linalg.solve(self.H, L.permute(2, 1, 0))).permute(1,2,0)
+
+
+    def compute_kernels(self, X, classes):
+        
+        Kxx_diagonal, Kxz, Kzz, pi = self.net.NTK2(X, self.inducing_locations, classes)
+        Kxx_diagonal = self.prior_std ** 2 * Kxx_diagonal
+        Kxz = self.prior_std ** 2 * Kxz
+        Kzz = self.prior_std ** 2 * Kzz
+
+        
+        return Kxx_diagonal, Kxz, Kzz, pi
+        
+    def nelbo(self, X, y):
+            
+        # Get clases
+        F_mean = self.net(X)
+        max_class = torch.argmax(F_mean, 1).unsqueeze(-1)
+        all = torch.arange(0, self.output_dim).repeat((max_class.shape[0], 1))
+        others = all.masked_fill(all == max_class, -1)
+        mask = (others != -1).to(torch.float32)
+        chosen = torch.multinomial(mask, num_samples=self.n_classes_sub_sampled, replacement=False, generator = self.generator)
+        classes = torch.concat([max_class, chosen], dim = -1).to(torch.long)
+        
+        Kxx_diagonal, Kxz, Kzz, pi = self.compute_kernels(X, classes)
+        self.Kz = Kzz
+        
+        # Computes inducing term. It is stored in self.A
+        self.compute_inducing_term(Kzz)
+        
+        # Compute predictive diagonal
+        # Shape [output_dim, output_dim, batch_size, batch_size]
+        #K2 = Kxz @ A @ Kxz^T
+        K2 = torch.einsum("bmc, mlc, blc -> bc", Kxz, self.A, Kxz)
+
+
+        # Shape [batch_size, output_dim]
+        Fvar = Kxx_diagonal - K2 
+        
+        aux = pi * Fvar
+        
+        pi_Fvar_pi = torch.sum(aux * pi, -1)
+        trace_pi_Fvar = torch.sum(aux, -1)
+        
+        log_p = - trace_pi_Fvar + pi_Fvar_pi
+
+        # Aggregate on data dimension
+        ell = torch.sum(log_p)
+        # Scale loss term corresponding to minibatch size
+        scale = self.num_data
+        scale /= X.shape[0]
+
+        # Compute KL term
+        KL = self.compute_KL()
+
+        
+        self.ell_history.append((-scale * ell).detach().cpu().numpy())
+        self.kl_history.append(KL.detach().cpu().numpy())
+        return -scale * ell + KL
+
+    def forward(self, X):
+        
+        x, Kx, Kxz, Kzz = self.net.get_full_kernels2(X, self.inducing_locations)
+        Kzz = self.prior_std ** 2 * Kzz
+        Kxz = self.prior_std ** 2 * Kxz
+        Kx = self.prior_std ** 2 * Kx
+        
+        # Computes inducing term. It is stored in self.A
+        self.compute_inducing_term(Kzz)
+        
+        # Compute predictive diagonal
+        # Shape [output_dim, output_dim, batch_size, batch_size]
+        #K2 = Kxz @ A @ Kxz^T
+        K2 = torch.einsum("bmc, mlc, blc -> bc", Kxz, self.A, Kxz)
+
+
+        # Shape [batch_size, output_dim, output_dim]
+        Fvar = Kx - K2 
+        Fvar = torch.block_diag(*list(Fvar.T)).unflatten(1, [self.output_dim, X.shape[0]]).permute(2,0,1)
+        
+
+        return x, Fvar   
+        
+
+    def train_step(self, optimizer, X, y):
+        """
+        Defines the training step for the DVIP model using a simple optimizer.
+        This method illustrates a standard training step. If more complex
+        operations are needed, such as optimizers with double steps,
+        create your own training step, calling this one is not compulsory.
+        Parameters
+        ----------
+        optimizer : torch.optim
+                    The considered optimization algorithm.
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input, must be standardized.
+        Returns
+        -------
+        loss : float
+               The nelbo of the model at the current state for the
+               given inputs.
+        """
+
+        # If targets are unidimensional,
+        # ensure there is a second dimension (N, 1)
+        if y.ndim == 1:
+            y = y.unsqueeze(-1)
+
+        # Transform inputs and largets to the model'd dtype
+        if self.dtype != X.dtype:
+            X = X.to(self.dtype)
+        if self.dtype != y.dtype:
+            y = y.to(self.dtype)
+
+        # Clear gradients
+        optimizer.zero_grad()
+
+        # Compute loss
+        loss = self.nelbo(X, y)
+        
+        # Create backpropagation graph
+        loss.backward()
+        
+        # Make optimization step
+        optimizer.step()
+        
+        if self.track_inducing_locations:
+            self.inducing_history += [self.inducing_locations.clone().detach().cpu().numpy()]
+
+        return loss
+
+
+    def test_step(self, X, y):
+        """
+        Defines the test step for the DVIP model.
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input.
+        Returns
+        -------
+        loss : float
+               The nelbo of the model at the current state for the given inputs.
+        mean_pred : torch tensor of size (batch_size, output_dim)
+                    Predictive mean of the model on the given batch
+        var_pred : torch tensor of size (batch_size, output_dim, output_dim)
+                   Contains the covariance matrix of the model for each element on 
+                   the batch.
+        """
+
+        # In case targets are one-dimensional and flattened, add a final dimension.
+        if y.ndim == 1:
+            y = y.unsqueeze(-1)
+
+        # Cast types if needed.
+        if self.dtype != X.dtype:
+            X = X.to(self.dtype)
+        if self.dtype != y.dtype:
+            y = y.to(self.dtype)
+
+        Fmean, Fvar = self(X)  # Forward pass
+
+        # Temporarily change the num data variable so that the
+        # scale of the likelihood is correctly computed on the
+        # test dataset.
+        num_data = self.num_data
+        self.num_data = X.shape[0]
+        # Compute the loss with scaled data
+        loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
+        self.num_data = num_data
+
+        return loss, Fmean, Fvar
+    
+    
+    def compute_KL(self):
+        """
+        Computes the Kulback-Leibler divergence between the variational distribution
+        and the prior.
+        """
+        log_det = torch.logdet(self.H)
+        
+        trace = torch.sum(torch.diagonal(self.Kz.permute(2, 0, 1) @ self.A.permute(2, 0, 1), dim1 = -2, dim2 = -1), -1)
+        KL = 0.5 * log_det - 0.5 * trace
+
+        return torch.sum(KL)
+    
+
+    
+
+    def print_variables(self):
+        """Prints the model variables in a prettier format."""
+        import numpy as np
+
+        print("\n---- MODEL PARAMETERS ----")
+        np.set_printoptions(threshold=3, edgeitems=2)
+        sections = []
+        pad = "  "
+        for name, param in self.named_parameters():
+            name = name.split(".")
+            for i in range(len(name) - 1):
+
+                if name[i] not in sections:
+                    print(pad * i, name[i].upper())
+                    sections = name[: i + 1]
+
+            padding = pad * (len(name) - 1)
+            print(
+                padding,
+                "{}: ({})".format(name[-1], str(list(param.data.size()))[1:-1]),
+            )
+            print(
+                padding + " " * (len(name[-1]) + 2),
+                param.data.detach().cpu().numpy().flatten(),
+            )
+
+        print("\n---------------------------\n\n")
+
+    def freeze_ll(self):
+        for param in self.likelihood.parameters():
+            param.requires_grad = False
+
+    def freeze_cholesky(self):
+        self.L.requires_grad = False
+    
+    def freeze_inducing(self):
+        self.inducing_locations.requires_grad = False
+
 
 class OptimalVaLLA(VaLLA):
     def name(self):
@@ -1032,7 +1569,43 @@ class GPLLA(torch.nn.Module):
         # Set device and data type (precision)
         self.device = device
         self.dtype = dtype
-    
+
+
+
+    def test_step(self, X, y):
+        """
+        Defines the test step for the DVIP model.
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input.
+        Returns
+        -------
+        loss : float
+               The nelbo of the model at the current state for the given inputs.
+        mean_pred : torch tensor of size (batch_size, output_dim)
+                    Predictive mean of the model on the given batch
+        var_pred : torch tensor of size (batch_size, output_dim, output_dim)
+                   Contains the covariance matrix of the model for each element on 
+                   the batch.
+        """
+
+        # In case targets are one-dimensional and flattened, add a final dimension.
+        if y.ndim == 1:
+            y = y.unsqueeze(-1)
+
+        # Cast types if needed.
+        if self.dtype != X.dtype:
+            X = X.to(self.dtype)
+        if self.dtype != y.dtype:
+            y = y.to(self.dtype)
+
+        Fmean, Fvar = self(X)  # Forward pass
+        
+        return 0, Fmean, Fvar    
+
     def jacobian_features(self, X):
         Js, _ = self.backend.jacobians(x = X)
         return Js * self.prior_std
@@ -1089,6 +1662,87 @@ class GPLLA(torch.nn.Module):
         Fmu, F_var = self(X)
         return self.likelihood.predict_mean_and_var(Fmu, F_var)
 
+
+class GPLLA_Optimized(torch.nn.Module):
+    def name(self):
+        return "SparseLA"
+
+    def __init__(
+        self,
+        net,
+        prior_std,
+        likelihood_hessian,
+        likelihood,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__()
+
+        self.net = net
+
+        self.prior_std = torch.tensor(
+            prior_std, 
+            device = device,  
+            dtype = dtype)
+        
+        self.likelihood_hessian = likelihood_hessian
+        self.likelihood = likelihood
+        
+        
+        # Set device and data type (precision)
+        self.device = device
+        self.dtype = dtype
+    
+    
+    def fit(self, X_train, y_train):
+
+        self.X_train = X_train
+        # Shape (output_dim, output_dim, num_data, num_data)
+        Kx = self.net.get_kernel(X_train, X_train).permute(2, 0, 3, 1)
+
+        output_dim = Kx.shape[0]
+        n_data = Kx.shape[1]
+        
+        # Shape (output_dim, output_dim, num_data, num_data)
+        Lambda = self.likelihood_hessian(X_train, y_train)
+        Lambda = torch.diag_embed(Lambda)
+        
+        Lambda = Lambda.permute(0,2,1,3).flatten(start_dim = 0, end_dim = 1).flatten(start_dim = 1, end_dim = 2)
+        Lambda_inv = torch.inverse(Lambda + 1e-7 * torch.eye(Lambda.shape[0]))
+        Lambda_inv = Lambda_inv.unflatten(0, (output_dim, n_data)).unflatten(2, (output_dim, n_data))
+        # Shape (output_dim, output_dim, num_data, num_data)
+        K = Kx + Lambda_inv/(self.prior_std**2)
+        
+        K = K.flatten(start_dim = 0, end_dim = 1).flatten(start_dim = 1, end_dim = 2)
+        K_inv = torch.inverse(K + 1e-7 * torch.eye(K.shape[0]))
+        K_inv = K_inv.unflatten(0, (output_dim, n_data)).unflatten(2, (output_dim, n_data))
+        self.inv = K_inv.permute(0, 2, 1, 3)
+
+
+
+    def forward(self, X):
+        # Shape (batch_size, output_dim)
+        mean = self.net(X)
+        
+        # Shape (output_dim, output_dim, batch_size)
+        Kzz = self.net.get_kernel(X, X)
+        Kzz = torch.diagonal(Kzz, dim1=0, dim2 = 1).permute(2, 0, 1)
+
+        # Shape (output_dim, output_dim, batch_size, num_data)
+        Kzx = self.net.get_kernel(X, self.X_train).permute(2,3,0,1)
+
+        K2 =  torch.einsum("abnm, bcml, dcnl -> nad", Kzx, self.inv, Kzx)
+        # Shape (output_dim, output_dim, batch_size)
+        KLLA = Kzz - K2
+        
+        # Permute variance to have shape ( num_data, output_dim, output_dim)
+        return mean, self.prior_std**2 * KLLA
+
+    
+    def predict_mean_and_var(self, X):
+        Fmu, F_var = self(X)
+        return self.likelihood.predict_mean_and_var(Fmu, F_var)
+
         
 class ELLA(torch.nn.Module):
     def name(self):
@@ -1132,7 +1786,40 @@ class ELLA(torch.nn.Module):
         self.device = device
         self.dtype = dtype
         
+    def test_step(self, X, y):
+        """
+        Defines the test step for the DVIP model.
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input.
+        Returns
+        -------
+        loss : float
+               The nelbo of the model at the current state for the given inputs.
+        mean_pred : torch tensor of size (batch_size, output_dim)
+                    Predictive mean of the model on the given batch
+        var_pred : torch tensor of size (batch_size, output_dim, output_dim)
+                   Contains the covariance matrix of the model for each element on 
+                   the batch.
+        """
+
+        # In case targets are one-dimensional and flattened, add a final dimension.
+        if y.ndim == 1:
+            y = y.unsqueeze(-1)
+
+        # Cast types if needed.
+        if self.dtype != X.dtype:
+            X = X.to(self.dtype)
+        if self.dtype != y.dtype:
+            y = y.to(self.dtype)
+
+        Fmean, Fvar = self(X)  # Forward pass
         
+        return 0, Fmean, Fvar    
+    
     def jacobian_features(self, X, dims = None):
         """
         Computes the Jacobian of the deep model w.r.t the parameters evaluated on
@@ -1185,16 +1872,70 @@ class ELLA(torch.nn.Module):
                               )
 
         Lambda = self.likelihood_hessian(X_train, y_train)
-        Lambda = torch.diag_embed(Lambda)
 
         
         Jtrain, _ = self.backend.jacobians(x = X_train)
         phi_train = torch.einsum("mds, sk -> dmk", Jtrain, self.v)
         
-        G = torch.einsum("amk, abmn, bng -> kg", phi_train, Lambda, phi_train)
+        G = torch.einsum("ank, abn, bng -> kg", phi_train, Lambda, phi_train)
         G = G + torch.eye(self.K)/(self.prior_std**2)
         
         self.G_inv = torch.inverse(G)
+        
+    
+    def fit_loader(self, X_train, y_train, train_loader):
+        
+        rng = np.random.default_rng(self.seed)
+        indexes = rng.choice(np.arange(X_train.shape[0]),
+                             self.M, 
+                             replace = False)
+        self.Xz = X_train[indexes]
+
+        if self.output_size > 1:
+            phi_z, _  = self.jacobian_features(self.Xz, y_train[indexes].to(torch.long))
+        else:
+            phi_z, _  = self.jacobian_features(self.Xz)
+
+        phi_z = phi_z.squeeze(1)
+        
+        K = torch.einsum("ns, ms -> nm", phi_z, phi_z)
+
+        L, V = torch.linalg.eigh(K)
+
+        L = torch.abs(L[-self.K:]).flip(-1)
+        V = V[:, -self.K:].flip(-1)
+
+        self.v = torch.einsum("ms, mk -> sk", 
+                              phi_z,
+                              V/torch.sqrt(L).unsqueeze(0)
+                              )
+        
+        G = torch.eye(self.K, dtype = self.dtype)/(self.prior_std**2)
+        
+    
+        from tqdm import tqdm
+        iters = tqdm(range(len(train_loader)), unit="iteration")
+        iters.set_description("Evaluating ")
+
+        data_iter = iter(train_loader)
+
+    
+        # Batches evaluation
+        for _ in iters:
+
+            data, target = next(data_iter)
+            data = data.to(self.device).to(self.dtype)
+            target = target.to(self.device).to(self.dtype)
+
+            Lambda = self.likelihood_hessian(data, target)
+            
+            Jtrain, _ = self.backend.jacobians(x = data)
+            phi_train = torch.einsum("mds, sk -> dmk", Jtrain, self.v)
+            G += torch.einsum("amk, abm, bmg -> kg", phi_train, Lambda, phi_train)
+
+
+        self.G_inv = torch.inverse(G)
+
 
     def forward(self, X_test):
 
@@ -1213,3 +1954,146 @@ class ELLA(torch.nn.Module):
         Fmu, F_var = self(X)
         
         return self.likelihood.predict_mean_and_var(Fmu, F_var)
+
+
+
+class ELLA_Optimized(torch.nn.Module):
+    def name(self):
+        return "SparseLA"
+
+    def __init__(
+        self,
+        net,
+        output_size,
+        n_samples,
+        n_eigh,
+        prior_std,
+        likelihood_hessian,
+        likelihood,
+        seed,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__()
+
+        self.output_size = output_size
+        self.net = net
+        
+        self.M = n_samples
+        self.K = n_eigh
+        
+        self.seed = seed
+
+        self.prior_std = torch.tensor(
+            prior_std, 
+            device = device,  
+            dtype = dtype)
+        
+        self.likelihood_hessian = likelihood_hessian
+        
+        self.likelihood = likelihood
+        
+        # Set device and data type (precision)
+        self.device = device
+        self.dtype = dtype
+        
+    def test_step(self, X, y):
+        """
+        Defines the test step for the DVIP model.
+        Parameters
+        ----------
+        X : torch tensor of shape (batch_size, data_dim)
+            Contains the input features.
+        y : torch tensor of shape (batch_size, output_dim)
+            Targets of the given input.
+        Returns
+        -------
+        loss : float
+               The nelbo of the model at the current state for the given inputs.
+        mean_pred : torch tensor of size (batch_size, output_dim)
+                    Predictive mean of the model on the given batch
+        var_pred : torch tensor of size (batch_size, output_dim, output_dim)
+                   Contains the covariance matrix of the model for each element on 
+                   the batch.
+        """
+
+        # In case targets are one-dimensional and flattened, add a final dimension.
+        if y.ndim == 1:
+            y = y.unsqueeze(-1)
+
+        # Cast types if needed.
+        if self.dtype != X.dtype:
+            X = X.to(self.dtype)
+        if self.dtype != y.dtype:
+            y = y.to(self.dtype)
+
+        Fmean, Fvar = self(X)  # Forward pass
+        
+        return 0, Fmean, Fvar    
+        
+    
+    def fit_loader(self, X_train, y_train, train_loader):
+        
+        with torch.no_grad():
+            rng = np.random.default_rng(self.seed)
+            indexes = rng.choice(np.arange(X_train.shape[0]),
+                                self.M, 
+                                replace = False)
+            self.Xz = X_train[indexes]
+
+            phi_z = self.net.get_jacobian_on_outputs(self.Xz, y_train[indexes].to(torch.long).squeeze(-1))
+
+            phi_z = phi_z.squeeze(1)
+            
+            K = torch.einsum("ns, ms -> nm", phi_z, phi_z)
+
+            L, V = torch.linalg.eigh(K)
+
+            L = torch.abs(L[-self.K:]).flip(-1)
+            V = V[:, -self.K:].flip(-1)
+
+            self.v = torch.einsum("ms, mk -> sk", 
+                                phi_z,
+                                V/torch.sqrt(L).unsqueeze(0)
+                                )
+            
+            G = torch.eye(self.K, dtype = self.dtype)/(self.prior_std**2)
+            
+        
+            from tqdm import tqdm
+            iters = tqdm(range(len(train_loader)), unit="iteration")
+            iters.set_description("Training ")
+
+            data_iter = iter(train_loader)
+
+        
+            # Batches evaluation
+            for _ in iters:
+
+                data, target = next(data_iter)
+                data = data.to(self.device).to(self.dtype)
+                target = target.to(self.device).to(self.dtype)
+
+                Lambda = self.likelihood_hessian(data, target)
+                
+                Jtrain = self.net.get_jacobian(data)
+                phi_train = torch.einsum("mds, sk -> dmk", Jtrain, self.v)
+                G += torch.einsum("amk, abm, bmg -> kg", phi_train, Lambda, phi_train)
+
+
+            self.G_inv = torch.inverse(G)
+
+
+    def forward(self, X_test):
+
+        Jz = self.net.get_jacobian(X_test)
+
+        phi = torch.einsum("mds, sk -> dmk", Jz, self.v)
+
+        K_test = torch.einsum("ank, kg, bmg -> abnm", phi, self.G_inv, phi)
+
+        mean = self.net(X_test)
+        var = torch.diagonal(K_test, dim1 = -2, dim2= -1)
+        
+        return mean, var.permute(2, 0, 1)
+    
