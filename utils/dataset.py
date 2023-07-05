@@ -471,12 +471,10 @@ class CIFAR10_SVHN_Dataset(DVIPDataset):
             transform=transforms.ToTensor(),
         )
 
-
-        train_data = train.data.reshape(50000, -1) / 255.0
-        test1_data = test1.data.reshape(10000, -1) / 255.0
-        test2_data = test2.data.reshape(26032, -1) / 255.0
+        train_data = train.data.mean(-1).reshape(50000, -1) / 255.0
+        test1_data = test1.data.mean(-1).reshape(10000, -1) / 255.0
+        test2_data = test2.data.mean(1).reshape(26032, -1) / 255.0
     
-        
         test_data = np.concatenate([test1_data, test2_data])
 
         train_targets = np.array(train.targets).reshape(-1, 1)
@@ -627,7 +625,7 @@ def get_dataset(dataset_name):
         "syntheticBinary": SyntheticBinary_Dataset,
         "MNIST": MNIST_Dataset,
         "MNIST_OOD": MNIST_FMNIST_Dataset,
-        "Cifar10_OOD": CIFAR10_SVHN_Dataset,
+        "CIFAR10_OOD": CIFAR10_SVHN_Dataset,
         "Banana": Banana_Dataset,
         "Moons": Two_Moons,
         "Spiral": Spiral,
