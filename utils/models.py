@@ -52,7 +52,7 @@ class LinearLayerJacobian(nn.Module):
         out = x @ self.weight + self.bias
         return out, x
 
-    def backward(self, cache, dout, pi_dout = None):
+    def backward(self, cache, dout, pi_dout = None, inducing =False):
         """
         Computes the accumulated Jacobian of the layer and returns the Jacobian wrt
         the parameters at this layer.
@@ -107,7 +107,7 @@ class TanhJacobian(nn.Module):
         cache = x
         return torch.tanh(x), cache
 
-    def backward(self, cache, dout, pi_dout = None):
+    def backward(self, cache, dout, pi_dout = None, inducing = False):
         """
         Computes the acuumulated Jacobian of the layer. Let f denote the output of a full
         model using this layer, a denote the output of this layer and o denote its input.
@@ -135,8 +135,13 @@ class TanhJacobian(nn.Module):
         
         x = cache
         derivative = 1 - torch.tanh(x)**2
+
+        if inducing is True:
+
+            dout = torch.einsum("...ap, ...ap -> ...ap", dout, derivative)
+            return dout
+
         dout = torch.einsum("a...p, ...ap -> a...p", dout, derivative)
-        
         if pi_dout is not None:
             pi_dout = torch.einsum("a...p, ap -> a...p", pi_dout, derivative)
             return dout, pi_dout
@@ -301,7 +306,6 @@ class MLP(nn.Module):
         return torch.cat(J, -1)
     
     def get_jacobian_on_outputs(self, x, outputs_x):
-             
         # Arrays to store data from forward pass
         x_caches = []
         
@@ -342,15 +346,119 @@ class MLP(nn.Module):
             dx = self.layers[i].backward(i_x, dx)
 
         return torch.cat(J, -1)
-
     def get_full_kernels(self, x, z, outputs_z):
+        # x shape (batch_size, input_dim)
+        # z shape (num_inducing, input_dim)
+        # outputs_x shape (batch_size, num_outputs_x (usually 2))
+        # outputs_z shape (num_inducing)
+
+
+
+        # Arrays to store data from forward pass
+        x_caches = []
+        z_caches = []
+
+        # Forward pass
+        for layer in self.layers:
+            x, cache = layer(x)
+            x_caches.append(cache)
+            z, cache = layer(z)
+            z_caches.append(cache)
+
+
+        # Initial derivatives of each input, indentity matrices
+        # Shapes (points, output_dim, output_dim)
+        dx = torch.tile(torch.diag(torch.ones(x.shape[1], dtype = self.dtype, device = self.device)).unsqueeze(0),
+                        (x.shape[0], 1, 1))
+        dz = torch.tile(torch.diag(torch.ones(z.shape[1], dtype = self.dtype, device = self.device)).unsqueeze(0),
+                        (z.shape[0], 1, 1))
+
+        # Initialize Kernel Matrices for inputs and inducing locations
+        # Stores the diagonal of the kernel matrix on the input x
+        Kxx = torch.zeros(x.shape[0], x.shape[1], x.shape[1], device = self.device, dtype = self.dtype)
+        # Stores the kernel matrix on x and z
+        Kxz = torch.zeros(x.shape[0], z.shape[0],
+                          x.shape[1], device = self.device, dtype = self.dtype)
+        # Stores the kernel matrix on the inducing locations z
+        Kzz = torch.zeros(z.shape[0], z.shape[0], device = self.device, dtype = self.dtype)
+
+        # Reduce the second dimension to consider only the desired outputs for each input
+        # Shape (inducing_points, output_dim)
+        dz = torch.gather(dz, 1, torch.tile(outputs_z.unsqueeze(-1).unsqueeze(-1), (1,1,dz.shape[-1]))).squeeze(1)
+
+        # Backward pass
+        for i in range(len(self.layers)-1, -1, -1):
+
+            # Get stored inputs for the layer
+            i_x = x_caches[i]
+            i_z = z_caches[i]
+
+            # If layer is not activation layer
+            if self.layers[i].activation == False:
+
+                # Pre-compute the product of the inputs
+                #  a and b are used for point dimensions and i for units dimension
+                i_x_product = torch.einsum("ai, ai-> a", i_x, i_x)
+                i_xz_product = torch.einsum("ai, bi-> ab", i_x, i_z)
+                i_z_product = torch.einsum("ai, bi-> ab", i_z, i_z)
+
+
+                ###################################################
+                #####################  Kzz ########################
+
+                # Pre-compute outputs product
+                # a and b are inducing dimension and o is units dimension
+                output_product = torch.einsum("ao, bo -> ab", dz, dz)
+
+                # Weight contribution
+                Kzz += output_product * i_z_product
+                # Bias contribution
+                Kzz += output_product
+
+                ###################################################
+                ##################### diag(Kxx) ###################
+
+                # Pre-compute outputs product
+                # a is point dimension and o is output sumsampled dimensions and p is unit dimensions
+                output_product = torch.einsum("aop, aup -> aou", dx, dx)
+
+                # Weight contribution
+                Kxx += output_product * i_x_product.unsqueeze(-1).unsqueeze(-1)
+                # Bias contribution
+                Kxx += output_product
+
+                ###################################################
+                ####################### Kxz #######################
+
+                # Pre-compute outputs product
+                # a and b are point dimension and o is output sumsampled dimensions and p is unit dimensions
+                output_product = torch.einsum("aop, bp -> abo", dx, dz)
+
+                # Weight contribution
+                Kxz += output_product * i_xz_product.unsqueeze(-1)
+                # Bias contribution
+                Kxz += output_product
+
+            # Backward pass return the gradeint wrt the input (for the recursive calls)
+            #  and the gradients wrt the parameters of that layer.
+            # dx shape (batch_size, outputs_x, n_units)
+            # pi_dx shape (batch_size, n_units)
+            dx = self.layers[i].backward(i_x, dx)
+            # dz shape (n_inducing, n_units)
+            dz = self.layers[i].backward(i_z, dz)
+
+        return x, Kxx, Kxz, Kzz
+
+
+
+
+    def get_full_kernels_dependent(self, x, z, outputs_z):
         # x shape (batch_size, input_dim)
         # z shape (num_inducing, input_dim)
         # outputs_x shape (batch_size, num_outputs_x (usually 2))
         # outputs_z shape (num_inducing)
         
 
-        
         # Arrays to store data from forward pass
         x_caches = []
         z_caches = []
@@ -367,45 +475,44 @@ class MLP(nn.Module):
         # Shapes (points, output_dim, output_dim)
         dx = torch.tile(torch.diag(torch.ones(x.shape[1], dtype = self.dtype, device = self.device)).unsqueeze(0),
                         (x.shape[0], 1, 1))
-        dz = torch.tile(torch.diag(torch.ones(z.shape[1], dtype = self.dtype, device = self.device)).unsqueeze(0),
-                        (z.shape[0], 1, 1))
-        
+        dz = torch.tile(torch.diag(torch.ones(z.shape[2], dtype = self.dtype, device = self.device)).unsqueeze(0).unsqueeze(0),
+                        (z.shape[0], z.shape[1], 1, 1))
         # Initialize Kernel Matrices for inputs and inducing locations
         # Stores the diagonal of the kernel matrix on the input x
         Kxx = torch.zeros(x.shape[0], x.shape[1], x.shape[1], device = self.device, dtype = self.dtype)
         # Stores the kernel matrix on x and z
-        Kxz = torch.zeros(x.shape[0], z.shape[0],
+        Kxz = torch.zeros(x.shape[0], z.shape[1],
                           x.shape[1], device = self.device, dtype = self.dtype)
         # Stores the kernel matrix on the inducing locations z
-        Kzz = torch.zeros(z.shape[0], z.shape[0], device = self.device, dtype = self.dtype)
+        Kzz = torch.zeros(z.shape[0], z.shape[1], z.shape[1], device = self.device, dtype = self.dtype)
 
         # Reduce the second dimension to consider only the desired outputs for each input
         # Shape (inducing_points, output_dim)
-        dz = torch.gather(dz, 1, torch.tile(outputs_z.unsqueeze(-1).unsqueeze(-1), (1,1,dz.shape[-1]))).squeeze(1)
-        
+        dz = torch.gather(dz, 2,
+                          torch.tile(outputs_z.unsqueeze(-1).unsqueeze(-1).unsqueeze(0),
+                                     (z.shape[0],1,1,dz.shape[-1]))).squeeze(2)
         # Backward pass
         for i in range(len(self.layers)-1, -1, -1):
             
             # Get stored inputs for the layer
             i_x = x_caches[i] 
-            i_z = z_caches[i] 
-            
+            i_z = z_caches[i]
+
             # If layer is not activation layer 
             if self.layers[i].activation == False:
                 
                 # Pre-compute the product of the inputs
                 #  a and b are used for point dimensions and i for units dimension
                 i_x_product = torch.einsum("ai, ai-> a", i_x, i_x)
-                i_xz_product = torch.einsum("ai, bi-> ab", i_x, i_z)
-                i_z_product = torch.einsum("ai, bi-> ab", i_z, i_z)
+                i_xz_product = torch.einsum("ai, abi-> ab", i_x, i_z)
+                i_z_product = torch.einsum("cai, cbi-> cab", i_z, i_z)
                    
-                
                 ###################################################
                 #####################  Kzz ########################
                 
                 # Pre-compute outputs product
                 # a and b are inducing dimension and o is units dimension
-                output_product = torch.einsum("ao, bo -> ab", dz, dz)
+                output_product = torch.einsum("nao, nbo -> nab", dz, dz)
                 
                 # Weight contribution
                 Kzz += output_product * i_z_product
@@ -429,7 +536,7 @@ class MLP(nn.Module):
                 
                 # Pre-compute outputs product
                 # a and b are point dimension and o is output sumsampled dimensions and p is unit dimensions
-                output_product = torch.einsum("aop, bp -> abo", dx, dz)
+                output_product = torch.einsum("aop, abp -> abo", dx, dz)
                 
                 # Weight contribution
                 Kxz += output_product * i_xz_product.unsqueeze(-1)
@@ -442,8 +549,8 @@ class MLP(nn.Module):
             # pi_dx shape (batch_size, n_units)
             dx = self.layers[i].backward(i_x, dx)
             # dz shape (n_inducing, n_units)
-            dz = self.layers[i].backward(i_z, dz)
-                
+            dz = self.layers[i].backward(i_z, dz, inducing = True)
+
         return x, Kxx, Kxz, Kzz
     
     
@@ -550,14 +657,14 @@ class MLP(nn.Module):
                 
         return x, Kxx, Kxz, Kzz
     
-    
-    
+
+
     def NTK(self, x, z, outputs_x, outputs_z):
         # x shape (batch_size, input_dim)
         # z shape (num_inducing, input_dim)
         # outputs_x shape (batch_size, num_outputs_x (usually 2))
         # outputs_z shape (num_inducing)
-        
+
         # Initialize Kernel Matrices for inputs and inducing locations
         # Stores the diagonal of the kernel matrix on the input x
         Kxx_diagonal = torch.zeros(x.shape[0], outputs_x.shape[1], device = self.device, dtype = self.dtype)
@@ -571,6 +678,150 @@ class MLP(nn.Module):
         piT_Kxx_pi = torch.zeros(x.shape[0], device = self.device, dtype = self.dtype)
         # Stores the contribution of pi^T K(x,z) to the variational lower bound.
         piT_Kxz = torch.zeros(x.shape[0], z.shape[0], device = self.device, dtype = self.dtype)
+
+        # Arrays to store data from forward pass
+        x_caches = []
+        z_caches = []
+
+        # Forward pass
+        for layer in self.layers:
+            x, cache = layer(x)
+            x_caches.append(cache)
+            z, cache = layer(z)
+            z_caches.append(cache)
+
+        # Get probabilities of each class per each point using softmax activation
+        pi = torch.softmax(x, -1)
+
+        # Initial derivatives of each input, indentity matrices
+        # Shapes (points, output_dim, output_dim)
+        dx = torch.tile(torch.diag(torch.ones(x.shape[1], dtype = self.dtype, device = self.device)).unsqueeze(0),
+                        (x.shape[0], 1, 1))
+        dz = torch.tile(torch.diag(torch.ones(z.shape[1], dtype = self.dtype, device = self.device)).unsqueeze(0),
+                        (z.shape[0], 1, 1))
+
+
+        # Multiply the derivatives by pi on the second dimension, reducing it.
+        # Shape (batch_size, output_dim)
+        pi_dx = torch.einsum("bo, bop -> bp", pi, dx)
+
+        # Reduce the second dimension to consider only the desired outputs for each input
+        # Shape (batch_size, outputs_x (usually 2), output_dim)
+        dx = torch.gather(dx, 1, torch.tile(outputs_x.unsqueeze(-1), (1,1,dx.shape[-1])))
+        # Shape (inducing_points, output_dim)
+        dz = torch.gather(dz, 1, torch.tile(outputs_z.unsqueeze(-1).unsqueeze(-1), (1,1,dz.shape[-1]))).squeeze(1)
+
+        # Backward pass
+        for i in range(len(self.layers)-1, -1, -1):
+
+            # Get stored inputs for the layer
+            i_x = x_caches[i]
+            i_z = z_caches[i]
+
+            # If layer is not activation layer
+            if self.layers[i].activation == False:
+
+                # Pre-compute the product of the inputs
+                #  a and b are used for point dimensions and i for units dimension
+                i_x_product = torch.einsum("ai, ai-> a", i_x, i_x)
+                i_xz_product = torch.einsum("ai, bi-> ab", i_x, i_z)
+                i_z_product = torch.einsum("ai, bi-> ab", i_z, i_z)
+
+
+                ###################################################
+                #####################  Kzz ########################
+
+                # Pre-compute outputs product
+                # a and b are inducing dimension and o is units dimension
+                output_product = torch.einsum("ao, bo -> ab", dz, dz)
+
+                # Weight contribution
+                Kzz += output_product * i_z_product
+                # Bias contribution
+                Kzz += output_product
+
+                ###################################################
+                ###################  pi^T Kxz #####################
+
+                # Pre-compute outputs product
+                # a and b are point dimension and o is units dimension
+                output_product = torch.einsum("ao, bo -> ab", pi_dx, dz)
+
+                # Weight contribution
+                piT_Kxz += output_product * i_xz_product
+                # Bias contribution
+                piT_Kxz += output_product
+
+                ###################################################
+                ##################  pi^T Kxx pi ###################
+
+                # Pre-compute outputs product
+                # a is point dimension and o is units dimension
+                output_product = torch.einsum("ao, ao -> a", pi_dx, pi_dx)
+
+                # Weight contribution
+                piT_Kxx_pi += output_product * i_x_product
+                # Bias contribution
+                piT_Kxx_pi += output_product
+
+
+                ###################################################
+                ##################### diag(Kxx) ###################
+
+                # Pre-compute outputs product
+                # a is point dimension and o is output sumsampled dimensions and p is unit dimensions
+                output_product = torch.einsum("aop, aop -> ao", dx, dx)
+
+                # Weight contribution
+                Kxx_diagonal += output_product * i_x_product.unsqueeze(-1)
+                # Bias contribution
+                Kxx_diagonal += output_product
+
+                ###################################################
+                ####################### Kxz #######################
+
+                # Pre-compute outputs product
+                # a and b are point dimension and o is output sumsampled dimensions and p is unit dimensions
+                output_product = torch.einsum("aop, bp -> abo", dx, dz)
+
+                # Weight contribution
+                Kxz += output_product * i_xz_product.unsqueeze(-1)
+                # Bias contribution
+                Kxz += output_product
+
+            # Backward pass return the gradeint wrt the input (for the recursive calls)
+            #  and the gradients wrt the parameters of that layer.
+            # dx shape (batch_size, outputs_x, n_units)
+            # pi_dx shape (batch_size, n_units)
+            dx, pi_dx = self.layers[i].backward(i_x, dx, pi_dx)
+            # dz shape (n_inducing, n_units)
+            dz = self.layers[i].backward(i_z, dz)
+
+        return Kxx_diagonal, Kxz, Kzz, piT_Kxx_pi, piT_Kxz, pi
+
+
+    
+    def NTK_dependent(self, x, z, outputs_x, outputs_z):
+        # x shape (batch_size, input_dim)
+        # z shape (num_inducing, input_dim)
+        # outputs_x shape (batch_size, num_outputs_x (usually 2))
+        # outputs_z shape (num_inducing)
+        
+        # Initialize Kernel Matrices for inputs and inducing locations
+        # Stores the diagonal of the kernel matrix on the input x
+        Kxx_diagonal = torch.zeros(x.shape[0], outputs_x.shape[1],
+                                   device = self.device, dtype = self.dtype)
+        # Stores the kernel matrix on x and z
+        Kxz = torch.zeros(x.shape[0], z.shape[1],
+                          outputs_x.shape[1], device = self.device, dtype = self.dtype)
+        # Stores the kernel matrix on the inducing locations z
+        Kzz = torch.zeros(z.shape[0], z.shape[1], z.shape[1],
+                          device = self.device, dtype = self.dtype)
+
+        # Stores the contribucion of pi^T K(x,x) pi to the variational lower bound.
+        piT_Kxx_pi = torch.zeros(x.shape[0], device = self.device, dtype = self.dtype)
+        # Stores the contribution of pi^T K(x,z) to the variational lower bound.
+        piT_Kxz = torch.zeros(x.shape[0], z.shape[1], device = self.device, dtype = self.dtype)
         
         # Arrays to store data from forward pass
         x_caches = []
@@ -590,10 +841,9 @@ class MLP(nn.Module):
         # Shapes (points, output_dim, output_dim)
         dx = torch.tile(torch.diag(torch.ones(x.shape[1], dtype = self.dtype, device = self.device)).unsqueeze(0),
                         (x.shape[0], 1, 1))
-        dz = torch.tile(torch.diag(torch.ones(z.shape[1], dtype = self.dtype, device = self.device)).unsqueeze(0),
-                        (z.shape[0], 1, 1))
-        
-    
+        dz = torch.tile(torch.diag(torch.ones(z.shape[2], dtype = self.dtype, device = self.device)).unsqueeze(0).unsqueeze(0),
+                        (z.shape[0], z.shape[1], 1, 1))
+
         # Multiply the derivatives by pi on the second dimension, reducing it.
         # Shape (batch_size, output_dim)
         pi_dx = torch.einsum("bo, bop -> bp", pi, dx)
@@ -602,8 +852,9 @@ class MLP(nn.Module):
         # Shape (batch_size, outputs_x (usually 2), output_dim)
         dx = torch.gather(dx, 1, torch.tile(outputs_x.unsqueeze(-1), (1,1,dx.shape[-1])))
         # Shape (inducing_points, output_dim)
-        dz = torch.gather(dz, 1, torch.tile(outputs_z.unsqueeze(-1).unsqueeze(-1), (1,1,dz.shape[-1]))).squeeze(1)
-        
+        dz = torch.gather(dz, 2, torch.tile(outputs_z.unsqueeze(-1).unsqueeze(-1).unsqueeze(0), (dz.shape[0],1,1,dz.shape[-1]))).squeeze(2)
+
+
         # Backward pass
         for i in range(len(self.layers)-1, -1, -1):
             
@@ -617,8 +868,8 @@ class MLP(nn.Module):
                 # Pre-compute the product of the inputs
                 #  a and b are used for point dimensions and i for units dimension
                 i_x_product = torch.einsum("ai, ai-> a", i_x, i_x)
-                i_xz_product = torch.einsum("ai, bi-> ab", i_x, i_z)
-                i_z_product = torch.einsum("ai, bi-> ab", i_z, i_z)
+                i_xz_product = torch.einsum("ai, abi-> ab", i_x, i_z)
+                i_z_product = torch.einsum("cai, cbi-> cab", i_z, i_z)
                    
                 
                 ###################################################
@@ -626,7 +877,7 @@ class MLP(nn.Module):
                 
                 # Pre-compute outputs product
                 # a and b are inducing dimension and o is units dimension
-                output_product = torch.einsum("ao, bo -> ab", dz, dz)
+                output_product = torch.einsum("nao, nbo -> nab", dz, dz)
                 
                 # Weight contribution
                 Kzz += output_product * i_z_product
@@ -638,7 +889,7 @@ class MLP(nn.Module):
                 
                 # Pre-compute outputs product
                 # a and b are point dimension and o is units dimension
-                output_product = torch.einsum("ao, bo -> ab", pi_dx, dz)
+                output_product = torch.einsum("ao, abo -> ab", pi_dx, dz)
                 
                 # Weight contribution
                 piT_Kxz += output_product * i_xz_product
@@ -675,7 +926,7 @@ class MLP(nn.Module):
                 
                 # Pre-compute outputs product
                 # a and b are point dimension and o is output sumsampled dimensions and p is unit dimensions
-                output_product = torch.einsum("aop, bp -> abo", dx, dz)
+                output_product = torch.einsum("aop, abp -> abo", dx, dz)
                 
                 # Weight contribution
                 Kxz += output_product * i_xz_product.unsqueeze(-1)
@@ -688,7 +939,7 @@ class MLP(nn.Module):
             # pi_dx shape (batch_size, n_units)
             dx, pi_dx = self.layers[i].backward(i_x, dx, pi_dx)
             # dz shape (n_inducing, n_units)
-            dz = self.layers[i].backward(i_z, dz)
+            dz = self.layers[i].backward(i_z, dz, inducing = True)
                 
         return Kxx_diagonal, Kxz, Kzz, piT_Kxx_pi, piT_Kxz, pi
     

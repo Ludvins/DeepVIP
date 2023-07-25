@@ -145,7 +145,7 @@ class SPGP_Dataset(DVIPDataset):
             inputs[mask, np.newaxis],
             targets[mask, np.newaxis],
             normalize_targets=False,
-            normalize_inputs=False,
+            normalize_inputs=True,
         )
 
         self.full = Test_Dataset(
@@ -614,7 +614,114 @@ class Spiral(DVIPDataset):
         
         self.inputs = res[:, :-1]
         self.targets = res[:, -1][:, np.newaxis]
-        
+
+
+
+class Airline_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+
+        data = pd.read_csv("./data/airline.csv")
+        # Convert time of day from hhmm to minutes since midnight
+        data.ArrTime = 60 * np.floor(data.ArrTime / 100) + np.mod(data.ArrTime, 100)
+        data.DepTime = 60 * np.floor(data.DepTime / 100) + np.mod(data.DepTime, 100)
+
+        # Pick out the data
+        Y = data["ArrDelay"].values[:800000].reshape(-1, 1)
+        names = [
+            "Month",
+            "DayofMonth",
+            "DayOfWeek",
+            "plane_age",
+            "AirTime",
+            "Distance",
+            "ArrTime",
+            "DepTime",
+        ]
+        X = data[names].values[:800000]
+
+        self.n_train = 700000
+        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
+
+        self.train_test = Test_Dataset(
+            X[: self.n_train],
+            Y[: self.n_train],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            X[self.n_train :],
+            Y[self.n_train :],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return self.len_data
+
+    def len_train(self, test_size):
+        return self.n_train
+
+    def get_split(self, split, *args):
+        return self.train, self.train_test, self.test
+
+
+class Year_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "regression"
+        self.output_dim = 1
+        try:
+            data = pd.read_csv(
+                "./data/YearPredictionMSD.txt", header=None, delimiter=","
+            ).values
+        except:
+            url = "{}{}".format(uci_base, "00203/YearPredictionMSD.txt.zip")
+            with urlopen(url) as zipresp:
+                with ZipFile(BytesIO(zipresp.read())) as zfile:
+                    zfile.extractall("./data/")
+
+            data = pd.read_csv(
+                "./data/YearPredictionMSD.txt", header=None, delimiter=","
+            ).values
+
+        self.len_data = data.shape[0]
+
+        X = data[:, 1:]
+        Y = data[:, 0].reshape(-1, 1)
+
+        self.n_train = 400000
+        self.n_val = 63715
+        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
+
+        self.train_test = Test_Dataset(
+            X[:self.n_train],
+            Y[:self.n_train],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+        self.val = Test_Dataset(
+            X[self.n_train:self.n_train + self.n_val],
+            Y[self.n_train:self.n_train + self.n_val],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            X[self.n_train + self.n_val:],
+            Y[self.n_train + self.n_val:],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return self.len_data
+
+    def len_train(self, test_size):
+        return self.n_train
+
+    def get_split(self, split, *args):
+        return self.train, self.val, self.test
         
         
 def get_dataset(dataset_name):
@@ -631,6 +738,8 @@ def get_dataset(dataset_name):
         "Spiral": Spiral,
         "Spiral3": Spiral3,
         "Blobs": Three_Blobs,
+        "Airline": Airline_Dataset,
+        "Year": Year_Dataset
     }
 
     return d[dataset_name]()

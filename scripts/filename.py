@@ -10,7 +10,7 @@ def create_file_name(args):
 
     filename += "_layer=" + args.bnn_layer_str
     filename += "_num_inducing=" + str(args.num_inducing)
-    
+
     if args.fix_mean:
         filename += "_fixed_mean"
     if args.fix_variance:

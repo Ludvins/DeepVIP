@@ -1,15 +1,23 @@
 import torch
 
 from backpack import backpack, extend, memory_cleanup
-from backpack.extensions import DiagGGNExact, DiagGGNMC, KFAC, KFLR, SumGradSquared, BatchGrad
+from backpack.extensions import (
+    DiagGGNExact,
+    DiagGGNMC,
+    KFAC,
+    KFLR,
+    SumGradSquared,
+    BatchGrad,
+)
 from backpack.context import CTX
 
 from laplace.curvature import CurvatureInterface, GGNInterface, EFInterface
 from laplace.utils import Kron
 
+
 class BackPackInterface(CurvatureInterface):
-    """Interface for Backpack backend.
-    """
+    """Interface for Backpack backend."""
+
     def __init__(self, model, output_dim, last_layer=False, subnetwork_indices=None):
         super().__init__(model, "regression", last_layer, subnetwork_indices)
         extend(self._model)
@@ -46,9 +54,9 @@ class BackPackInterface(CurvatureInterface):
                 to_cat = []
                 for param in model.parameters():
                     to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
-                    delattr(param, 'grad_batch')
+                    delattr(param, "grad_batch")
                 Jk = torch.cat(to_cat, dim=1)
-                
+
             to_stack.append(Jk)
 
         model.zero_grad()
@@ -88,12 +96,11 @@ class BackPackInterface(CurvatureInterface):
             out = model(x)
 
             with backpack(BatchGrad(), retain_graph=True):
-
                 torch.gather(out, 1, c.unsqueeze(-1)).sum().backward(create_graph=True)
                 to_cat = []
                 for param in model.parameters():
                     to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
-                    delattr(param, 'grad_batch')
+                    delattr(param, "grad_batch")
                 Jk = torch.cat(to_cat, dim=1)
                 if self.subnetwork_indices is not None:
                     Jk = Jk[:, self.subnetwork_indices]
@@ -109,8 +116,8 @@ class BackPackInterface(CurvatureInterface):
             return torch.stack(to_stack, dim=2).transpose(1, 2), f
         else:
             return Jk.unsqueeze(-1).transpose(1, 2), f
-        
-        
+
+
 def _cleanup(module):
     for child in module.children():
         _cleanup(child)

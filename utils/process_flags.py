@@ -116,7 +116,13 @@ def get_parser():
         type=float,
         default=1,
     )
-    
+    parser.add_argument(
+        "--ll_var",
+        type=float,
+        default=-5,
+    )
+
+
     parser.add_argument(
         "--weight_decay",
         type=float,

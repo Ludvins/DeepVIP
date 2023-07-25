@@ -245,7 +245,7 @@ def score(model, generator, metrics, use_tqdm=False, device=None, dtype = None, 
     # Set model in evaluation mode
     #model.eval()
     # Initialize metrics
-    metrics = metrics(len(generator.dataset), device=device, dtype = dtype, **kwargs)
+    metrics = metrics(len(generator.dataset), device=device, dtype = dtype)
 
     if use_tqdm:
         # Initialize TQDM bar

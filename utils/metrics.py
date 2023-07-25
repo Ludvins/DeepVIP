@@ -35,17 +35,15 @@ class Metrics:
 
 
 class MetricsRegression(Metrics):
-    def __init__(self, num_data, ll_var, device, dtype):
+    def __init__(self, num_data, device, dtype):
         super().__init__(num_data, device)
         self.dtype = dtype
-        self.ll_var = ll_var
 
     def reset(self):
         """Ressets all the metrics to zero."""
         super().reset()
         self.mse = torch.tensor(0.0, device=self.device)
         self.crps = torch.tensor(0.0, device=self.device)
-        self.nll_map = torch.tensor(0.0, device=self.device)
 
     def update(self, y, loss, Fmean, Fvar):
         # Conmpute the scale value using the batch_size
@@ -60,15 +58,15 @@ class MetricsRegression(Metrics):
         #  Mixture, that is, the mean of the mean predictions.
         self.mse += scale * self.compute_mse(y, Fmean)
         self.nll += scale * self.compute_nll(y, Fmean, Fvar)
-        self.nll_map += scale * self.compute_nll(y, Fmean, torch.zeros_like(Fvar))
 
     def compute_mse(self, y, prediction):
         """Computes the root mean squared error for the given predictions."""
         return torch.nn.functional.mse_loss(prediction, y)
     
     def compute_nll(self, y, Fmean, Fvar):
-        var = (Fvar + self.ll_var).squeeze()
-        return -torch.mean(-0.5 * (np.log(2 * np.pi) + torch.log(var) + (Fmean.squeeze() - y.squeeze())**2 / var))
+        var = Fvar.squeeze()
+        ll = -0.5 * (np.log(2 * np.pi) + torch.log(var) + (Fmean.squeeze() - y.squeeze())**2 / var)
+        return torch.mean(-ll)
 
     def compute_crps(self, y, mean_pred, std_pred):
         crps= crps_gaussian(y.detach().cpu(), mean_pred.detach().cpu(), std_pred.detach().cpu())
@@ -79,7 +77,6 @@ class MetricsRegression(Metrics):
             "LOSS": float(self.loss.detach().cpu().numpy()),
             "RMSE": np.sqrt(self.mse.detach().cpu().numpy()),
             "NLL": float(self.nll.detach().cpu().numpy()),
-            "NLL MAP": float(self.nll_map.detach().cpu().numpy()),
             "CRPS": float(self.crps),
         }
 
