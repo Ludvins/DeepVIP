@@ -3,6 +3,48 @@ import torch
 from torch import nn
 import math
 
+import torch.nn.functional as F
+
+
+
+class ConvNet(nn.Module):
+    def __init__(self, input_shape, output_dim, device, dtype):
+        super().__init__()
+        
+        self.n_channels = input_shape[0]
+        self.input_shape = input_shape
+        if input_shape[-1] == 32:
+            fc_shape = 5*5*16
+        elif input_shape[-1] == 28:
+            fc_shape = 256
+        else:
+            raise ValueError("Unsupported image shape")
+        self.dtype = dtype
+        
+        self.conv1 = nn.Conv2d(self.n_channels, 6, 5, device=device, dtype = dtype)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(6, 16, 5, device=device, dtype = dtype)
+        self.fc1 = nn.Linear(fc_shape, 120, device=device, dtype = dtype)
+        self.fc2 = nn.Linear(120, 84, device=device, dtype = dtype)
+        self.fc3 = nn.Linear(84, output_dim, device=device, dtype = dtype)
+
+    def forward(self, x):
+        x = x.to(self.dtype)
+        x = x.view(-1, *self.input_shape)
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = torch.flatten(x, 1) # flatten all dimensions except batch
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+    
+def get_conv(input_shape, output_dim, device, dtype):
+
+    torch.manual_seed(2147483647)
+    net = ConvNet(input_shape, output_dim, device, dtype)
+    return net
+
 def get_mlp(input_dim, output_dim, inner_dims, activation,
             final_layer_activation = None, device = None, dtype = None):
     torch.manual_seed(2147483647)

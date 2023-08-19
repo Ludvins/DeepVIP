@@ -151,10 +151,6 @@ class SoftmaxClassification(Metrics):
         self.acc = torch.tensor(0.0, device=self.device)
         self.ece = _ECELoss()
 
-        self.nll_map = torch.tensor(0.0, device=self.device)
-        self.acc_map = torch.tensor(0.0, device=self.device)
-        self.ece_map = _ECELoss()
-
         self.generator.manual_seed(2147483647)
         
         
@@ -181,11 +177,7 @@ class SoftmaxClassification(Metrics):
          
         self.loss += scale * loss
         
-        self.acc_map += scale * self.compute_acc(y, Fmean)
-        self.nll_map += scale * self.compute_nll(y, Fmean)
-
-        self.ece_map.update(y, Fmean)
-        chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1]).unsqueeze(0))
+        chol = torch.linalg.cholesky(Fvar + 1e-6 * torch.eye(Fvar.shape[-1]).unsqueeze(0))
         z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, dtype = self.dtype)
         samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)
         
@@ -204,11 +196,9 @@ class SoftmaxClassification(Metrics):
         self.ece.update(y, scaled_logits)
         
     def compute_auc(self, y, F):
-        
         probs = F.softmax(-1)
         return roc_auc_score(y, probs, multi_class="ovo")
         
-
     def compute_acc(self, y, F):
         # F shape (..., num_classes)
         
@@ -218,7 +208,8 @@ class SoftmaxClassification(Metrics):
         return (pred == y.flatten()).float().mean()
     
     def compute_nll(self, y, F):
-        return torch.nn.functional.cross_entropy(F, y.to(torch.long).squeeze(-1))
+        nll = torch.nn.functional.cross_entropy(F, y.to(torch.long).squeeze(-1), reduction = "none")
+        return nll.mean()
 
 
     def get_dict(self):
@@ -230,9 +221,6 @@ class SoftmaxClassification(Metrics):
             "NLL MC": float(self.nll_mc.detach().cpu().numpy()),
             "ACC MC": float(self.acc_mc.detach().cpu().numpy()),
             "ECE MC": float(self.ece_mc.compute().detach().cpu().numpy()),
-            "NLL MAP": float(self.nll_map.detach().cpu().numpy()),
-            "ACC MAP": float(self.acc_map.detach().cpu().numpy()),
-            "ECE MAP": float(self.ece_map.compute().detach().cpu().numpy()),
         }
 
 
@@ -250,7 +238,6 @@ class OOD(Metrics):
         self.labels = []
         self.preds_mc = []
         self.preds = []
-        self.preds_map = []
 
         self.generator.manual_seed(2147483647)
         
@@ -268,14 +255,7 @@ class OOD(Metrics):
         likelihood : instance of Likelihood
                      Usable to compute the log likelihood metric.
         """
-        with torch.no_grad():
-            # Compute MAP probabilities
-            probs = Fmean.softmax(-1)
-            # Compute MAP Entropy
-            H = - torch.sum(probs * probs.log(), -1)       
-            # Store MAP Entropy
-            self.preds_map.append(H)
-            
+        with torch.no_grad():            
             chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1]).unsqueeze(0))
             z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, dtype = self.dtype)
             samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)
@@ -306,14 +286,11 @@ class OOD(Metrics):
         self.labels = torch.cat(self.labels)
         self.preds = torch.cat(self.preds)
         self.preds_mc = torch.cat(self.preds_mc)
-        self.preds_map = torch.cat(self.preds_map)
 
         auc = roc_auc_score(self.labels.squeeze(-1), self.preds)
         auc_mc = roc_auc_score(self.labels.squeeze(-1), self.preds_mc)
-        auc_map = roc_auc_score(self.labels.squeeze(-1), self.preds_map)
 
         return {
             "AUC MC": auc_mc,
             "AUC": auc,
-            "AUC MAP": auc_map
         }

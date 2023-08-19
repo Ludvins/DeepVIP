@@ -15,6 +15,7 @@ class Training_Dataset(Dataset):
         self,
         inputs,
         targets,
+        output_dim,
         verbose=True,
         normalize_inputs=True,
         normalize_targets=True,
@@ -31,7 +32,7 @@ class Training_Dataset(Dataset):
 
         self.n_samples = inputs.shape[0]
         self.input_dim = inputs.shape[1]
-        self.output_dim = targets.shape[1]
+        self.output_dim = output_dim
 
         # Normalize inputs
         if normalize_inputs:
@@ -57,13 +58,13 @@ class Training_Dataset(Dataset):
 
 
 class Test_Dataset(Dataset):
-    def __init__(self, inputs, targets=None, inputs_mean=0.0, inputs_std=1.0):
+    def __init__(self, inputs, output_dim, targets=None, inputs_mean=0.0, inputs_std=1.0):
         self.inputs = (inputs - inputs_mean) / inputs_std
         self.targets = targets
         self.n_samples = inputs.shape[0]
         self.input_dim = inputs.shape[1]
         if self.targets is not None:
-            self.output_dim = targets.shape[1]
+            self.output_dim = output_dim
 
     def __getitem__(self, index):
         if self.targets is None:
@@ -358,18 +359,21 @@ class MNIST_Dataset(DVIPDataset):
         self.train = Training_Dataset(
             train_data.numpy(),
             train_targets.numpy(),
+            self.output_dim,
             normalize_targets=False,
             normalize_inputs=False,
         )
 
         self.full = Test_Dataset(
             train_data.numpy(),
+            self.output_dim,
             train_targets.numpy(),
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
             test_data.numpy(),
+            self.output_dim,
             test_targets.numpy(),
             self.train.inputs_mean,
             self.train.inputs_std,
@@ -385,6 +389,59 @@ class MNIST_Dataset(DVIPDataset):
         return 60000
     
 
+class FMNIST_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "multiclass"
+        self.classes = 10
+        self.output_dim = 10
+        train = datasets.FashionMNIST(
+            root="./data", train=True, download=True, transform=transforms.ToTensor()
+        )
+        test = datasets.FashionMNIST(
+            root="./data",
+            train=False,
+            download=True,
+            transform=transforms.ToTensor(),
+        )
+        self.input_shape = [1, 28, 28]
+
+        train_data = train.data.reshape(60000, -1) / 255.0
+        test_data = test.data.reshape(10000, -1) / 255.0
+        train_targets = train.targets.reshape(-1, 1)
+        test_targets = test.targets.reshape(-1, 1)
+
+        self.train = Training_Dataset(
+            train_data.numpy(),
+            train_targets.numpy(),
+            self.output_dim,
+            normalize_targets=False,
+            normalize_inputs=False,
+        )
+
+        self.full = Test_Dataset(
+            train_data.numpy(),
+            self.output_dim,
+            train_targets.numpy(),
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_data.numpy(),
+            self.output_dim,
+            test_targets.numpy(),
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return 70000
+
+    def get_split(self, *args):
+        return self.train, self.full, self.test
+
+    def len_train(self, test_size):
+        return 60000
+    
     
 class MNIST_FMNIST_Dataset(DVIPDataset):
     def __init__(self):
@@ -423,18 +480,21 @@ class MNIST_FMNIST_Dataset(DVIPDataset):
         self.train = Training_Dataset(
             train_data.numpy(),
             train_targets.numpy(),
+            self.output_dim,
             normalize_targets=False,
             normalize_inputs=False,
         )
 
         self.full = Test_Dataset(
             test1_data.numpy(),
+            self.output_dim,
             test1_targets.numpy(),
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
             test_data,
+            self.output_dim,
             test_targets,
             self.train.inputs_mean,
             self.train.inputs_std,
@@ -448,6 +508,62 @@ class MNIST_FMNIST_Dataset(DVIPDataset):
 
     def len_train(self, test_size):
         return 60000
+
+
+class CIFAR10_Dataset(DVIPDataset):
+    def __init__(self):
+        self.type = "multiclass"
+        self.classes = 10
+        self.output_dim = 10
+        train = datasets.CIFAR10(
+            root="./data", train=True, download=True, transform=transforms.ToTensor()
+        )
+        test = datasets.CIFAR10(
+            root="./data",
+            train=False,
+            download=True,
+            transform=transforms.ToTensor(),
+        )
+        self.input_shape = [1, 32, 32]
+        
+        train_data = train.data.mean(-1).reshape(50000, -1) / 255.0
+        test_data = test.data.mean(-1).reshape(10000, -1) / 255.0
+    
+        train_targets = np.array(train.targets).reshape(-1, 1)
+        test_targets = np.array(test.targets).reshape(-1, 1)
+        
+
+        self.train = Training_Dataset(
+            train_data,
+            train_targets,
+            self.output_dim,
+            normalize_targets=False,
+            normalize_inputs=False,
+        )
+
+        self.full = Test_Dataset(
+            test_data,
+            self.output_dim,
+            test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_data,
+            self.output_dim,
+            test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return 60000
+
+    def get_split(self, *args):
+        return self.train, self.full, self.test
+
+    def len_train(self, test_size):
+        return 50000
 
 
 class CIFAR10_SVHN_Dataset(DVIPDataset):
@@ -641,18 +757,30 @@ class Airline_Dataset(DVIPDataset):
         ]
         X = data[names].values[:800000]
 
-        self.n_train = 700000
-        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
-
+        self.n_train = 600000
+        self.n_val = 100000
+        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train],
+            self.output_dim)
+        
         self.train_test = Test_Dataset(
-            X[: self.n_train],
-            Y[: self.n_train],
+            X[:self.n_train],
+            self.output_dim,
+            Y[:self.n_train],
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        
+        self.val = Test_Dataset(
+            X[self.n_train:self.n_train + self.n_val],
+            self.output_dim,
+            Y[self.n_train:self.n_train + self.n_val],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
-            X[self.n_train :],
-            Y[self.n_train :],
+            X[self.n_train + self.n_val:],
+            self.output_dim,
+            Y[self.n_train + self.n_val:],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
@@ -664,7 +792,7 @@ class Airline_Dataset(DVIPDataset):
         return self.n_train
 
     def get_split(self, split, *args):
-        return self.train, self.train_test, self.test
+        return self.train, self.val, self.test
 
 
 class Year_Dataset(DVIPDataset):
@@ -692,10 +820,12 @@ class Year_Dataset(DVIPDataset):
 
         self.n_train = 400000
         self.n_val = 63715
-        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train])
+        self.train = Training_Dataset(X[: self.n_train], Y[: self.n_train],
+            self.output_dim)
 
         self.train_test = Test_Dataset(
             X[:self.n_train],
+            self.output_dim,
             Y[:self.n_train],
             self.train.inputs_mean,
             self.train.inputs_std,
@@ -703,12 +833,14 @@ class Year_Dataset(DVIPDataset):
 
         self.val = Test_Dataset(
             X[self.n_train:self.n_train + self.n_val],
+            self.output_dim,
             Y[self.n_train:self.n_train + self.n_val],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
             X[self.n_train + self.n_val:],
+            self.output_dim,
             Y[self.n_train + self.n_val:],
             self.train.inputs_mean,
             self.train.inputs_std,
@@ -731,8 +863,10 @@ def get_dataset(dataset_name):
         "synthetic2": Synthetic2_Dataset,
         "syntheticBinary": SyntheticBinary_Dataset,
         "MNIST": MNIST_Dataset,
+        "FMNIST": FMNIST_Dataset,
         "MNIST_OOD": MNIST_FMNIST_Dataset,
         "CIFAR10_OOD": CIFAR10_SVHN_Dataset,
+        "CIFAR10": CIFAR10_Dataset,
         "Banana": Banana_Dataset,
         "Moons": Two_Moons,
         "Spiral": Spiral,
