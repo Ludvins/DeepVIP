@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score
 from properscoring import crps_gaussian
-
+from scipy.stats import norm
 
 class Metrics:
     def __init__(self, num_data=-1, device=None):
@@ -32,9 +32,31 @@ class Metrics:
     def update(self, y, loss, mean_pred, std_pred, likelihood, light=True):
         raise NotImplementedError
 
+class RegressionNLL(Metrics):
+    def __init__(self, num_data, device, dtype):
+        super().__init__(num_data, device)
+        self.dtype = dtype
 
+    def update(self, y, loss, Fmean, Fvar):
+        # Conmpute the scale value using the batch_size
+        batch_size = y.shape[0]
+        if self.num_data == -1:
+            scale = 1
+        else:
+            scale = batch_size / self.num_data
 
-class MetricsRegression(Metrics):
+        self.nll += scale * self.compute_nll(y, Fmean, Fvar)
+
+    def compute_nll(self, y, Fmean, Fvar):
+        var = Fvar.squeeze()
+        ll = -0.5 * (np.log(2 * np.pi) + torch.log(var) + (Fmean.squeeze() - y.squeeze())**2 / var)
+        return torch.mean(-ll)
+
+    def get_dict(self):
+        return self.nll
+        
+
+class Regression(Metrics):
     def __init__(self, num_data, device, dtype):
         super().__init__(num_data, device)
         self.dtype = dtype
@@ -44,6 +66,17 @@ class MetricsRegression(Metrics):
         super().reset()
         self.mse = torch.tensor(0.0, device=self.device)
         self.crps = torch.tensor(0.0, device=self.device)
+
+        self.q_10 = torch.tensor(0.0, device=self.device)
+        self.q_20 = torch.tensor(0.0, device=self.device)
+        self.q_30 = torch.tensor(0.0, device=self.device)
+        self.q_40 = torch.tensor(0.0, device=self.device)
+        self.q_50 = torch.tensor(0.0, device=self.device)
+        self.q_60 = torch.tensor(0.0, device=self.device)
+        self.q_70 = torch.tensor(0.0, device=self.device)
+        self.q_80 = torch.tensor(0.0, device=self.device)
+        self.q_90 = torch.tensor(0.0, device=self.device)
+
 
     def update(self, y, loss, Fmean, Fvar):
         # Conmpute the scale value using the batch_size
@@ -58,6 +91,27 @@ class MetricsRegression(Metrics):
         #  Mixture, that is, the mean of the mean predictions.
         self.mse += scale * self.compute_mse(y, Fmean)
         self.nll += scale * self.compute_nll(y, Fmean, Fvar)
+        
+        Fstd = torch.sqrt(Fvar)
+        self.crps += scale * self.compute_crps(y, Fmean, Fstd)
+
+        self.q_10 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.10)
+        self.q_20 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.20)
+        self.q_30 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.30)
+        self.q_40 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.40)
+        self.q_50 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.50)
+        self.q_60 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.60)
+        self.q_70 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.70)
+        self.q_80 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.80)
+        self.q_90 += scale * self.compute_quantile_error(y, Fmean, Fstd, 0.90)
+
+    def compute_quantile_error(self, y, Fmean, Fstd, alpha):
+        deviation = norm.ppf(0.5 + alpha/2)
+        u = (Fmean + deviation*Fstd)
+        l = (Fmean - deviation*Fstd)
+        inside = ((y < u) * (y > l)).to(torch.float32)
+        return torch.mean(inside)
+
 
     def compute_mse(self, y, prediction):
         """Computes the root mean squared error for the given predictions."""
@@ -77,6 +131,15 @@ class MetricsRegression(Metrics):
             "LOSS": float(self.loss.detach().cpu().numpy()),
             "RMSE": np.sqrt(self.mse.detach().cpu().numpy()),
             "NLL": float(self.nll.detach().cpu().numpy()),
+            "Q-10": float(self.q_10.detach().cpu().numpy()),
+            "Q-20": float(self.q_20.detach().cpu().numpy()),
+            "Q-30": float(self.q_30.detach().cpu().numpy()),
+            "Q-40": float(self.q_40.detach().cpu().numpy()),
+            "Q-50": float(self.q_50.detach().cpu().numpy()),
+            "Q-60": float(self.q_60.detach().cpu().numpy()),
+            "Q-70": float(self.q_70.detach().cpu().numpy()),
+            "Q-80": float(self.q_80.detach().cpu().numpy()),
+            "Q-90": float(self.q_90.detach().cpu().numpy()),
             "CRPS": float(self.crps),
         }
 
@@ -133,6 +196,53 @@ class _ECELoss(torch.nn.Module):
 
         return ece
 
+class SoftmaxClassificationNLL(Metrics):
+    def __init__(self, num_data=-1, device=None, dtype = None):
+        self.dtype = dtype
+        self.generator = torch.Generator(device=device)
+        self.generator.manual_seed(2147483647)
+        super().__init__(num_data, device)
+
+    def reset(self):
+        """Ressets all the metrics to zero."""
+        super().reset()
+        self.generator.manual_seed(2147483647)
+        self.nll = torch.tensor(0.0, device=self.device)
+        
+    def update(self, y, loss, Fmean, Fvar):
+        """Updates all the metrics given the results in the parameters.
+
+        Arguments
+        ---------
+
+        y : torch tensor of shape (batch_size, output_dim)
+            Contains the true targets of the data.
+        loss : torch tensor of shape ()
+               Contains the loss value for the given batch.
+        likelihood : instance of Likelihood
+                     Usable to compute the log likelihood metric.
+        """
+        # Conmpute the scale value using the batch_size
+        batch_size = y.shape[0]
+        if self.num_data == -1:
+            scale = 1
+        else:
+            scale = batch_size / self.num_data
+               
+        chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1]).unsqueeze(0))
+        z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, dtype = self.dtype)
+        samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)
+        
+        probs = samples.softmax(-1)
+        mean = probs.mean(0)
+        self.nll += scale * self.compute_nll(y, mean.log())
+    
+    def compute_nll(self, y, F):
+        nll = torch.nn.functional.cross_entropy(F, y.to(torch.long).squeeze(-1), reduction = "none")
+        return nll.mean()
+
+    def get_dict(self):
+        return self.nll
 
 class SoftmaxClassification(Metrics):
     def __init__(self, num_data=-1, device=None, dtype = None):
@@ -146,9 +256,11 @@ class SoftmaxClassification(Metrics):
         super().reset()
         self.nll_mc = torch.tensor(0.0, device=self.device)
         self.acc_mc = torch.tensor(0.0, device=self.device)
+        self.brier_mc = torch.tensor(0.0, device=self.device)
         self.ece_mc = _ECELoss()
         self.nll = torch.tensor(0.0, device=self.device)
         self.acc = torch.tensor(0.0, device=self.device)
+        self.brier = torch.tensor(0.0, device=self.device)
         self.ece = _ECELoss()
 
         self.generator.manual_seed(2147483647)
@@ -185,6 +297,7 @@ class SoftmaxClassification(Metrics):
         mean = probs.mean(0)
         self.acc_mc += scale * self.compute_acc(y, mean)
         self.nll_mc += scale * self.compute_nll(y, mean.log())
+        self.brier_mc += scale * self.compute_brier(y, mean.log())
         self.ece_mc.update(y, mean.log())
         
         
@@ -192,12 +305,17 @@ class SoftmaxClassification(Metrics):
 
         self.acc += scale * self.compute_acc(y, scaled_logits)
         self.nll += scale * self.compute_nll(y, scaled_logits)
+        self.brier += scale * self.compute_brier(y,scaled_logits)
 
         self.ece.update(y, scaled_logits)
         
-    def compute_auc(self, y, F):
+    def compute_brier(self, y, F):
         probs = F.softmax(-1)
-        return roc_auc_score(y, probs, multi_class="ovo")
+
+        oh_on = torch.nn.functional.one_hot(y.squeeze(), num_classes = probs.shape[-1])
+        dist = (probs - oh_on)**2
+        dist = torch.sum(dist, -1)
+        return torch.mean(dist)
         
     def compute_acc(self, y, F):
         # F shape (..., num_classes)
@@ -218,9 +336,11 @@ class SoftmaxClassification(Metrics):
             "NLL": float(self.nll.detach().cpu().numpy()),
             "ACC": float(self.acc.detach().cpu().numpy()),
             "ECE": float(self.ece.compute().detach().cpu().numpy()),
+            "BRIER": float(self.brier.detach().cpu().numpy()),
             "NLL MC": float(self.nll_mc.detach().cpu().numpy()),
             "ACC MC": float(self.acc_mc.detach().cpu().numpy()),
             "ECE MC": float(self.ece_mc.compute().detach().cpu().numpy()),
+            "BRIER MC": float(self.brier_mc.detach().cpu().numpy()),
         }
 
 

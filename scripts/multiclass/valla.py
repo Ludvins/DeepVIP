@@ -1,32 +1,24 @@
-from datetime import datetime
 import numpy as np
 import torch
 import pandas as pd
 from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
-from properscoring import crps_gaussian
 
 from scipy.cluster.vq import kmeans2
 
 sys.path.append(".")
 
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit_map_crossentropy, fit, forward, score
-from scripts.filename import create_file_name
-from src.generative_functions import *
+from utils.pytorch_learning import fit_map_crossentropy, fit, score
 from src.valla import VaLLAMultiClass
 from utils.models import get_mlp, create_ad_hoc_mlp
-from utils.dataset import get_dataset
-from utils.metrics import SoftmaxClassification
-from src.utils import smooth
-import matplotlib.pyplot as plt
+from utils.metrics import SoftmaxClassification, OOD
 args = manage_experiment_configuration()
 
 args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
-args.dataset = get_dataset(args.dataset_name)
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
 )
@@ -38,17 +30,15 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
 f = get_mlp(
-    train_dataset.inputs.shape[1],
+    args.dataset.input_dim,
     args.dataset.output_dim,
-    [200, 200],
-    torch.nn.Tanh,
+    args.net_structure,
+    args.activation,
     device=args.device,
     dtype=args.dtype,
 )
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
-criterion = torch.nn.MSELoss()
-
 
 try:
     f.load_state_dict(torch.load("weights/multiclass_weights_" + args.dataset_name))
@@ -62,18 +52,12 @@ except:
         train_loader,
         opt,
         criterion=torch.nn.CrossEntropyLoss(),
-        use_tqdm=True,
+        use_tqdm=args.verbose,
         return_loss=True,
         iterations=args.MAP_iterations,
         device=args.device,
+        dtype=args.dtype,
     )
-    import matplotlib.pyplot as plt
-    iters_per_epoch = len(train_loader)
-    if len(loss) > iters_per_epoch:
-        loss = smooth(np.array(loss), iters_per_epoch)
-
-        plt.plot(loss)
-        plt.show()
     print("MAP Loss: ", loss[-1])
     end = timer()
     torch.save(f.state_dict(), "weights/multiclass_weights_" + args.dataset_name)
@@ -86,17 +70,14 @@ valla = VaLLAMultiClass(
     prior_std=args.prior_std,
     num_data=train_dataset.inputs.shape[0],
     output_dim=train_dataset.output_dim,
-    track_inducing_locations=True,
+    track_inducing_locations=False,
+    trainable_prior = not args.fixed_prior,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
     alpha = args.bb_alpha,
     device=args.device,
     dtype=args.dtype
     )
-
-# if args.freeze_ll:
-#     sparseLA.freeze_ll()
-
 
 valla.print_variables()
 
@@ -107,47 +88,28 @@ loss = fit(
     valla,
     train_loader,
     opt,
-    use_tqdm=True,
+    use_tqdm=args.verbose,
     return_loss=True,
     iterations=args.iterations,
     device=args.device,
 )
 end = timer()
 
-iters_per_epoch = len(train_loader)
-if len(loss) > iters_per_epoch:
-
-    fig, axis = plt.subplots(3, 1, figsize=(15, 20))
-    loss = smooth(np.array(loss), iters_per_epoch)
-    ell = smooth(np.array(valla.ell_history), iters_per_epoch)
-    kl = smooth(np.array(valla.kl_history), iters_per_epoch)
-
-    axis[0].plot(loss)
-    axis[0].set_title("Nelbo")
-
-    axis[1].plot(ell)
-    axis[1].set_title("ELL")
-
-    axis[2].plot(kl)
-    axis[2].set_title("KL")
-
-    plt.show()
-
 
 valla.print_variables()
 
-save_str = "VaLLA_dataset={}_M={}".format(
-    args.dataset_name, args.num_inducing, args.seed
+fp = "_fixed_prior" if args.fixed_prior else ""
+
+
+save_str = "VaLLA_dataset={}_M={}_seed={}_alpha={}{}".format(
+    args.dataset_name, args.num_inducing, args.seed,str(args.bb_alpha), fp
 )
-
-
-plt.savefig("plots/" + save_str + ".pdf")
 
 test_metrics = score(
     valla,
     test_loader,
     SoftmaxClassification,
-    use_tqdm=True,
+    use_tqdm=args.verbose,
     device=args.device,
     dtype=args.dtype,
 )
@@ -158,8 +120,37 @@ test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name
 test_metrics["MAP_iterations"] = args.MAP_iterations
 test_metrics["M"] = args.num_inducing
-
+test_metrics["seed"] = args.seed
+test_metrics["time"] = end-start
 test_metrics["alpha"] = args.bb_alpha
+
+
+if args.test_ood:
+    ood_dataset = args.dataset.get_ood_datasets()
+    ood_loader = DataLoader(ood_dataset, batch_size=args.batch_size)
+    ood_metrics = score(
+        valla, ood_loader, OOD, use_tqdm=args.verbose, device=args.device, dtype=args.dtype
+    )
+    test_metrics["OOD-AUC"] = ood_metrics["AUC"]
+    test_metrics["OOD-AUC MC"] = ood_metrics["AUC MC"]
+
+if args.test_corruptions:
+    for corruption_value in args.dataset.corruption_values:
+        corrupted_dataset = args.dataset.get_corrupted_split(corruption_value)
+
+        loader = DataLoader(corrupted_dataset, batch_size=args.batch_size)
+        corrupted_metrics = score(
+            valla, loader, SoftmaxClassification, use_tqdm=args.verbose, device=args.device, dtype=args.dtype
+        ).copy()
+        print(corrupted_metrics)
+
+        test_metrics = {
+            **test_metrics,
+            **{k+'-C'+str(corruption_value): v for k, v in corrupted_metrics.items()}
+        }
+
+
+
 df = pd.DataFrame.from_dict(test_metrics, orient="index").transpose()
 
 print(df)

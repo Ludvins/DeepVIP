@@ -15,6 +15,15 @@ def manage_experiment_configuration(args=None):
 
     FLAGS = vars(args)
 
+    FLAGS["activation_str"] = args.activation
+
+    if args.activation == "tanh":
+        FLAGS["activation"] = torch.nn.Tanh
+    elif args.activation == "relu":
+        FLAGS["activation"] = torch.nn.ReLU
+    else:
+        raise ValueError("Invalid BNN activation type.")
+
     if args.device == "gpu":
         # CUDA for PyTorch
         use_cuda = torch.cuda.is_available()
@@ -29,7 +38,10 @@ def manage_experiment_configuration(args=None):
     args.dataset = get_dataset(args.dataset_name)
     
     
-
+    if args.fixed_prior:
+        args.prior_std = np.sqrt(1/(args.dataset.len_train() * args.weight_decay))
+        print("Prior standard deviation fixed to: ", args.prior_std)
+    
     return args
 
 
@@ -48,18 +60,18 @@ def get_parser():
     parser.add_argument(
         "--dataset_name",
         type=str,
-        help=(
-            "Dataset to use. Options: SPGP, boston, energy, concrete, naval,"
-            " kin8nm, yatch, power, protein, winered, CO2, MNIST, Rectangles,"
-            " Year, Airline, HIGGS, SUSY, taxi"
-        ),
     )
+
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=None,
-        help="Training epochs",
+        "--hessian",
+        type=str,
     )
+
+    parser.add_argument(
+        "--subset",
+        type=str,
+    )
+
     parser.add_argument(
         "--iterations",
         type=int,
@@ -97,11 +109,30 @@ def get_parser():
         help="Training learning rate",
     )
 
+
     parser.add_argument(
         "--MAP_lr",
         type=float,
         default=0.001,
         help="MAP Training learning rate",
+    )
+
+    parser.add_argument(
+        "--net_structure",
+        type=int,
+        default=[200, 200],
+        nargs="+",
+        help="Specifies the width of the inner layers of the underlying model.",
+    )
+
+    parser.add_argument(
+        "--activation",
+        type=str,
+        default="tanh",
+        help=(
+            "Activation function to use in the Bayesian NN. Options:"
+            "tanh, relu, sigmoid, cos"
+        ),
     )
     
     parser.add_argument(
@@ -117,7 +148,7 @@ def get_parser():
         default=1,
     )
     parser.add_argument(
-        "--ll_var",
+        "--ll_log_var",
         type=float,
         default=-5,
     )
@@ -128,12 +159,43 @@ def get_parser():
         type=float,
         default=0,
     )
+
     parser.add_argument(
         "--sub_classes",
         type=int,
         default=-1,
     )
-    
+
+
+    parser.add_argument(
+        "--verbose",
+        dest="verbose",
+        action="store_true",
+    )
+    parser.set_defaults(verbose=False)
+
+    parser.add_argument(
+        "--test_ood",
+        dest="test_ood",
+        action="store_true",
+    )
+    parser.set_defaults(test_ood=False)
+
+    parser.add_argument(
+        "--test_corruptions",
+        dest="test_corruptions",
+        action="store_true",
+    )
+    parser.set_defaults(test_corruptions=False)
+
+
+    parser.add_argument(
+        "--fixed_prior",
+        dest="fixed_prior",
+        action="store_true",
+    )
+    parser.set_defaults(fixed_prior=False)
+
     parser.add_argument(
         "--fix_inducing",
         dest="fix_inducing",
@@ -141,27 +203,8 @@ def get_parser():
     )
     parser.set_defaults(fix_inducing=False)
 
-
-    parser.add_argument(
-        "--freeze_posterior",
-        dest="freeze_posterior",
-        action="store_true",
-        help="Freeze the posterior parameters, set them unlearnable",
-    )
-    parser.set_defaults(freeze_posterior=False)
-
-    parser.add_argument(
-        "--freeze_ll",
-        dest="freeze_ll",
-        action="store_true",
-        help="Freeze the likelihood parameters, set them unlearnable",
-    )
-    parser.set_defaults(freeze_ll=False)
-
     parser.add_argument("--seed", type=int, default=2147483647, help="Random seed.")
-    parser.add_argument(
-        "--verbose", type=int, default=1, help="Set to 0 to disable messages."
-    )
+
     parser.add_argument("--dtype", type=str, default=torch.float64, help="Data type")
     parser.add_argument("--split", default=None, type=int, help="Data split to use.")
     parser.add_argument("--name_flag", default="", type=str)

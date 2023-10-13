@@ -5,27 +5,37 @@ import pandas as pd
 from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
-from properscoring import crps_gaussian
-
-from scipy.cluster.vq import kmeans2
 
 sys.path.append(".")
 
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit_map, fit, forward, score
-from scripts.filename import create_file_name
-from src.generative_functions import *
+from utils.pytorch_learning import fit_map, score
 from src.ella import ELLA_Regression
 from utils.models import get_mlp, create_ad_hoc_mlp
-from utils.dataset import get_dataset
-from utils.metrics import MetricsRegression
-from tqdm import tqdm
+from utils.metrics import Regression
 args = manage_experiment_configuration()
 
 args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
-args.dataset = get_dataset(args.dataset_name)
+
+if args.fixed_prior:
+    save_str = "ELLA_dataset={}_M={}_ll={}_seed={}_fixed_prior".format(
+        args.dataset_name, args.num_inducing, args.ll_log_var, args.seed
+    )
+else:
+    save_str = "ELLA_dataset={}_M={}_ll={}_prior={}_seed={}".format(
+        args.dataset_name, args.num_inducing, args.ll_log_var, args.prior_std, args.seed
+    )
+print(save_str)
+import os
+
+
+if os.path.isfile("results/" + save_str + ".csv"):
+    print("Experiment already exists")
+    exit()
+
+
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
 )
@@ -37,25 +47,19 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
 f = get_mlp(
-    train_dataset.inputs.shape[1],
-    train_dataset.targets.shape[1],
-    [200, 200, 200],
-    torch.nn.Tanh,
+    args.dataset.input_dim,
+    args.dataset.output_dim,
+    args.net_structure,
+    args.activation,
     device=args.device,
     dtype=args.dtype,
 )
 
-if args.weight_decay != 0:
-    args.prior_std = np.sqrt(1 / (len(train_dataset) * args.weight_decay))
-
-
-ll_var = 0.1
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
 criterion = torch.nn.MSELoss()
 
-# Set the number of training samples to generate
 
 try:
     f.load_state_dict(torch.load("weights/regression_weights_" + args.dataset_name))
@@ -79,9 +83,7 @@ except:
     end = timer()
     torch.save(f.state_dict(), "weights/regression_weights_" + args.dataset_name)
 
-import numpy
 
-numpy.set_printoptions(threshold=sys.maxsize)
 
 
 ella = ELLA_Regression(
@@ -90,7 +92,7 @@ ella = ELLA_Regression(
     args.num_inducing,
     np.min([args.num_inducing, 20]),
     prior_std=args.prior_std,
-    log_variance = np.log(ll_var),
+    log_variance = args.ll_log_var,
     seed=args.seed,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
@@ -99,86 +101,50 @@ ella = ELLA_Regression(
 )
 
 
+start = timer()
 
-ll_vars = [-0.5, -0.4, -0.3, -0.2]
-prior_stds = np.linspace(0.01, 1, 5)
-
-
-
-
-best_score = np.inf
-best_ll_var = None
-best_prior_std = None
-
-iters = tqdm(range(len(ll_vars) * len(prior_stds)), unit = " configuration")
-iters.set_description("Finding optimal hyper-parameters ")
-
-for i in iters:
-
-    ll_var = ll_vars[i // len(prior_stds)]
-    prior_std = prior_stds[i%len(prior_stds)]
-
-    ella.prior_std = torch.tensor(prior_std, device=args.device, dtype=args.dtype)
-
-    if i % len(prior_stds) == 0:
-        ella.log_variance = torch.tensor(ll_var, device = args.device, dtype = args.dtype)
-
-        ella.fit_loader(
-            torch.tensor(train_dataset.inputs, device=args.device, dtype=args.dtype),
-            torch.tensor(train_dataset.targets, device=args.device, dtype=args.dtype),
-            train_loader,
-            verbose = False,
-        )
-
-    test_metrics = score(
-        ella,
-        val_loader,
-        MetricsRegression,
-        use_tqdm=False,
-        device=args.device,
-        dtype=args.dtype,
-    )
-
-    if test_metrics["NLL"] < best_score:
-        best_score = test_metrics["NLL"]
-        best_ll_var = ll_var
-        best_prior_std = prior_std
-
-save_str = "ELLA_dataset={}_M={}".format(
-    args.dataset_name, args.num_inducing, args.seed
-)
-
-ella.prior_std = torch.tensor(best_prior_std, device=args.device, dtype=args.dtype)
-
-ella.log_variance = torch.tensor(best_ll_var, device = args.device, dtype = args.dtype)
-
-ella.fit_loader(
+ella.fit_loader_val(
     torch.tensor(train_dataset.inputs, device=args.device, dtype=args.dtype),
     torch.tensor(train_dataset.targets, device=args.device, dtype=args.dtype),
     train_loader,
-    verbose = True,
+    val_loader,
+    val_steps= 100,
+    verbose = args.verbose,
 )
-        
-test_metrics = score(
+end = timer()
+
+
+val_metrics = score(
         ella,
-        test_loader,
-        MetricsRegression,
-        use_tqdm=True,
+        val_loader,
+        Regression,
+        use_tqdm=args.verbose,
         device=args.device,
         dtype=args.dtype,
     )
 
+test_metrics = score(
+        ella,
+        test_loader,
+        Regression,
+        use_tqdm=args.verbose,
+        device=args.device,
+        dtype=args.dtype,
+)
 
-
-test_metrics["prior_std"] = ella.prior_std.detach().numpy()
-test_metrics["log_variance"] = ella.log_variance.detach().numpy()
+test_metrics["val_NLL"] = val_metrics["NLL"]
+test_metrics["prior_std"] = args.prior_std
+test_metrics["log_variance"] = args.ll_log_var
 test_metrics["iterations"] = args.iterations
 test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name
 test_metrics["MAP_iterations"] = args.MAP_iterations
 test_metrics["M"] = args.num_inducing
+test_metrics["seed"] = args.seed
+test_metrics["time"] = end-start
 
 df = pd.DataFrame.from_dict(test_metrics, orient="index").transpose()
+
 
 print(df)
 
@@ -186,3 +152,4 @@ df.to_csv(
     path_or_buf="results/" + save_str + ".csv",
     encoding="utf-8",
 )
+

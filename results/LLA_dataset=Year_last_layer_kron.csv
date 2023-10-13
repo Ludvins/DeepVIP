@@ -1,2 +1,0 @@
-,LOSS,RMSE,NLL,CRPS,prior_std,log_variance,iterations,weight_decay,dataset,MAP_iterations,subset,hessian
-0,0.0,9.096688,3.6268537044525146,0.0,0.5605428218841553,-0.3768628239631653,20000,0.01,Year,20000,last_layer,kron

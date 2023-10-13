@@ -11,6 +11,7 @@ class ConvNet(nn.Module):
     def __init__(self, input_shape, output_dim, device, dtype):
         super().__init__()
         
+        self.output_size = output_dim
         self.n_channels = input_shape[0]
         self.input_shape = input_shape
         if input_shape[-1] == 32:
@@ -191,7 +192,9 @@ class TanhJacobian(nn.Module):
         return dout
 
 def create_ad_hoc_mlp(mlp):
-    mlp_ad_hoc = MLP(mlp[0].weight.shape[1], mlp[-1].weight.shape[0], len(mlp)//2, mlp[0].weight.shape[0], device =  mlp[-1].weight.device, dtype =  mlp[-1].weight.dtype)
+    mlp_ad_hoc = MLP(mlp[0].weight.shape[1], mlp[-1].weight.shape[0], len(mlp)//2, mlp[0].weight.shape[0], 
+                     device =  mlp[-1].weight.device, 
+                     dtype =  mlp[-1].weight.dtype)
     
     for i in range(0, len(mlp), 2):
         mlp_ad_hoc.layers[i].weight = mlp[i].weight.T
@@ -1383,7 +1386,7 @@ def _resnet(
     layers: List[int],
     model_urls: Dict[str, str],
     progress: bool = True,
-    pretrained: bool = False,
+    pretrained: bool = True,
     **kwargs: Any
 ) -> CifarResNet:
     model = CifarResNet(BasicBlock, layers, **kwargs)

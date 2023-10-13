@@ -255,20 +255,22 @@ def score(model, generator, metrics, use_tqdm=False, device=None, dtype = None, 
         iters = range(len(generator))
     data_iter = iter(generator)
 
-
-    # Batches evaluation
-    for _ in iters:
-        data, target = next(data_iter)
-        data = data.to(device)
-        target = target.to(device)
-        loss, Fmean, Fvar = model.test_step(data, target)
-        # log_likelihood = model.predict_logdensity(data, target)
-        # Update mertics using this batch
-        metrics.update(
-            target, loss, Fmean, Fvar
-        )
+    with torch.no_grad():
+        # Batches evaluation
+        for _ in iters:
+            data, target = next(data_iter)
+            data = data.to(device)
+            target = target.to(device)
+            loss, Fmean, Fvar = model.test_step(data, target)
+            # log_likelihood = model.predict_logdensity(data, target)
+            # Update mertics using this batch
+            metrics.update(
+                target, loss, Fmean, Fvar
+            )
     # Return metrics as a dictionary
-    return metrics.get_dict()
+    d = metrics.get_dict()
+    metrics.reset()
+    return d
 
 
 def predict(model, generator, device=None):
@@ -304,7 +306,7 @@ def predict(model, generator, device=None):
         for idx, data in enumerate(generator):
             # Consider datasets with no targets, just input values.
             try:
-                batch_x, _, _ = data
+                batch_x, _ = data
             except:
                 batch_x = data
             # Create batched predictions

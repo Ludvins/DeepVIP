@@ -21,7 +21,8 @@ class BackPackInterface(CurvatureInterface):
     def __init__(self, model, output_dim, last_layer=False, subnetwork_indices=None):
         super().__init__(model, "regression", last_layer, subnetwork_indices)
         extend(self._model)
-        self.model.output_size = output_dim
+        self.output_size = output_dim
+        self.train_mode = True
 
     def jacobians(self, x):
         """Compute Jacobians \\(\\nabla_{\\theta} f(x;\\theta)\\) at current parameter \\(\\theta\\)
@@ -39,34 +40,38 @@ class BackPackInterface(CurvatureInterface):
         f : torch.Tensor
             output function `(batch, outputs)`
         """
-        model = extend(self.model)
-        to_stack = []
-        out = model(x)
-
-        for i in range(model.output_size):
+        with torch.set_grad_enabled(True):
+            print(x.shape)
+            model = extend(self.model, use_converter=True)
+            model.eval()
+            to_stack = []
             model.zero_grad()
+            out = model(x)
 
-            with backpack(BatchGrad(), retain_graph=True):
-                if model.output_size > 1:
-                    out[:, i].sum().backward(create_graph=True)
-                else:
-                    out.sum().backward(create_graph=True)
-                to_cat = []
-                for param in model.parameters():
-                    to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
-                    delattr(param, "grad_batch")
-                Jk = torch.cat(to_cat, dim=1)
+            for i in range(self.output_size):
 
-            to_stack.append(Jk)
+                with backpack(BatchGrad(), retain_graph=True):
+                    if self.output_size > 1:
+                        out[:, i].sum().backward(create_graph=True)
+                    else:
+                        out.sum().backward(create_graph=True)
+                    to_cat = []
+                    for param in model.parameters():
+                        to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
+                        delattr(param, "grad_batch")
+                    Jk = torch.cat(to_cat, dim=1)
+                    if self.train_mode == False:
+                        Jk = Jk.detach()
+                to_stack.append(Jk)
 
         model.zero_grad()
         x.grad = None
         CTX.remove_hooks()
         _cleanup(model)
         if model.output_size > 1:
-            return torch.stack(to_stack, dim=2).transpose(1, 2), out
+            return torch.stack(to_stack, dim=2).transpose(1, 2)
         else:
-            return Jk.unsqueeze(-1).transpose(1, 2), out
+            return Jk.unsqueeze(-1).transpose(1, 2)
 
     def jacobians_on_outputs(self, x, outputs):
         """Compute Jacobians \\(\\nabla_{\\theta} f(x;\\theta)\\) at current parameter \\(\\theta\\)
@@ -88,34 +93,38 @@ class BackPackInterface(CurvatureInterface):
         f : torch.Tensor
             output function `(batch)`
         """
-        model = extend(self.model)
-        to_stack = []
-        for i in range(outputs.shape[1]):
-            c = outputs[:, i]
+        with torch.set_grad_enabled(True):
+            model.eval()
+            model = extend(self.model,  use_converter=True)
+            to_stack = []
             model.zero_grad()
-            out = model(x)
 
-            with backpack(BatchGrad(), retain_graph=True):
-                torch.gather(out, 1, c.unsqueeze(-1)).sum().backward(create_graph=True)
-                to_cat = []
-                for param in model.parameters():
-                    to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
-                    delattr(param, "grad_batch")
-                Jk = torch.cat(to_cat, dim=1)
-                if self.subnetwork_indices is not None:
-                    Jk = Jk[:, self.subnetwork_indices]
-            to_stack.append(Jk)
-            if i == 0:
-                f = torch.gather(out, 1, outputs)
+            out = model(x)
+            for i in range(outputs.shape[1]):
+                c = outputs[:, i]
+
+                with backpack(BatchGrad(), retain_graph=self.train_mode):
+                    torch.gather(out, 1, c.unsqueeze(-1)).sum().backward(create_graph=self.train_mode)
+                    to_cat = []
+                    for param in model.parameters():
+                        to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
+                        delattr(param, "grad_batch")
+                    Jk = torch.cat(to_cat, dim=1)
+                    if self.subnetwork_indices is not None:
+                        Jk = Jk[:, self.subnetwork_indices]
+                    if self.train_mode == False:
+                        Jk = Jk.detach()
+                to_stack.append(Jk)
+                
 
         model.zero_grad()
         x.grad = None
         CTX.remove_hooks()
         _cleanup(model)
         if model.output_size > 1:
-            return torch.stack(to_stack, dim=2).transpose(1, 2), f
+            return torch.stack(to_stack, dim=2).transpose(1, 2)
         else:
-            return Jk.unsqueeze(-1).transpose(1, 2), f
+            return Jk.unsqueeze(-1).transpose(1, 2)
 
 
 def _cleanup(module):

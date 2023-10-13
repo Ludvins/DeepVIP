@@ -1,29 +1,21 @@
-from datetime import datetime
-import numpy as np
 import torch
 import pandas as pd
 from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
-from properscoring import crps_gaussian
 
 from scipy.cluster.vq import kmeans2
 
 sys.path.append(".")
 
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit_map, fit, forward, score
-from scripts.filename import create_file_name
-from src.generative_functions import *
-from src.valla import VaLLARegressionRBF, VaLLARegression
-from src.lla import GPLLA
-from src.likelihood import Gaussian
+from utils.pytorch_learning import fit_map, fit, score
+from src.valla import VaLLARegressionRBF
 from src.backpack_interface import BackPackInterface
 from utils.models import get_mlp, create_ad_hoc_mlp
 from utils.dataset import get_dataset
-from utils.metrics import MetricsRegression
-from src.utils import smooth
-import matplotlib.pyplot as plt
+from utils.metrics import Regression
+
 args = manage_experiment_configuration()
 
 args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -40,11 +32,12 @@ val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle = True)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
+
 f = get_mlp(
-    train_dataset.inputs.shape[1],
-    train_dataset.targets.shape[1],
-    [200, 200, 200],
-    torch.nn.Tanh,
+    args.dataset.input_dim,
+    args.dataset.output_dim,
+    args.net_structure,
+    args.activation,
     device=args.device,
     dtype=args.dtype,
 )
@@ -73,12 +66,6 @@ except:
         iterations=args.MAP_iterations,
         device=args.device,
     )
-    import matplotlib.pyplot as plt
-    iters_per_epoch = len(train_loader)
-    loss = smooth(np.array(loss), iters_per_epoch)
-
-    plt.plot(loss)
-    plt.show()
     print("MAP Loss: ", loss[-1])
     end = timer()
     torch.save(f.state_dict(), "weights/regression_weights_" + args.dataset_name)
@@ -92,16 +79,15 @@ valla = VaLLARegressionRBF(
     prior_std=args.prior_std,
     num_data=train_dataset.inputs.shape[0],
     output_dim=1,
-    track_inducing_locations=True,
+    log_variance=args.ll_log_var,
+    track_inducing_locations=False,
+    trainable_prior = not args.fixed_prior,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
-    alpha = args.bb_alpha,
+    alpha=args.bb_alpha,
     device=args.device,
     dtype=args.dtype,
 )
-
-# if args.freeze_ll:
-#     sparseLA.freeze_ll()
 
 
 valla.print_variables()
@@ -113,32 +99,26 @@ loss = fit(
     valla,
     train_loader,
     opt,
-    use_tqdm=True,
+    use_tqdm=args.verbose,
     return_loss=True,
     iterations=args.iterations,
     device=args.device,
 )
 end = timer()
 
-iters_per_epoch = len(train_loader)
-#loss = smooth(np.array(loss), iters_per_epoch, window="flat")
-
-
 valla.print_variables()
 
-save_str = "VaLLA_RBF_dataset={}_M={}".format(
-    args.dataset_name, args.num_inducing, args.seed
+fp = "_fixed_prior" if args.fixed_prior else ""
+
+save_str = "VaLLA_RBF_dataset={}_M={}_seed={}_alpha={}{}".format(
+    args.dataset_name, args.num_inducing, args.seed, str(args.bb_alpha),fp
 )
-
-
-plt.savefig("plots/" + save_str + ".pdf")
-
 
 test_metrics = score(
     valla,
     test_loader,
-    MetricsRegression,
-    use_tqdm=True,
+    Regression,
+    use_tqdm=args.verbose,
     device=args.device,
     dtype=args.dtype,
     ll_var=valla.log_variance.exp().detach(),
@@ -150,9 +130,12 @@ test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name
 test_metrics["MAP_iterations"] = args.MAP_iterations
 test_metrics["M"] = args.num_inducing
+test_metrics["seed"] = args.seed
+test_metrics["time"] = end-start
 
 test_metrics["alpha"] = args.bb_alpha
 df = pd.DataFrame.from_dict(test_metrics, orient="index").transpose()
+
 
 print(df)
 

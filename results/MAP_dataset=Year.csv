@@ -1,2 +1,0 @@
-,LOSS,RMSE,NLL,CRPS,log_variance,weight_decay,dataset,MAP_iterations
-0,0.0,9.096688,4.186740398406982,0.0,-0.3364722366212128,0.01,Year,20000

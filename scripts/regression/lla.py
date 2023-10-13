@@ -1,24 +1,16 @@
-from datetime import datetime
 import numpy as np
 import torch
 import pandas as pd
 from torch.utils.data import DataLoader
 import sys
 from time import process_time as timer
-from properscoring import crps_gaussian
-
-from scipy.cluster.vq import kmeans2
 
 sys.path.append(".")
 
 from utils.process_flags import manage_experiment_configuration
-from utils.pytorch_learning import fit_map, fit, forward, score
-from scripts.filename import create_file_name
-from src.generative_functions import *
-from src.ella import ELLA_Regression
-from utils.models import get_mlp, create_ad_hoc_mlp
-from utils.dataset import get_dataset
-from utils.metrics import MetricsRegression
+from utils.pytorch_learning import fit_map, score
+from utils.models import get_mlp
+from utils.metrics import Regression
 from laplace import Laplace
 import tqdm
 
@@ -27,29 +19,24 @@ args = manage_experiment_configuration()
 args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
-args.dataset = get_dataset(args.dataset_name)
-train_dataset, full_dataset, test_dataset = args.dataset.get_split(
+train_dataset, val_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
 )
 
 # Initialize DataLoader
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-full_loader = DataLoader(full_dataset, batch_size=args.batch_size)
+val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
 f = get_mlp(
-    train_dataset.inputs.shape[1],
-    train_dataset.targets.shape[1],
-    [200, 200, 200],
-    torch.nn.Tanh,
+    args.dataset.input_dim,
+    args.dataset.output_dim,
+    args.net_structure,
+    args.activation,
     device=args.device,
     dtype=args.dtype,
 )
-
-if args.weight_decay != 0:
-    args.prior_std = np.sqrt(1 / (len(train_dataset) * args.weight_decay))
-
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
@@ -79,28 +66,39 @@ except:
     end = timer()
     torch.save(f.state_dict(), "weights/regression_weights_" + args.dataset_name)
 
-import numpy
-
-numpy.set_printoptions(threshold=sys.maxsize)
-
 
 # 'all', 'subnetwork' and 'last_layer'
-subset = "all"
+subset = args.subset
 # 'full', 'kron', 'lowrank' and 'diag'
-hessian = "kron"
+hessian = args.hessian
 X = test_dataset.inputs
-la = Laplace(f, "regression", subset_of_weights=subset, hessian_structure=hessian)
+la = Laplace(f, "regression", subset_of_weights=args.subset, hessian_structure=args.hessian)
+
+start = timer()
+
 la.fit(train_loader)
 
-log_prior, log_sigma = torch.ones(1, requires_grad=True), torch.ones(
-    1, requires_grad=True
-)
+log_sigma = torch.ones(1, requires_grad=True)
+if not args.fixed_prior:
+    log_prior = torch.ones(1, requires_grad=True)
+else:
+    log_prior = torch.ones(1, requires_grad = False) * np.log((1/(args.prior_std**2)))
+
 hyper_optimizer = torch.optim.Adam([log_prior, log_sigma], lr=1e-3)
-for i in tqdm.tqdm(range(args.iterations)):
+
+if args.verbose:
+    it = tqdm.tqdm(range(args.iterations))
+else:
+    it = range(args.iterations)
+
+
+for i in it:
     hyper_optimizer.zero_grad()
     neg_marglik = -la.log_marginal_likelihood(log_prior.exp(), log_sigma.exp())
     neg_marglik.backward()
     hyper_optimizer.step()
+
+end = timer()
 
 prior_std = np.sqrt(1 / np.exp(log_prior.detach().numpy())).item()
 log_variance = 2*log_sigma.detach().numpy().item()
@@ -130,28 +128,32 @@ def test_step(X, y):
 
 
 la.test_step = test_step
+fp = "_fixed_prior" if args.fixed_prior else ""
 
-save_str = "LLA_dataset={}_{}_{}".format(
-    args.dataset_name, subset, hessian
+save_str = "LLA_dataset={}_{}_{}_seed={}{}".format(
+    args.dataset_name, args.subset, args.hessian, args.seed, fp
 )
 
 
 test_metrics = score(
     la,
     test_loader,
-    MetricsRegression,
-    use_tqdm=True,
+    Regression,
+    use_tqdm=args.verbose,
     device=args.device,
     dtype=args.dtype,
 )
+
 test_metrics["prior_std"] = prior_std
 test_metrics["log_variance"] = log_variance
 test_metrics["iterations"] = args.iterations
 test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name
 test_metrics["MAP_iterations"] = args.MAP_iterations
-test_metrics["subset"] = subset
-test_metrics["hessian"] = hessian
+test_metrics["subset"] = args.subset
+test_metrics["hessian"] = args.hessian
+test_metrics["seed"] = args.seed
+test_metrics["time"] = end-start
 
 df = pd.DataFrame.from_dict(test_metrics, orient="index").transpose()
 

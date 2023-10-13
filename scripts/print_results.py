@@ -1,4 +1,3 @@
-import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -116,8 +115,12 @@ MAP_conv["model"] = "MAP CNN"
 ELLA["model"] = "ELLA"
 LLA["model"] = "LLA"
 
-df = pd.concat([MAP, MAP_conv, LLA, ELLA, VaLLA, VaLLA_RBF, VaLLA_MC, VaLLA_Conv, VaLLA_Conv_MC]).drop(
+df = pd.concat([MAP, LLA, ELLA, VaLLA, VaLLA_RBF, VaLLA_MC]).drop(
     ["LOSS", "Unnamed: 0", "iterations", "weight_decay", "MAP_iterations", "CRPS"], axis=1
+)
+
+df_conv = pd.concat([MAP_conv, VaLLA_Conv, VaLLA_Conv_MC]).drop(
+    ["LOSS", "Unnamed: 0", "iterations", "weight_decay", "MAP_iterations"], axis=1
 )
 
 regression = df[df["ACC"].isna()].drop(["ACC",  "ECE",  "NLL MC",  "ACC MC",  "ECE MC"], axis = 1)
@@ -126,3 +129,4 @@ classification = df[df["RMSE"].isna()].drop(["RMSE",  "log_variance"], axis = 1)
 # df = df.astype({"M": "int"})
 print(regression.groupby(["dataset", "model","M", "subset", "hessian"], dropna=False).mean())
 print(classification.groupby(["dataset", "model","M", "subset", "hessian"], dropna=False).mean())
+print(df_conv.groupby(["dataset", "model","M"], dropna=False).mean())
