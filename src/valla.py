@@ -1,7 +1,5 @@
 import torch
-from .utils import reparameterize
 import numpy as np
-import torch.autograd.profiler as profiler
 
 
 class BaseVaLLA(torch.nn.Module):
@@ -74,9 +72,9 @@ class BaseVaLLA(torch.nn.Module):
         self.net = net
         self.num_inducing = Z.shape[0]
 
-        self.prior_std = torch.tensor(prior_std, device=device, dtype=dtype)
+        self.log_prior_std = torch.log(torch.tensor(prior_std, device=device, dtype=dtype))
         if trainable_prior:
-            self.prior_std = torch.nn.Parameter(self.prior_std)
+            self.log_prior_std = torch.nn.Parameter(self.log_prior_std)
 
         self.inducing_locations = torch.tensor(Z, device=device, dtype=dtype)
         self.inducing_locations = torch.nn.Parameter(self.inducing_locations)
@@ -141,7 +139,7 @@ class BaseVaLLA(torch.nn.Module):
                The nelbo of the model at the current state for the
                given inputs.
         """
-
+        self.train()
         # If targets are unidimensional,
         # ensure there is a second dimension (N, 1)
         if y.ndim == 1:
@@ -191,6 +189,8 @@ class BaseVaLLA(torch.nn.Module):
                    Contains the covariance matrix of the model for each element on
                    the batch.
         """
+
+        self.eval()
         with torch.no_grad():
             # In case targets are one-dimensional and flattened, add a final dimension.
             if y.ndim == 1:
@@ -238,9 +238,9 @@ class BaseVaLLA(torch.nn.Module):
             self.inducing_locations,
             self.inducing_class,
         )
-        Kx_diag = self.prior_std**2 * Kx_diag
-        Kxz = self.prior_std**2 * Kxz
-        Kz = self.prior_std**2 * Kz
+        Kx_diag = torch.exp(self.log_prior_std)**2 * Kx_diag
+        Kxz = torch.exp(self.log_prior_std)**2 * Kxz
+        Kz = torch.exp(self.log_prior_std)**2 * Kz
         F_mean = self.net(X)
         return F_mean, Kx_diag, Kxz, Kz
     
@@ -333,7 +333,7 @@ class BaseVaLLA(torch.nn.Module):
         self.inducing_locations.requires_grad = False
 
     def freeze_prior(self):
-        self.prior_std.requires_grad = False
+        self.log_prior_std.requires_grad = False
 
 
 class VaLLARegression(BaseVaLLA):
@@ -531,7 +531,7 @@ class VaLLARegressionRBF(VaLLARegression):
         dist = torch.cdist(X, Z)**2
 
         l = 2
-        K = self.prior_std**2 * torch.exp(-dist / l)
+        K = torch.exp(self.log_prior_std)**2 * torch.exp(-dist / l)
         return K
 
     def compute_kernels(self, X):
@@ -551,13 +551,13 @@ class VaLLAMultiClass(BaseVaLLA):
 
         F_mean, F_var = self.predict_f(X)
         
-        if self.alpha != 1:
-            raise ValueError("Alpha must be 1")
-
         F = F_mean/torch.sqrt( 1 + torch.pi/8 * torch.diagonal(F_var, dim1 = 1, dim2 = 2))
-        ell = -torch.nn.functional.cross_entropy(F, 
-                                                 y.to(torch.long).squeeze(-1),
-                                                 reduction = "none")
+
+        probs = F.softmax(-1)**self.alpha
+
+        ell = -1/self.alpha * torch.nn.functional.cross_entropy(probs.log(), 
+                                                y.to(torch.long).squeeze(-1),
+                                                reduction = "none")
 
         # # Aggregate on data dimension
         logpdf = torch.sum(ell)
@@ -743,7 +743,7 @@ class VaLLAMultiClassMCRBF(VaLLAMultiClassMC):
 
         dist = torch.cdist(X, Z)**2
 
-        K = self.prior_std**2 * torch.exp(-dist / 2)
+        K = torch.exp(self.log_prior_std)**2 * torch.exp(-dist / 2)
         return K
 
     def compute_kernels(self, X):
@@ -810,7 +810,7 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
         Z_classes = torch.nn.functional.one_hot(Z_classes, self.output_dim).to(self.dtype) 
         output_dist = torch.sum((X_classes.unsqueeze(1).unsqueeze(3) - Z_classes.unsqueeze(0).unsqueeze(2))**2, -1)
 
-        K = self.prior_std**2 * torch.exp(-dist / 2) * torch.exp(-output_dist / (2* self.length_scale_outputs))
+        K = torch.exp(self.log_prior_std)**2 * torch.exp(-dist / 2) * torch.exp(-output_dist / (2* self.length_scale_outputs))
         return K
 
     def compute_kernels(self, X):
@@ -842,7 +842,7 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
 
 
 
-class VaLLAMultiClassBackPack(VaLLAMultiClass):
+class VaLLAMultiClassBackend(VaLLAMultiClass):
     def __init__(
         self,
         net,
@@ -850,6 +850,7 @@ class VaLLAMultiClassBackPack(VaLLAMultiClass):
         prior_std,
         num_data,
         output_dim,
+        backend,
         track_inducing_locations=False,
         trainable_prior = True,
         alpha=1.0,
@@ -874,73 +875,22 @@ class VaLLAMultiClassBackPack(VaLLAMultiClass):
             device,
             dtype,
         )
-        from src.backpack_interface import BackPackInterface
-        self.backpack = BackPackInterface(net, output_dim)
+        self.backpack = backend
 
     def compute_kernels(self, X):
-        Jx = self.backpack.jacobians(X)
+        Jx = self.backpack.jacobians(X, enable_back_prop = False)
         Jz = self.backpack.jacobians_on_outputs(self.inducing_locations, 
-                                                self.inducing_class.unsqueeze(-1)
+                                                self.inducing_class.unsqueeze(-1),
+                                                enable_back_prop = self.training
                                                 ).squeeze(1)
 
-        Kx_diag = self.prior_std**2 * torch.einsum("nai, nbi -> nab", Jx, Jx)
-        Kxz = self.prior_std**2 * torch.einsum("nai, mi -> nma", Jx, Jz)
-        Kzz = self.prior_std**2 * torch.einsum("ni, mi -> nm", Jz, Jz)
+        Kx_diag = torch.exp(self.log_prior_std)**2 * torch.einsum("nai, nbi -> nab", Jx, Jx)
+        Kxz = torch.exp(self.log_prior_std)**2 * torch.einsum("nai, mi -> nma", Jx, Jz)
+        Kzz = torch.exp(self.log_prior_std)**2 * torch.einsum("ni, mi -> nm", Jz, Jz)
         F_mean = self.net(X)
 
         return F_mean, Kx_diag, Kxz, Kzz
 
-    def test_step(self, X, y):
-        """
-        Defines the test step for the DVIP model.
-        Parameters
-        ----------
-        X : torch tensor of shape (batch_size, data_dim)
-            Contains the input features.
-        y : torch tensor of shape (batch_size, output_dim)
-            Targets of the given input.
-        Returns
-        -------
-        loss : float
-               The nelbo of the model at the current state for the given inputs.
-        mean_pred : torch tensor of size (batch_size, output_dim)
-                    Predictive mean of the model on the given batch
-        var_pred : torch tensor of size (batch_size, output_dim, output_dim)
-                   Contains the covariance matrix of the model for each element on
-                   the batch.
-        """
-        # In case targets are one-dimensional and flattened, add a final dimension.
-
-        self.backpack.train_mode = False
-        with torch.no_grad():
-            if y.ndim == 1:
-                y = y.unsqueeze(-1)
-
-            # Cast types if needed.
-            if self.dtype != X.dtype:
-                X = X.to(self.dtype)
-            if self.dtype != y.dtype:
-                y = y.to(self.dtype)
-
-            Fmean, Fvar = self(X)  # Forward pass
-    
-            # Temporarily change the num data variable so that the
-            # scale of the likelihood is correctly computed on the
-            # test dataset.
-            num_data = self.num_data
-            self.num_data = X.shape[0]
-            # Compute the loss with scaled data
-            loss = self.nelbo(X, (y - self.y_mean) / self.y_std)
-            self.num_data = num_data
-
-            return loss, Fmean, Fvar
-        
-    def freeze(self):
-        self.inducing_locations.requires_grad = False
-        #self.prior_std.requires_grad = False
-        #self.L.requires_grad = False
-        return
-    
 
 class VaLLAMultiClassRBF(VaLLAMultiClass):
     def __init__(
@@ -977,7 +927,7 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
 
         self.length_scale = torch.ones(Z.shape[1], self.output_dim, device=device, dtype=dtype)
         self.length_scale = torch.nn.Parameter(self.length_scale)
-        self.prior_std = torch.ones(self.output_dim, device = device, dtype = dtype)
+        self.log_prior_std = torch.ones(self.output_dim, device = device, dtype = dtype)
 
     def rbf(self, X, Z, X_classes, Z_classes):
         # X shape (n, i)
@@ -1004,7 +954,7 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
         Z_classes = torch.nn.functional.one_hot(Z_classes, self.output_dim).to(self.dtype) 
         output_dist = torch.sum((X_classes.unsqueeze(1).unsqueeze(3) - Z_classes.unsqueeze(0).unsqueeze(2))**2, -1)
 
-        K = self.prior_std**2 * torch.exp(-dist / 2) * torch.exp(-output_dist / (2* self.length_scale_outputs))
+        K = torch.exp(self.log_prior_std)**2 * torch.exp(-dist / 2) * torch.exp(-output_dist / (2* self.length_scale_outputs))
         return K
 
     def compute_kernels(self, X):

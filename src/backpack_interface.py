@@ -1,127 +1,162 @@
 import torch
 
 from backpack import backpack, extend, memory_cleanup
-from backpack.extensions import (
-    DiagGGNExact,
-    DiagGGNMC,
-    KFAC,
-    KFLR,
-    SumGradSquared,
-    BatchGrad,
-)
+from backpack.extensions import BatchGrad
 from backpack.context import CTX
-
-from laplace.curvature import CurvatureInterface, GGNInterface, EFInterface
-from laplace.utils import Kron
+from laplace.curvature import CurvatureInterface
 
 
 class BackPackInterface(CurvatureInterface):
     """Interface for Backpack backend."""
 
-    def __init__(self, model, output_dim, last_layer=False, subnetwork_indices=None):
-        super().__init__(model, "regression", last_layer, subnetwork_indices)
+    def __init__(self, model, output_dim):
+        super().__init__(model, "regression", False, None)
         extend(self._model)
         self.output_size = output_dim
-        self.train_mode = True
 
-    def jacobians(self, x):
+    def jacobians(self, x, enable_back_prop = False):
         """Compute Jacobians \\(\\nabla_{\\theta} f(x;\\theta)\\) at current parameter \\(\\theta\\)
         using backpack's BatchGrad per output dimension.
 
         Parameters
         ----------
-        x : torch.Tensor
-            input data `(batch, input_shape)` on compatible device with model.
+        x : torch.Tensor of shape (batch, input_shape)
+            input data on compatible device with model.
+        enable_back_prop : boolean
+            If True, computational graph is retained and backpropagation can be used
+            on elements used in this function.
 
         Returns
         -------
-        Js : torch.Tensor
-            Jacobians `(batch, parameters, outputs)`
-        f : torch.Tensor
-            output function `(batch, outputs)`
+        Js : torch.Tensor of shape (batch, parameters, outputs)
+            Jacobians ``
         """
+        # Enable grads in this section of code
         with torch.set_grad_enabled(True):
-            print(x.shape)
+            # Extend model using BackPack converter
             model = extend(self.model, use_converter=True)
+            # Set model in evaluation mode to ignore Dropout, BatchNorm..
             model.eval()
+
+            # Initialice array to concatenate
             to_stack = []
-            model.zero_grad()
-            out = model(x)
 
+            # Loop over output dimension
             for i in range(self.output_size):
+                # Reset gradients
+                model.zero_grad()
+                # Compute output
+                out = model(x)
 
-                with backpack(BatchGrad(), retain_graph=True):
+                # Use Backpack Gradbatch to retain independent gradients for each input.
+                with backpack(BatchGrad()):
+                    # Compute backward pass on the corresponding output (if more than one)
                     if self.output_size > 1:
-                        out[:, i].sum().backward(create_graph=True)
+                        out[:, i].sum().backward(create_graph=enable_back_prop,
+                                                 retain_graph=enable_back_prop)
                     else:
-                        out.sum().backward(create_graph=True)
+                        out.sum().backward(create_graph=enable_back_prop,
+                                           retain_graph=enable_back_prop)
+                    # Auxiliar array
                     to_cat = []
+                    # Loop over model parameters, retrieve their gradient and delete it
                     for param in model.parameters():
                         to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
                         delattr(param, "grad_batch")
+                    # Stack all gradients
                     Jk = torch.cat(to_cat, dim=1)
-                    if self.train_mode == False:
-                        Jk = Jk.detach()
+                # Append result
                 to_stack.append(Jk)
 
+        # Clean model gradients
         model.zero_grad()
+        # Erase gradients form input
         x.grad = None
+        # Clean BackPak hooks
         CTX.remove_hooks()
+        # Clean extended model
         _cleanup(model)
-        if model.output_size > 1:
+
+        # Return Jacobians
+        if self.output_size > 1:
             return torch.stack(to_stack, dim=2).transpose(1, 2)
         else:
             return Jk.unsqueeze(-1).transpose(1, 2)
 
-    def jacobians_on_outputs(self, x, outputs):
+    def jacobians_on_outputs(self, x, outputs, enable_back_prop = True):
         """Compute Jacobians \\(\\nabla_{\\theta} f(x;\\theta)\\) at current parameter \\(\\theta\\)
-        using backpack's BatchGrad per given output dimension.
+        using backpack's BatchGrad on specific output dimensions for each input.
+
+        For example, if outputs[i] = [3, 4], the returned Jacobian at position i
+        will have shape (num_params, 2), where [:, 0] will contain the Jacobians 
+        wrt the 3rd output and [:, 1] the Jacobians wrt the 4th output.
 
         Parameters
         ----------
-        x : torch.Tensor
-            input data `(batch, input_shape)` on compatible device with model.
-
-        outputs : torch.Tensor
-            input data `(batch)` on compatible device with model.
-
+        x : torch.Tensor of shape (batch, input_shape)
+            input data on compatible device with model.
+        outputs : torch.Tensor of shape (batch, n_outputs)
+            Contains the outputs wrt which the Jacobian sholud be computed for every
+            input.
+        enable_back_prop : boolean
+            If True, computational graph is retained and backpropagation can be used
+            on elements used in this function.
 
         Returns
         -------
         Js : torch.Tensor
-            Jacobians `(batch, parameters)`
-        f : torch.Tensor
-            output function `(batch)`
+            Jacobians `(batch, parameters, n_outputs)`
+            The position (i, p, j) contains the Jacobian wrt the p-th parameter
+            for the input x[i] and the outputs[j]-th output of the network.
         """
+        # Enable grads in this section of code
         with torch.set_grad_enabled(True):
+            # Extend model using BackPack converter
+            model = extend(self.model, use_converter=True)
+            # Set model in evaluation mode to ignore Dropout, BatchNorm..
             model.eval()
-            model = extend(self.model,  use_converter=True)
-            to_stack = []
-            model.zero_grad()
 
-            out = model(x)
+            # Initialice array to concatenate
+            to_stack = []
+
+            # Loop over the number of desired outputs.
             for i in range(outputs.shape[1]):
+                # Reset gradients
+                model.zero_grad()
+                # Compute output
+                out = model(x)
+                # Get the specific output for each input in this iteration
                 c = outputs[:, i]
 
-                with backpack(BatchGrad(), retain_graph=self.train_mode):
-                    torch.gather(out, 1, c.unsqueeze(-1)).sum().backward(create_graph=self.train_mode)
+                # Use Backpack Gradbatch to retain independent gradients for each input.
+                with backpack(BatchGrad()):
+                    # Gather the desired output for each input
+                    o = torch.gather(out, 1, c.unsqueeze(-1)).sum()
+                    # Compute Backward pass
+                    o.backward(create_graph=enable_back_prop,
+                               retain_graph=enable_back_prop)
+                    # Initialize auxiliar array
                     to_cat = []
+                    # Loop over model parameters, retrieve their gradient and delete it
                     for param in model.parameters():
                         to_cat.append(param.grad_batch.reshape(x.shape[0], -1))
                         delattr(param, "grad_batch")
+                    # Stack all gradients
                     Jk = torch.cat(to_cat, dim=1)
-                    if self.subnetwork_indices is not None:
-                        Jk = Jk[:, self.subnetwork_indices]
-                    if self.train_mode == False:
-                        Jk = Jk.detach()
+                # Append result
                 to_stack.append(Jk)
-                
 
+        # Clean model gradients
         model.zero_grad()
+        # Erase gradients form input
         x.grad = None
+        # Clean BackPak hooks
         CTX.remove_hooks()
+        # Clean extended model
         _cleanup(model)
-        if model.output_size > 1:
+
+        # Return Jacobians
+        if self.output_size > 1:
             return torch.stack(to_stack, dim=2).transpose(1, 2)
         else:
             return Jk.unsqueeze(-1).transpose(1, 2)

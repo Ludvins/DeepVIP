@@ -27,6 +27,9 @@ def manage_experiment_configuration(args=None):
     if args.device == "gpu":
         # CUDA for PyTorch
         use_cuda = torch.cuda.is_available()
+        if use_cuda:
+            print("Enabling GPU usage")
+
         args.device = torch.device("cuda:0" if use_cuda else "cpu")
         torch.backends.cudnn.benchmark = True
 

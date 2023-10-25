@@ -141,12 +141,14 @@ def fit(
     model,
     training_generator,
     optimizer,
-    scheduler=None,
-    epochs=None,
+    val_generator = None,
+    val_steps = -1,
+    val_metrics = None,
     iterations=None,
     use_tqdm=False,
     return_loss=False,
     device=None,
+    dtype=None,
 ):
     """
     Trains the given model using the arguments provided.
@@ -170,32 +172,9 @@ def fit(
     # Set model in training mode
 
     losses = []
+    val_losses = [np.infty]
 
-    model.train()
-
-    if epochs is None and iterations is None:
-        raise ValueError("Either epochs or iterations must be set.")
-
-    if epochs is not None:
-
-        if use_tqdm:
-            # Initialize TQDM bar
-            tepoch = tqdm(range(epochs), unit=" epoch")
-            tepoch.set_description("Training ")
-        else:
-            tepoch = range(epochs)
-
-        for _ in tepoch:
-            # Mini-batch training
-            for inputs, target in training_generator:
-                inputs = inputs.to(device)
-                target = target.to(device)
-                loss = model.train_step(optimizer, inputs, target)
-                if return_loss:
-                    losses.append(loss.detach().numpy())
-            # Update learning rate using scheduler if available
-            if scheduler is not None:
-                scheduler.step()
+    #model.train()
 
     if use_tqdm:
         # Initialize TQDM bar
@@ -205,7 +184,7 @@ def fit(
         iters = range(iterations)
     data_iter = iter(training_generator)
 
-    for _ in iters:
+    for i in iters:
         try:
             inputs, target = next(data_iter)
         except StopIteration:
@@ -219,7 +198,16 @@ def fit(
         if return_loss:
             losses.append(loss.detach().cpu().numpy())
 
-    return losses
+        if val_generator != None and i%val_steps == 0:
+            #model.eval()
+            sc = score(model, val_generator, val_metrics, True, device, dtype)["NLL"]
+            val_losses.append(sc)
+            if val_losses[-1]>val_losses[-2]:
+                print("Early-stopped at iteration {} with val NLL {}".format(i, val_losses[-1]))
+                return losses, val_losses[1:]
+            #model.train()
+
+    return losses, val_losses[1:]
 
 
 def score(model, generator, metrics, use_tqdm=False, device=None, dtype = None, **kwargs):
@@ -243,8 +231,8 @@ def score(model, generator, metrics, use_tqdm=False, device=None, dtype = None, 
               batches.
     """
     # Set model in evaluation mode
-    #model.eval()
     # Initialize metrics
+
     metrics = metrics(len(generator.dataset), device=device, dtype = dtype)
 
     if use_tqdm:

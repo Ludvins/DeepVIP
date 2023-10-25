@@ -28,7 +28,6 @@ if os.path.isfile("results/" + save_str + ".csv"):
     exit()
 
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -48,12 +47,15 @@ f = get_mlp(
     args.dataset.output_dim,
     args.net_structure,
     args.activation,
+    dropout=True,
     device=args.device,
     dtype=args.dtype,
 )
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
+opt = torch.optim.SGD(f.parameters(), lr=args.MAP_lr, momentum=0.5)
+
 # Set the number of training samples to generate
 
 try:
@@ -79,6 +81,7 @@ except:
     end = timer()
     torch.save(f.state_dict(), "weights/multiclass_weights_" + args.dataset_name)
 
+f.eval()
 
 ella = ELLA_Multiclass(
     create_ad_hoc_mlp(f),

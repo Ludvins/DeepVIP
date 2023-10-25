@@ -14,7 +14,7 @@ sys.path.append(".")
 from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit_map_crossentropy, fit, forward, score
 from scripts.filename import create_file_name
-from src.valla import VaLLAMultiClassBackPack
+from src.valla import VaLLAMultiClassBackend
 from utils.models import get_resnet
 from utils.dataset import get_dataset
 from utils.metrics import SoftmaxClassification, OOD
@@ -22,7 +22,6 @@ from src.utils import smooth
 import matplotlib.pyplot as plt
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -34,15 +33,28 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-f = get_resnet("resnet20", 10)
+f = get_resnet("resnet20", 10).to(args.device)
 
-Z = kmeans2(train_dataset.inputs.reshape(train_dataset.inputs.shape[0], -1), 
-            args.num_inducing, minit="points", seed=args.seed)[0]
-Z = Z.reshape(args.num_inducing, *train_dataset.inputs.shape[1:])
+Z = []
+classes = []
+for c in range(train_dataset.output_dim):
+    s = train_dataset.inputs[train_dataset.targets.flatten() == c]
+    z = kmeans2(s.reshape(s.shape[0], -1), 
+                args.num_inducing//train_dataset.output_dim, minit="points", 
+                seed=args.seed)[0]
+    z = z.reshape(args.num_inducing//train_dataset.output_dim, 
+                  *train_dataset.inputs.shape[1:])
 
-valla = VaLLAMultiClassBackPack(
+    Z.append(z)
+    classes.append(np.ones(args.num_inducing//train_dataset.output_dim) * c)
+Z = np.concatenate(Z)
+classes = np.concatenate(classes)
+
+from src.backpack_interface import BackPackInterface
+valla = VaLLAMultiClassBackend(
     f,
     Z,
+    backend = BackPackInterface(f, train_dataset.output_dim),
     prior_std=args.prior_std,
     num_data=train_dataset.inputs.shape[0],
     output_dim=train_dataset.output_dim,
@@ -70,7 +82,7 @@ loss = fit(
 end = timer()
 
 
-save_str = "VaLLA_Conv_dataset={}_M={}_seed={}".format(
+save_str = "VaLLA_Resnet20_dataset={}_M={}_seed={}".format(
     args.dataset_name, args.num_inducing, args.seed
 )
 
@@ -86,7 +98,7 @@ test_metrics = score(
     dtype=args.dtype,
 )
 
-test_metrics["prior_std"] = valla.prior_std.detach().numpy()
+test_metrics["prior_std"] = np.exp(valla.prior_std.detach().cpu().numpy())
 test_metrics["iterations"] = args.iterations
 test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name

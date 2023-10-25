@@ -16,7 +16,7 @@ from utils.metrics import SoftmaxClassification, OOD
 args = manage_experiment_configuration()
 
 
-save_str = "ELLA_Conv_dataset={}_M={}_prior={}_seed={}".format(
+save_str = "ELLA_Resnet20_dataset={}_M={}_prior={}_seed={}".format(
     args.dataset_name, args.num_inducing, args.prior_std, args.seed
 )
 
@@ -28,7 +28,6 @@ if os.path.isfile("results/" + save_str + ".csv"):
     exit()
 
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -42,7 +41,7 @@ val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-f = get_resnet("resnet20", 10)
+f = get_resnet("resnet20", 10).to(args.device)
 
 
 ella = ELLA_MulticlassBackpack(

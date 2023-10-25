@@ -15,7 +15,6 @@ from utils.metrics import SoftmaxClassification, OOD
 
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -32,6 +31,7 @@ f = get_mlp(
     args.dataset.output_dim,
     args.net_structure,
     args.activation,
+    dropout=True,
     device=args.device,
     dtype=args.dtype,
 )
@@ -41,7 +41,8 @@ if args.weight_decay != 0:
 
 
 # Define optimizer and compile model
-opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
+#opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
+opt = torch.optim.SGD(f.parameters(), lr=args.MAP_lr, momentum=0.5, weight_decay=args.weight_decay)
 
 # Set the number of training samples to generate
 
@@ -69,7 +70,7 @@ except:
     end = timer()
     torch.save(f.state_dict(), "weights/multiclass_weights_" + args.dataset_name)
 
-
+f.eval()
 
 def test_step(X, y):
 
@@ -99,6 +100,7 @@ test_metrics = score(
     device=args.device,
     dtype=args.dtype,
 )
+print(test_metrics)
 
 test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name

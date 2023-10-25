@@ -18,7 +18,6 @@ import tqdm
 
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -36,12 +35,14 @@ f = get_mlp(
     args.dataset.output_dim,
     args.net_structure,
     args.activation,
+    dropout=True,
     device=args.device,
     dtype=args.dtype,
 )
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
+opt = torch.optim.SGD(f.parameters(), lr=args.MAP_lr, momentum=0.5)
 
 try:
     f.load_state_dict(torch.load("weights/multiclass_weights_" + args.dataset_name))
@@ -64,6 +65,9 @@ except:
     print("MAP Loss: ", loss[-1])
     end = timer()
     torch.save(f.state_dict(), "weights/multiclass_weights_" + args.dataset_name)
+
+f.eval()
+
 
 # 'all', 'subnetwork' and 'last_layer'
 subset = args.subset
@@ -98,6 +102,9 @@ if not args.fixed_prior:
         neg_marglik = -la.log_marginal_likelihood(log_prior.exp())
         neg_marglik.backward()
         hyper_optimizer.step()
+
+    #la.optimize_prior_precision(method = "CV", val_loader = val_loader, 
+    #                            link_approx = "mc", verbose = args.verbose)
 
 
     prior_std = np.sqrt(1 / np.exp(log_prior.detach().numpy())).item()
@@ -137,6 +144,11 @@ test_metrics = score(
     device=args.device,
     dtype=args.dtype,
 )
+
+
+print(test_metrics)
+input()
+
 test_metrics["prior_std"] = prior_std
 test_metrics["iterations"] = args.iterations
 test_metrics["weight_decay"] = args.weight_decay
@@ -146,6 +158,8 @@ test_metrics["subset"] = subset
 test_metrics["hessian"] = hessian
 test_metrics["seed"] = args.seed
 test_metrics["time"] = end-start
+
+print(test_metrics)
 
 if args.test_ood:
     ood_dataset = args.dataset.get_ood_datasets()

@@ -16,7 +16,6 @@ from utils.models import get_mlp, create_ad_hoc_mlp
 from utils.metrics import SoftmaxClassification, OOD
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -34,11 +33,13 @@ f = get_mlp(
     args.dataset.output_dim,
     args.net_structure,
     args.activation,
+    dropout=True,
     device=args.device,
     dtype=args.dtype,
 )
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
+opt = torch.optim.SGD(f.parameters(), lr=args.MAP_lr, momentum=0.5)
 
 try:
     f.load_state_dict(torch.load("weights/multiclass_weights_" + args.dataset_name))
@@ -61,8 +62,19 @@ except:
     print("MAP Loss: ", loss[-1])
     end = timer()
     torch.save(f.state_dict(), "weights/multiclass_weights_" + args.dataset_name)
+f.eval()
 
-Z = kmeans2(train_dataset.inputs, args.num_inducing, minit="points", seed=args.seed)[0]
+Z = []
+classes = []
+for c in range(train_dataset.output_dim):
+    Z.append(kmeans2(train_dataset.inputs[train_dataset.targets.flatten() == c], 
+                args.num_inducing//train_dataset.output_dim, minit="points", 
+                seed=args.seed)[0])
+    classes.append(np.ones(args.num_inducing//train_dataset.output_dim) * c)
+Z = np.concatenate(Z)
+classes = np.concatenate(classes)
+
+#Z = kmeans2(train_dataset.inputs, args.num_inducing, minit="points", seed=args.seed)[0]
 
 valla = VaLLAMultiClass(
     create_ad_hoc_mlp(f),
@@ -71,6 +83,7 @@ valla = VaLLAMultiClass(
     num_data=train_dataset.inputs.shape[0],
     output_dim=train_dataset.output_dim,
     track_inducing_locations=False,
+    inducing_classes=classes,
     trainable_prior = not args.fixed_prior,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
@@ -84,14 +97,18 @@ valla.print_variables()
 opt = torch.optim.Adam(valla.parameters(recurse=False), lr=args.lr)
 
 start = timer()
-loss = fit(
+loss, val_loss = fit(
     valla,
     train_loader,
     opt,
+    val_metrics=SoftmaxClassification,
+    val_steps=valla.num_data//args.batch_size,
+    val_generator = val_loader,
     use_tqdm=args.verbose,
     return_loss=True,
     iterations=args.iterations,
     device=args.device,
+    dtype = args.dtype
 )
 end = timer()
 
@@ -114,7 +131,9 @@ test_metrics = score(
     dtype=args.dtype,
 )
 
-test_metrics["prior_std"] = valla.prior_std.detach().numpy()
+print(test_metrics)
+
+test_metrics["prior_std"] = torch.exp(valla.log_prior_std).detach().numpy()
 test_metrics["iterations"] = args.iterations
 test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name

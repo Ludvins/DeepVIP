@@ -22,7 +22,6 @@ from src.utils import smooth
 import matplotlib.pyplot as plt
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -41,7 +40,8 @@ f = get_conv(
     dtype=args.dtype,
 )
 # Define optimizer and compile model
-opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
+#opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
+opt = torch.optim.SGD(f.parameters(), lr=args.MAP_lr, momentum=0.5,  weight_decay=args.weight_decay)
 
 try:
     f.load_state_dict(torch.load("weights/multiclass_weights_conv_" + args.dataset_name))
@@ -66,11 +66,6 @@ except:
 save_str = "MAP_Conv_dataset={}".format(
     args.dataset_name)
 
-
-y_mean = torch.tensor(train_dataset.targets_mean, device=args.device)
-y_std = torch.tensor(train_dataset.targets_std, device=args.device)
-
-
 def test_step(X, y):
 
         # In case targets are one-dimensional and flattened, add a final dimension.
@@ -87,7 +82,7 @@ def test_step(X, y):
     Fvar = torch.zeros(Fmean.shape[0], Fmean.shape[1], Fmean.shape[1],
                        dtype = args.dtype, device = args.device)
 
-    return 0, Fmean * y_std + y_mean, Fvar * y_std**2
+    return 0, Fmean, Fvar
 
 f.test_step = test_step
 
@@ -99,6 +94,7 @@ test_metrics = score(
     device=args.device,
     dtype=args.dtype,
 )
+
 
 test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name
@@ -126,6 +122,9 @@ if args.test_corruptions:
             f, loader, SoftmaxClassification, use_tqdm=args.verbose, device=args.device, dtype=args.dtype
         ).copy()
         print(corrupted_metrics)
+
+        del corrupted_dataset
+        del loader
 
         test_metrics = {
             **test_metrics,

@@ -229,8 +229,8 @@ class SoftmaxClassificationNLL(Metrics):
         else:
             scale = batch_size / self.num_data
                
-        chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1]).unsqueeze(0))
-        z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, dtype = self.dtype)
+        chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1], device=self.device).unsqueeze(0))
+        z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, device=self.device, dtype = self.dtype)
         samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)
         
         probs = samples.softmax(-1)
@@ -289,8 +289,9 @@ class SoftmaxClassification(Metrics):
          
         self.loss += scale * loss
         
-        chol = torch.linalg.cholesky(Fvar + 1e-6 * torch.eye(Fvar.shape[-1]).unsqueeze(0))
-        z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, dtype = self.dtype)
+        chol = torch.linalg.cholesky(Fvar + 1e-6 * torch.eye(Fvar.shape[-1], device = self.device).unsqueeze(0))
+        z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, device = self.device,
+                            dtype = self.dtype)
         samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)
         
         probs = samples.softmax(-1)
@@ -376,8 +377,9 @@ class OOD(Metrics):
                      Usable to compute the log likelihood metric.
         """
         with torch.no_grad():            
-            chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1]).unsqueeze(0))
-            z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, dtype = self.dtype)
+            chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1], device = self.device).unsqueeze(0))
+            z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator,
+                            device = self.device, dtype = self.dtype)
             samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)
             
             # Compute probabilities
@@ -407,8 +409,10 @@ class OOD(Metrics):
         self.preds = torch.cat(self.preds)
         self.preds_mc = torch.cat(self.preds_mc)
 
-        auc = roc_auc_score(self.labels.squeeze(-1), self.preds)
-        auc_mc = roc_auc_score(self.labels.squeeze(-1), self.preds_mc)
+        auc = roc_auc_score(self.labels.squeeze(-1).detach().cpu().numpy(), 
+                            self.preds.detach().cpu().numpy())
+        auc_mc = roc_auc_score(self.labels.squeeze(-1).detach().cpu().numpy(), 
+                               self.preds_mc.detach().cpu().numpy())
 
         return {
             "AUC MC": auc_mc,

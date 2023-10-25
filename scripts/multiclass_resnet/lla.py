@@ -19,7 +19,6 @@ import tqdm
 
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -32,7 +31,7 @@ val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-f = get_resnet("resnet20", 10)
+f = get_resnet("resnet20", 10).to(args.device)
 # 'all', 'subnetwork' and 'last_layer'
 subset = args.subset
 # 'full', 'kron', 'lowrank' and 'diag'
@@ -60,8 +59,19 @@ start = timer()
 
 la.fit(train_loader)
 
-#la.optimize_prior_precision(method='marglik', pred_type='glm', link_approx='mc', n_samples=512)
+log_prior = torch.ones(1, requires_grad=True)
+
+hyper_optimizer = torch.optim.Adam([log_prior], lr=1e-3)
+for i in tqdm.tqdm(range(args.iterations)):
+    hyper_optimizer.zero_grad()
+    neg_marglik = -la.log_marginal_likelihood(log_prior.exp())
+    neg_marglik.backward()
+    hyper_optimizer.step()
+
 end = timer()
+
+prior_std = np.sqrt(1 / np.exp(log_prior.detach().numpy())).item()
+
 
 
 def test_step(X, y):
@@ -76,17 +86,14 @@ def test_step(X, y):
         if args.dtype != y.dtype:
             y = y.to(args.dtype)
 
-        Fmean, Fvar = la._glm_predictive_distribution(X)  # Forward pass
-        #Fmean = f(X)  # Forward pass
-        #Fvar = torch.zeros(Fmean.shape[0], Fmean.shape[1], Fmean.shape[1],
-        #               dtype = args.dtype, device = args.device)
+        Fmean, Fvar = la._glm_predictive_distribution(X) 
 
         return 0, Fmean, Fvar
 
 
 la.test_step = test_step
 
-save_str = "LLA_Conv_dataset={}_{}_{}_seed={}".format(
+save_str = "LLA_Resnet20_dataset={}_{}_{}_seed={}".format(
     args.dataset_name, subset, hessian, args.seed
 )
 
@@ -99,7 +106,7 @@ test_metrics = score(
     device=args.device,
     dtype=args.dtype,
 )
-#test_metrics["prior_std"] = prior_std
+test_metrics["prior_std"] = prior_std
 test_metrics["iterations"] = args.iterations
 test_metrics["weight_decay"] = args.weight_decay
 test_metrics["dataset"] = args.dataset_name

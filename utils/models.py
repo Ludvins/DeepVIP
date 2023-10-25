@@ -12,31 +12,39 @@ class ConvNet(nn.Module):
         super().__init__()
         
         self.output_size = output_dim
-        self.n_channels = input_shape[0]
+        self.n_channels = input_shape[-1]
         self.input_shape = input_shape
-        if input_shape[-1] == 32:
+        if input_shape[0] == 32:
             fc_shape = 5*5*16
-        elif input_shape[-1] == 28:
+        elif input_shape[0] == 28:
             fc_shape = 256
         else:
             raise ValueError("Unsupported image shape")
         self.dtype = dtype
-        
+        self.relu = nn.ReLU(inplace=False)
+
         self.conv1 = nn.Conv2d(self.n_channels, 6, 5, device=device, dtype = dtype)
         self.pool = nn.MaxPool2d(2, 2)
+        self.drop = nn.Dropout(0.1)
         self.conv2 = nn.Conv2d(6, 16, 5, device=device, dtype = dtype)
         self.fc1 = nn.Linear(fc_shape, 120, device=device, dtype = dtype)
         self.fc2 = nn.Linear(120, 84, device=device, dtype = dtype)
         self.fc3 = nn.Linear(84, output_dim, device=device, dtype = dtype)
 
     def forward(self, x):
-        x = x.to(self.dtype)
-        x = x.view(-1, *self.input_shape)
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
+        #x = x.to(self.dtype)
+        x = self.pool(self.conv1(x))
+        x = self.relu(x)
+        x = self.drop(x)
+        x = self.pool(self.conv2(x))
+        x = self.relu(x)
+        x = self.drop(x)
         x = torch.flatten(x, 1) # flatten all dimensions except batch
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        x = self.relu(x)
+
         x = self.fc3(x)
         return x
     
@@ -46,7 +54,7 @@ def get_conv(input_shape, output_dim, device, dtype):
     net = ConvNet(input_shape, output_dim, device, dtype)
     return net
 
-def get_mlp(input_dim, output_dim, inner_dims, activation,
+def get_mlp(input_dim, output_dim, inner_dims, activation, dropout = False,
             final_layer_activation = None, device = None, dtype = None):
     torch.manual_seed(2147483647)
     
@@ -56,13 +64,19 @@ def get_mlp(input_dim, output_dim, inner_dims, activation,
         layers.append(
             torch.nn.Linear(_in, _out, device = device, dtype = dtype)
         )
-        if i != len(dims) -2:
-            layers.append(activation())
+
+        if i != len(dims) -2:       
+            layers.append(activation()) 
+            if dropout:
+                layers.append(
+                    torch.nn.Dropout(0.1)
+                )
             
     if final_layer_activation is not None:
         layers.append(final_layer_activation())
     
     model = torch.nn.Sequential(*layers)
+    print(model)
     setattr(model, 'output_size', output_dim)
     setattr(model, "implements_jacobian", False)
     return model
@@ -192,13 +206,19 @@ class TanhJacobian(nn.Module):
         return dout
 
 def create_ad_hoc_mlp(mlp):
-    mlp_ad_hoc = MLP(mlp[0].weight.shape[1], mlp[-1].weight.shape[0], len(mlp)//2, mlp[0].weight.shape[0], 
+
+    linear_layers = []
+    for layer in mlp:
+        if isinstance(layer, nn.Linear):
+            linear_layers.append(layer)
+    
+    mlp_ad_hoc = MLP(mlp[0].weight.shape[1], mlp[-1].weight.shape[0], len(linear_layers)-1,
+                     mlp[0].weight.shape[0], 
                      device =  mlp[-1].weight.device, 
                      dtype =  mlp[-1].weight.dtype)
-    
-    for i in range(0, len(mlp), 2):
-        mlp_ad_hoc.layers[i].weight = mlp[i].weight.T
-        mlp_ad_hoc.layers[i].bias = mlp[i].bias.unsqueeze(0)
+    for i in range(0, len(linear_layers)):
+        mlp_ad_hoc.layers[2*i].weight = linear_layers[i].weight.T
+        mlp_ad_hoc.layers[2*i].bias = linear_layers[i].bias.unsqueeze(0)
 
     return mlp_ad_hoc
 

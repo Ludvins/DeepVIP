@@ -22,7 +22,6 @@ from src.utils import smooth
 import matplotlib.pyplot as plt
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
@@ -34,7 +33,7 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle = True)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-f = get_resnet("resnet20", 10)
+f = get_resnet("resnet20", 10).to(args.device)
 
 save_str = "MAP_Resnet20_dataset={}".format(
     args.dataset_name)

@@ -559,7 +559,7 @@ class CIFAR10_Dataset(DVIPDataset):
         self.type = "multiclass"
         self.classes = 10
         self.output_dim = 10
-        self.corruption_values = [1,2,3,4,5]
+        self.corruption_values = [0,1,2,3,4]
         train = datasets.CIFAR10(
             root="./data", train=True, download=True, transform=transforms.ToTensor()
         )
@@ -633,18 +633,12 @@ class CIFAR10_Dataset(DVIPDataset):
         return self.train, self.val, self.test
     
     def get_corrupted_split(self, noise):
+        map = np.lib.format.open_memmap("./data/gaussian_blur.npy", mode='r+')
+        subset = map[noise*10000:(noise+1)*10000]
         
-        test = datasets.CIFAR10(
-            root="./data",
-            train=False,
-            download=True,
-            transform=transforms.ToTensor(),
-        )
+        test_data = subset.mean(-1).reshape(10000, -1) / 255.0
 
-        gaussian_blur = GaussianBlur(noise*4+1, noise*4+1)
-        test_data = gaussian_blur(torch.tensor(test.data).permute(0, 3, 1, 2)).to(torch.float32)
-        test_data = test_data.mean(1).reshape(10000, -1) / 255.0
-        test_targets = np.array(test.targets).reshape(-1, 1)
+        test_targets = np.array(self.test.targets).reshape(-1, 1)
 
         return Test_Dataset(
             test_data,
@@ -661,12 +655,12 @@ class CIFAR10_Dataset(DVIPDataset):
         return self.ood_test
     
 
-class CIFAR10o_Dataset(DVIPDataset):
+class CIFAR10_Dataset(DVIPDataset):
     def __init__(self):
         self.type = "multiclass"
         self.classes = 10
         self.output_dim = 10
-        self.corruption_values = [1,2,3,4,5]
+        self.corruption_values = [0,1,2,3,4]
         train = datasets.CIFAR10(
             root="./data", train=True, download=True
         )
@@ -681,6 +675,7 @@ class CIFAR10o_Dataset(DVIPDataset):
         train_data = (train.data/255.0 - mean)/std
         test_data = (test.data/255.0 - mean)/std
 
+        self.input_shape = train_data.shape[1:]
         n_val = 5000
         train_data = np.transpose(train_data, (0, 3, 1, 2))
         test_data = np.transpose(test_data, (0, 3, 1, 2))
@@ -720,7 +715,10 @@ class CIFAR10o_Dataset(DVIPDataset):
             download=True,
             transform=transforms.ToTensor(),
         )
-        test2_data = test2.data
+        mean = np.expand_dims(np.expand_dims(mean, -1),-1)
+        std = np.expand_dims(np.expand_dims(std, -1),-1)
+
+        test2_data = (test2.data/255.0 - mean)/std
         ood_test_data = np.concatenate([test_data, test2_data])
         ood_test_targets = np.concatenate(
             [
@@ -743,18 +741,15 @@ class CIFAR10o_Dataset(DVIPDataset):
         return self.train, self.val, self.test
     
     def get_corrupted_split(self, noise):
+        map = np.lib.format.open_memmap("./data/gaussian_blur.npy", mode='r+')
+        subset = map[noise*10000:(noise+1)*10000]
         
-        test = datasets.CIFAR10(
-            root="./data",
-            train=False,
-            download=True,
-            transform=transforms.ToTensor(),
-        )
+        mean = [0.4914, 0.4822, 0.4465]
+        std = [0.2023, 0.1994, 0.2010]
+        test_data = (subset/255.0 - mean)/std
+        test_data = np.transpose(test_data, (0, 3, 1, 2))
 
-        gaussian_blur = GaussianBlur(noise*4+1, noise*4+1)
-        test_data = gaussian_blur(torch.tensor(test.data).permute(0, 3, 1, 2)).to(torch.float32).permute(0, 2, 3, 1)
-        test_data = test_data.reshape(10000, -1) / 255.0
-        test_targets = np.array(test.targets).reshape(-1, 1)
+        test_targets = np.array(self.test.targets)
 
         return Test_Dataset(
             test_data,
@@ -1100,7 +1095,7 @@ def get_dataset(dataset_name):
         "MNIST": MNIST_Dataset,
         "FMNIST": FMNIST_Dataset,
         "CIFAR10": CIFAR10_Dataset,
-        "CIFAR10o": CIFAR10o_Dataset,
+        #"CIFAR10o": CIFAR10o_Dataset,
         "Banana": Banana_Dataset,
         "Airline": Airline_Dataset,
         "Year": Year_Dataset,

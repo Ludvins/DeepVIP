@@ -18,7 +18,6 @@ from utils.metrics import Regression
 
 args = manage_experiment_configuration()
 
-args.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.manual_seed(args.seed)
 
 args.dataset = get_dataset(args.dataset_name)
