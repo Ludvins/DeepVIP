@@ -52,7 +52,7 @@ class BaseVaLLA(torch.nn.Module):
         num_data,
         output_dim,
         track_inducing_locations=False,
-        trainable_prior = True,
+        trainable_prior=True,
         inducing_classes=None,
         y_mean=0.0,
         y_std=1.0,
@@ -72,7 +72,9 @@ class BaseVaLLA(torch.nn.Module):
         self.net = net
         self.num_inducing = Z.shape[0]
 
-        self.log_prior_std = torch.log(torch.tensor(prior_std, device=device, dtype=dtype))
+        self.log_prior_std = torch.log(
+            torch.tensor(prior_std, device=device, dtype=dtype)
+        )
         if trainable_prior:
             self.log_prior_std = torch.nn.Parameter(self.log_prior_std)
 
@@ -80,7 +82,11 @@ class BaseVaLLA(torch.nn.Module):
         self.inducing_locations = torch.nn.Parameter(self.inducing_locations)
 
         if inducing_classes is None:
-            print("Initializing inducing classes with {} different classes".format(self.output_dim))
+            print(
+                "Initializing inducing classes with {} different classes".format(
+                    self.output_dim
+                )
+            )
             self.inducing_class = torch.tensor(
                 np.tile(
                     np.arange(self.output_dim),
@@ -231,19 +237,19 @@ class BaseVaLLA(torch.nn.Module):
         # A = L @ H^{-1} @ L^T
         # self.A = torch.einsum("nm, ml, kl -> nk", L, torch.inverse(self.H), L)
         self.A = L @ torch.linalg.solve(self.H, L.T)
-        
+
     def compute_kernels(self, X):
         _, Kx_diag, Kxz, Kz = self.net.get_full_kernels(
             X,
             self.inducing_locations,
             self.inducing_class,
         )
-        Kx_diag = torch.exp(self.log_prior_std)**2 * Kx_diag
-        Kxz = torch.exp(self.log_prior_std)**2 * Kxz
-        Kz = torch.exp(self.log_prior_std)**2 * Kz
+        Kx_diag = torch.exp(self.log_prior_std) ** 2 * Kx_diag
+        Kxz = torch.exp(self.log_prior_std) ** 2 * Kxz
+        Kz = torch.exp(self.log_prior_std) ** 2 * Kz
         F_mean = self.net(X)
         return F_mean, Kx_diag, Kxz, Kz
-    
+
     def predict_f(self, X):
         """
         Performs the mean and covariance matrix of the given input.
@@ -279,7 +285,7 @@ class BaseVaLLA(torch.nn.Module):
         # Shape [batch_size, output_dim, output_dim]
         Fvar = Kx_diag - diag
         return F_mean, Fvar
-    
+
     def forward(self, X):
         raise NotImplementedError
 
@@ -346,7 +352,7 @@ class VaLLARegression(BaseVaLLA):
         output_dim,
         log_variance=-5,
         track_inducing_locations=False,
-        trainable_prior = True,
+        trainable_prior=True,
         inducing_classes=None,
         y_mean=0.0,
         y_std=1.0,
@@ -484,8 +490,64 @@ class VaLLARegression(BaseVaLLA):
         return Fmu, F_var + self.log_variance.exp()
 
 
-class VaLLARegressionRBF(VaLLARegression):
+class VaLLARegressionBackend(VaLLARegression):
+    def __init__(
+        self,
+        net,
+        Z,
+        prior_std,
+        num_data,
+        output_dim,
+        log_variance,
+        backend,
+        track_inducing_locations=False,
+        trainable_prior=True,
+        alpha=1.0,
+        inducing_classes=None,
+        y_mean=0.0,
+        y_std=1.0,
+        device=None,
+        dtype=torch.float64,
+    ):
+        super().__init__(
+            net,
+            Z,
+            prior_std,
+            num_data,
+            output_dim,
+            log_variance,
+            track_inducing_locations,
+            trainable_prior,
+            inducing_classes,
+            y_mean,
+            y_std,
+            alpha,
+            device,
+            dtype,
+        )
+        self.backpack = backend
 
+    def compute_kernels(self, X):
+        Jx = self.backpack.jacobians(X, enable_back_prop=False)
+        Jz = self.backpack.jacobians_on_outputs(
+            self.inducing_locations,
+            self.inducing_class.unsqueeze(-1),
+            enable_back_prop=self.training,
+        ).squeeze(1)
+
+        Kx_diag = torch.exp(self.log_prior_std) ** 2 * torch.einsum(
+            "nai, nbi -> nab", Jx, Jx
+        )
+        Kxz = torch.exp(self.log_prior_std) ** 2 * torch.einsum(
+            "nai, mi -> nma", Jx, Jz
+        )
+        Kzz = torch.exp(self.log_prior_std) ** 2 * torch.einsum("ni, mi -> nm", Jz, Jz)
+        F_mean = self.net(X)
+
+        return F_mean, Kx_diag, Kxz, Kzz
+
+
+class VaLLARegressionRBF(VaLLARegression):
     def __init__(
         self,
         net,
@@ -495,7 +557,7 @@ class VaLLARegressionRBF(VaLLARegression):
         output_dim,
         log_variance=-5,
         track_inducing_locations=False,
-        trainable_prior = True,
+        trainable_prior=True,
         inducing_classes=None,
         y_mean=0.0,
         y_std=1.0,
@@ -520,7 +582,6 @@ class VaLLARegressionRBF(VaLLARegression):
             dtype,
         )
 
-
         self.length_scale = torch.ones(Z.shape[1], device=device, dtype=dtype)
         self.length_scale = torch.nn.Parameter(self.length_scale)
 
@@ -528,10 +589,10 @@ class VaLLARegressionRBF(VaLLARegression):
         X = X / self.length_scale
         Z = Z / self.length_scale
 
-        dist = torch.cdist(X, Z)**2
+        dist = torch.cdist(X, Z) ** 2
 
         l = 2
-        K = torch.exp(self.log_prior_std)**2 * torch.exp(-dist / l)
+        K = torch.exp(self.log_prior_std) ** 2 * torch.exp(-dist / l)
         return K
 
     def compute_kernels(self, X):
@@ -544,20 +605,23 @@ class VaLLARegressionRBF(VaLLARegression):
         return F_mean, Kx_diag, Kxz, Kzz
 
 
-
 class VaLLAMultiClass(BaseVaLLA):
-    
     def nelbo(self, X, y):
-
         F_mean, F_var = self.predict_f(X)
-        
-        F = F_mean/torch.sqrt( 1 + torch.pi/8 * torch.diagonal(F_var, dim1 = 1, dim2 = 2))
 
-        probs = F.softmax(-1)**self.alpha
+        F = F_mean / torch.sqrt(
+            1 + torch.pi / 8 * torch.diagonal(F_var, dim1=1, dim2=2)
+        )
 
-        ell = -1/self.alpha * torch.nn.functional.cross_entropy(probs.log(), 
-                                                y.to(torch.long).squeeze(-1),
-                                                reduction = "none")
+        probs = F.softmax(-1) ** self.alpha
+
+        ell = (
+            -1
+            / self.alpha
+            * torch.nn.functional.cross_entropy(
+                probs.log(), y.to(torch.long).squeeze(-1), reduction="none"
+            )
+        )
 
         # # Aggregate on data dimension
         logpdf = torch.sum(ell)
@@ -572,7 +636,7 @@ class VaLLAMultiClass(BaseVaLLA):
         self.kl_history.append(KL.detach().cpu().numpy())
 
         return -scale * logpdf + KL
-    
+
     def forward(self, predict_at):
         """
         Computes the predicted labels for the given input.
@@ -589,7 +653,7 @@ class VaLLAMultiClass(BaseVaLLA):
         # Cast types if needed.
         if self.dtype != predict_at.dtype:
             predict_at = predict_at.to(self.dtype)
-            
+
         if self.y_mean != 0 or self.y_std != 1:
             raise ValueError("Labels should not be standardized in Classification")
 
@@ -604,9 +668,9 @@ class VaLLAMultiClassMC(BaseVaLLA):
         prior_std,
         num_data,
         output_dim,
-        n_mc_samples = 100,
+        n_mc_samples=100,
         track_inducing_locations=False,
-        trainable_prior = True,
+        trainable_prior=True,
         alpha=1.0,
         inducing_classes=None,
         y_mean=0.0,
@@ -635,21 +699,31 @@ class VaLLAMultiClassMC(BaseVaLLA):
         self.generator.manual_seed(seed)
         self.n_mc_samples = n_mc_samples
 
-    
     def nelbo(self, X, y):
-
         F_mean, F_var = self.predict_f(X)
-        chol = torch.linalg.cholesky(F_var)# + 1e-3 * torch.eye(F_var.shape[-1]).unsqueeze(0))
-        
-        z = torch.randn(self.n_mc_samples, F_mean.shape[0], F_var.shape[-1], generator = self.generator, dtype = self.dtype)
-        
+        chol = torch.linalg.cholesky(
+            F_var
+        )  # + 1e-3 * torch.eye(F_var.shape[-1]).unsqueeze(0))
+
+        z = torch.randn(
+            self.n_mc_samples,
+            F_mean.shape[0],
+            F_var.shape[-1],
+            generator=self.generator,
+            dtype=self.dtype,
+        )
+
         F = F_mean + torch.einsum("sna, nab -> snb", z, chol)
-        
-        F = F.softmax(-1)**self.alpha
+
+        F = F.softmax(-1) ** self.alpha
         mean = F.mean(0)
-        ell = -1/self.alpha * torch.nn.functional.cross_entropy(mean.log(), 
-                                                 y.to(torch.long).squeeze(-1),
-                                                 reduction = "none")
+        ell = (
+            -1
+            / self.alpha
+            * torch.nn.functional.cross_entropy(
+                mean.log(), y.to(torch.long).squeeze(-1), reduction="none"
+            )
+        )
         """ 
         F = F_mean + torch.einsum("sna, nab -> snb", z, chol)
 
@@ -671,7 +745,7 @@ class VaLLAMultiClassMC(BaseVaLLA):
         self.kl_history.append(KL.detach().cpu().numpy())
 
         return -scale * logpdf + KL
-    
+
     def forward(self, predict_at):
         """
         Computes the predicted labels for the given input.
@@ -688,12 +762,11 @@ class VaLLAMultiClassMC(BaseVaLLA):
         # Cast types if needed.
         if self.dtype != predict_at.dtype:
             predict_at = predict_at.to(self.dtype)
-            
+
         if self.y_mean != 0 or self.y_std != 1:
             raise ValueError("Labels should not be standardized in Classification")
 
         return self.predict_f(predict_at)
-
 
 
 class VaLLAMultiClassMCRBF(VaLLAMultiClassMC):
@@ -704,9 +777,9 @@ class VaLLAMultiClassMCRBF(VaLLAMultiClassMC):
         prior_std,
         num_data,
         output_dim,
-        n_mc_samples = 100,
+        n_mc_samples=100,
         track_inducing_locations=False,
-        trainable_prior = True,
+        trainable_prior=True,
         alpha=0.0,
         inducing_classes=None,
         y_mean=0.0,
@@ -733,7 +806,6 @@ class VaLLAMultiClassMCRBF(VaLLAMultiClassMC):
             seed,
         )
 
-
         self.length_scale = torch.ones(Z.shape[1], device=device, dtype=dtype)
         self.length_scale = torch.nn.Parameter(self.length_scale)
 
@@ -741,9 +813,9 @@ class VaLLAMultiClassMCRBF(VaLLAMultiClassMC):
         X = X / self.length_scale
         Z = Z / self.length_scale
 
-        dist = torch.cdist(X, Z)**2
+        dist = torch.cdist(X, Z) ** 2
 
-        K = torch.exp(self.log_prior_std)**2 * torch.exp(-dist / 2)
+        K = torch.exp(self.log_prior_std) ** 2 * torch.exp(-dist / 2)
         return K
 
     def compute_kernels(self, X):
@@ -754,7 +826,6 @@ class VaLLAMultiClassMCRBF(VaLLAMultiClassMC):
         F_mean = self.net(X)
 
         return F_mean, Kx_diag, Kxz, Kzz
-    
 
 
 class VaLLAMultiClassRBF(VaLLAMultiClass):
@@ -766,7 +837,7 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
         num_data,
         output_dim,
         track_inducing_locations=False,
-        trainable_prior = True,
+        trainable_prior=True,
         alpha=0.0,
         inducing_classes=None,
         y_mean=0.0,
@@ -793,53 +864,58 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
         self.length_scale = torch.ones(Z.shape[1], device=device, dtype=dtype)
         self.length_scale = torch.nn.Parameter(self.length_scale)
 
-        self.length_scale_outputs = torch.tensor(1, dtype = self.dtype, device = self.device)
+        self.length_scale_outputs = torch.tensor(
+            1, dtype=self.dtype, device=self.device
+        )
         self.length_scale_outputs = torch.nn.Parameter(self.length_scale_outputs)
 
     def rbf(self, X, Z, X_classes, Z_classes):
-
         X = X / self.length_scale
         Z = Z / self.length_scale
 
         # Shape (n,m)
-        dist = torch.cdist(X, Z)**2
+        dist = torch.cdist(X, Z) ** 2
         # shape (n,m,1,1)
         dist = dist.unsqueeze(-1).unsqueeze(-1)
 
-        X_classes = torch.nn.functional.one_hot(X_classes, self.output_dim).to(self.dtype)
-        Z_classes = torch.nn.functional.one_hot(Z_classes, self.output_dim).to(self.dtype) 
-        output_dist = torch.sum((X_classes.unsqueeze(1).unsqueeze(3) - Z_classes.unsqueeze(0).unsqueeze(2))**2, -1)
+        X_classes = torch.nn.functional.one_hot(X_classes, self.output_dim).to(
+            self.dtype
+        )
+        Z_classes = torch.nn.functional.one_hot(Z_classes, self.output_dim).to(
+            self.dtype
+        )
+        output_dist = torch.sum(
+            (X_classes.unsqueeze(1).unsqueeze(3) - Z_classes.unsqueeze(0).unsqueeze(2))
+            ** 2,
+            -1,
+        )
 
-        K = torch.exp(self.log_prior_std)**2 * torch.exp(-dist / 2) * torch.exp(-output_dist / (2* self.length_scale_outputs))
+        K = (
+            torch.exp(self.log_prior_std) ** 2
+            * torch.exp(-dist / 2)
+            * torch.exp(-output_dist / (2 * self.length_scale_outputs))
+        )
         return K
 
     def compute_kernels(self, X):
         X_classes = np.arange(0, self.output_dim)[np.newaxis, :]
-        X_classes = torch.tensor(X_classes, device = self.device, dtype = torch.long)
-        X_classes = torch.tile(
-            X_classes,
-            [X.shape[0], 1]
-        )
+        X_classes = torch.tensor(X_classes, device=self.device, dtype=torch.long)
+        X_classes = torch.tile(X_classes, [X.shape[0], 1])
 
-        Kx_diag = torch.diagonal(
-            self.rbf(X, 
-                     X, 
-                     X_classes, 
-                     X_classes)
-            ).permute(2, 0, 1)
-        Kxz = self.rbf(X, 
-                       self.inducing_locations,
-                       X_classes,
-                       self.inducing_class.unsqueeze(-1)).squeeze(-1)
-        Kzz = self.rbf(self.inducing_locations, 
-                       self.inducing_locations, 
-                       self.inducing_class.unsqueeze(-1),
-                       self.inducing_class.unsqueeze(-1)).squeeze()
+        Kx_diag = torch.diagonal(self.rbf(X, X, X_classes, X_classes)).permute(2, 0, 1)
+        Kxz = self.rbf(
+            X, self.inducing_locations, X_classes, self.inducing_class.unsqueeze(-1)
+        ).squeeze(-1)
+        Kzz = self.rbf(
+            self.inducing_locations,
+            self.inducing_locations,
+            self.inducing_class.unsqueeze(-1),
+            self.inducing_class.unsqueeze(-1),
+        ).squeeze()
 
         F_mean = self.net(X)
 
         return F_mean, Kx_diag, Kxz, Kzz
-
 
 
 class VaLLAMultiClassBackend(VaLLAMultiClass):
@@ -852,7 +928,7 @@ class VaLLAMultiClassBackend(VaLLAMultiClass):
         output_dim,
         backend,
         track_inducing_locations=False,
-        trainable_prior = True,
+        trainable_prior=True,
         alpha=1.0,
         inducing_classes=None,
         y_mean=0.0,
@@ -878,15 +954,20 @@ class VaLLAMultiClassBackend(VaLLAMultiClass):
         self.backpack = backend
 
     def compute_kernels(self, X):
-        Jx = self.backpack.jacobians(X, enable_back_prop = False)
-        Jz = self.backpack.jacobians_on_outputs(self.inducing_locations, 
-                                                self.inducing_class.unsqueeze(-1),
-                                                enable_back_prop = self.training
-                                                ).squeeze(1)
+        Jx = self.backpack.jacobians(X, enable_back_prop=False)
+        Jz = self.backpack.jacobians_on_outputs(
+            self.inducing_locations,
+            self.inducing_class.unsqueeze(-1),
+            enable_back_prop=self.training,
+        ).squeeze(1)
 
-        Kx_diag = torch.exp(self.log_prior_std)**2 * torch.einsum("nai, nbi -> nab", Jx, Jx)
-        Kxz = torch.exp(self.log_prior_std)**2 * torch.einsum("nai, mi -> nma", Jx, Jz)
-        Kzz = torch.exp(self.log_prior_std)**2 * torch.einsum("ni, mi -> nm", Jz, Jz)
+        Kx_diag = torch.exp(self.log_prior_std) ** 2 * torch.einsum(
+            "nai, nbi -> nab", Jx, Jx
+        )
+        Kxz = torch.exp(self.log_prior_std) ** 2 * torch.einsum(
+            "nai, mi -> nma", Jx, Jz
+        )
+        Kzz = torch.exp(self.log_prior_std) ** 2 * torch.einsum("ni, mi -> nm", Jz, Jz)
         F_mean = self.net(X)
 
         return F_mean, Kx_diag, Kxz, Kzz
@@ -901,7 +982,7 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
         num_data,
         output_dim,
         track_inducing_locations=False,
-        trainable_prior = True,
+        trainable_prior=True,
         alpha=0.0,
         inducing_classes=None,
         y_mean=0.0,
@@ -925,9 +1006,11 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
             dtype,
         )
 
-        self.length_scale = torch.ones(Z.shape[1], self.output_dim, device=device, dtype=dtype)
+        self.length_scale = torch.ones(
+            Z.shape[1], self.output_dim, device=device, dtype=dtype
+        )
         self.length_scale = torch.nn.Parameter(self.length_scale)
-        self.log_prior_std = torch.ones(self.output_dim, device = device, dtype = dtype)
+        self.log_prior_std = torch.ones(self.output_dim, device=device, dtype=dtype)
 
     def rbf(self, X, Z, X_classes, Z_classes):
         # X shape (n, i)
@@ -935,9 +1018,7 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
         # X_classes shape (n, o_x)
         # Z_classes shape (m, o_z)
 
-
-        l_x = torch.gather(
-            self.length_scale, X_classes)
+        l_x = torch.gather(self.length_scale, X_classes)
         l_z = torch.gather(self.length_scale, Z_classes)
 
         # X shape (n, i, o_x)
@@ -946,42 +1027,45 @@ class VaLLAMultiClassRBF(VaLLAMultiClass):
         Z = Z.unsqueeze(-1) / self.length_scale
 
         # Shape (n,m)
-        dist = torch.cdist(X, Z)**2
+        dist = torch.cdist(X, Z) ** 2
         # shape (n,m,1,1)
         dist = dist.unsqueeze(-1).unsqueeze(-1)
 
-        X_classes = torch.nn.functional.one_hot(X_classes, self.output_dim).to(self.dtype)
-        Z_classes = torch.nn.functional.one_hot(Z_classes, self.output_dim).to(self.dtype) 
-        output_dist = torch.sum((X_classes.unsqueeze(1).unsqueeze(3) - Z_classes.unsqueeze(0).unsqueeze(2))**2, -1)
+        X_classes = torch.nn.functional.one_hot(X_classes, self.output_dim).to(
+            self.dtype
+        )
+        Z_classes = torch.nn.functional.one_hot(Z_classes, self.output_dim).to(
+            self.dtype
+        )
+        output_dist = torch.sum(
+            (X_classes.unsqueeze(1).unsqueeze(3) - Z_classes.unsqueeze(0).unsqueeze(2))
+            ** 2,
+            -1,
+        )
 
-        K = torch.exp(self.log_prior_std)**2 * torch.exp(-dist / 2) * torch.exp(-output_dist / (2* self.length_scale_outputs))
+        K = (
+            torch.exp(self.log_prior_std) ** 2
+            * torch.exp(-dist / 2)
+            * torch.exp(-output_dist / (2 * self.length_scale_outputs))
+        )
         return K
 
     def compute_kernels(self, X):
         X_classes = np.arange(0, self.output_dim)[np.newaxis, :]
-        X_classes = torch.tensor(X_classes, device = self.device, dtype = torch.long)
-        X_classes = torch.tile(
-            X_classes,
-            [X.shape[0], 1]
-        )
+        X_classes = torch.tensor(X_classes, device=self.device, dtype=torch.long)
+        X_classes = torch.tile(X_classes, [X.shape[0], 1])
 
-        Kx_diag = torch.diagonal(
-            self.rbf(X, 
-                     X, 
-                     X_classes, 
-                     X_classes)
-            ).permute(2, 0, 1)
-        Kxz = self.rbf(X, 
-                       self.inducing_locations,
-                       X_classes,
-                       self.inducing_class.unsqueeze(-1)).squeeze(-1)
-        Kzz = self.rbf(self.inducing_locations, 
-                       self.inducing_locations, 
-                       self.inducing_class.unsqueeze(-1),
-                       self.inducing_class.unsqueeze(-1)).squeeze()
+        Kx_diag = torch.diagonal(self.rbf(X, X, X_classes, X_classes)).permute(2, 0, 1)
+        Kxz = self.rbf(
+            X, self.inducing_locations, X_classes, self.inducing_class.unsqueeze(-1)
+        ).squeeze(-1)
+        Kzz = self.rbf(
+            self.inducing_locations,
+            self.inducing_locations,
+            self.inducing_class.unsqueeze(-1),
+            self.inducing_class.unsqueeze(-1),
+        ).squeeze()
 
         F_mean = self.net(X)
 
         return F_mean, Kx_diag, Kxz, Kzz
-    
-    

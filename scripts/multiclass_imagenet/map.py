@@ -16,26 +16,23 @@ from utils.pytorch_learning import fit_map_crossentropy, fit, forward, score
 from scripts.filename import create_file_name
 from src.valla import VaLLAMultiClassMC
 from utils.models import get_resnet
-from utils.dataset import get_dataset
+from utils.dataset import imagenet_loaders
 from utils.metrics import SoftmaxClassification, OOD
 from src.utils import smooth
+from torchvision import models
 import matplotlib.pyplot as plt
 args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
 
-train_dataset, val_dataset, test_dataset = args.dataset.get_split(
-    args.test_size, args.seed + args.split
-)
+train_loader, test_loader = imagenet_loaders(args, valid_size=0.0)
 
-# Initialize DataLoader
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle = True)
-test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+import torchvision.models as models
 
-f = get_resnet(args.resnet, 10).to(args.device).to(args.dtype)
+f = models.__dict__[args.resnet](pretrained=True).to(args.device).to(args.dtype)
+f.eval()
 
-save_str = "MAP_Resnet20_dataset={}".format(
+save_str = "MAP_ImageNet_dataset={}".format(
     args.dataset_name)
 
 
@@ -68,6 +65,9 @@ test_metrics = score(
     device=args.device,
     dtype=args.dtype,
 )
+
+print(test_metrics)
+input()
 
 
 test_metrics["weight_decay"] = args.weight_decay

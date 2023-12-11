@@ -31,7 +31,7 @@ val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-f = get_resnet("resnet20", 10).to(args.device)
+f = get_resnet(args.resnet, 10).to(args.device).to(args.dtype)
 # 'all', 'subnetwork' and 'last_layer'
 subset = args.subset
 # 'full', 'kron', 'lowrank' and 'diag'
@@ -133,7 +133,6 @@ if args.test_corruptions:
         corrupted_metrics = score(
             la, loader, SoftmaxClassification, use_tqdm=args.verbose, device=args.device, dtype=args.dtype
         ).copy()
-        print(corrupted_metrics)
 
         test_metrics = {
             **test_metrics,

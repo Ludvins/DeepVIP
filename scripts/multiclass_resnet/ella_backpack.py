@@ -41,7 +41,7 @@ val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 
-f = get_resnet("resnet20", 10).to(args.device)
+f = get_resnet(args.resnet, 10).to(args.device).to(args.dtype)
 
 
 ella = ELLA_MulticlassBackpack(

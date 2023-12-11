@@ -2,6 +2,7 @@ from io import BytesIO
 from urllib.request import urlopen
 from zipfile import ZipFile
 
+import torchvision
 import os
 import numpy as np
 import pandas as pd
@@ -206,20 +207,22 @@ class Synthetic_Dataset(DVIPDataset):
         targets = f(inputs) + rng.standard_normal(inputs.shape)*0.1
         
         mask = (((inputs > -1) * (inputs < -0.5)) | ((inputs < 1) * (inputs > 0.5))).flatten()
+        mask2 = ((inputs > -0.5) * (inputs < 0.5)).flatten()
+
         #mask = ...
         
         self.train = Training_Dataset(
             inputs[mask, np.newaxis],
             targets[mask, np.newaxis],
             self.output_dim,
-            normalize_targets=True,
+            normalize_targets=False,
             normalize_inputs=False,
         )
 
-        self.full = Test_Dataset(
-            inputs[..., np.newaxis],
+        self.val = Test_Dataset(
+            inputs[mask2, np.newaxis],
             self.output_dim,
-            targets[..., np.newaxis],
+            targets[mask2, np.newaxis],
             self.train.inputs_mean,
             self.train.inputs_std,
         )
@@ -235,7 +238,7 @@ class Synthetic_Dataset(DVIPDataset):
         return 300
 
     def get_split(self, *args):
-        return self.train, self.full, self.test
+        return self.train, self.val, self.test
 
     def len_train(self):
         return 200 
@@ -247,7 +250,7 @@ class Synthetic2_Dataset(DVIPDataset):
         self.type = "regression"
         self.output_dim = 1
 
-        data = np.load("data/data.npy")
+        data = np.load("../data/data.npy")
         inputs, targets = data[:, 0], data[:, 1]
 
         test_inputs = np.linspace(np.min(inputs)-5, np.max(inputs)+5, 200)
@@ -255,18 +258,21 @@ class Synthetic2_Dataset(DVIPDataset):
         self.train = Training_Dataset(
             inputs[..., np.newaxis],
             targets[..., np.newaxis],
-            normalize_targets=True,
-            normalize_inputs=True,
+            output_dim=1,
+            normalize_targets=False,
+            normalize_inputs=False,
         )
 
         self.full = Test_Dataset(
             test_inputs[..., np.newaxis],
+            1,
             None,
             self.train.inputs_mean,
             self.train.inputs_std,
         )
         self.test = Test_Dataset(
             test_inputs[..., np.newaxis],
+            1,
             None,
             self.train.inputs_mean,
             self.train.inputs_std,
@@ -280,66 +286,6 @@ class Synthetic2_Dataset(DVIPDataset):
 
     def len_train(self):
         return 400 
-    
-
-
-class SyntheticBinary_Dataset(DVIPDataset):
-    def __init__(self):
-        self.type = "binary"
-        self.output_dim = 1
-
-        rng = np.random.default_rng(seed=0)
-
-        def f(x):
-            y = np.zeros_like(x)
-            mask1 = ((x >= -3) * (x < -1)) |((x >= 1) * (x < 4)) 
-            mask2 = ((x >= -1) * (x < -0)) 
-            mask3 = ((x >= 0) * (x < 2)) 
-            
-            y[mask1] = 0.
-            y[mask2] = 1.
-
-            r = rng.uniform(-1, 1, size = x[mask3].shape[0])
-            y[mask3] = np.sign(r)
-            y[y == -1] = 0
-            return y
-            
- 
-
-        # inputs = rng.standard_normal(300)
-        inputs = np.linspace(-3.0,4.0, 300)
-        targets = f(inputs)
-        
-        mask = (((inputs > -3) * (inputs < 1)) | ((inputs < 4) * (inputs > 3))).flatten()
-                
-        self.train = Training_Dataset(
-            inputs[mask, np.newaxis],
-            targets[mask, np.newaxis],
-            normalize_targets=False,
-            normalize_inputs=False,
-        )
-
-        self.full = Test_Dataset(
-            inputs[..., np.newaxis],
-            targets[..., np.newaxis],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-        self.test = Test_Dataset(
-            inputs[..., np.newaxis],
-            targets[..., np.newaxis],
-            self.train.inputs_mean,
-            self.train.inputs_std,
-        )
-
-    def __len__(self):
-        return 300
-
-    def get_split(self, *args):
-        return self.train, self.full, self.test
-
-    def len_train(self):
-        return 200 
 
     
 class MNIST_Dataset(DVIPDataset):
@@ -347,7 +293,7 @@ class MNIST_Dataset(DVIPDataset):
         self.type = "multiclass"
         self.classes = 10
         self.output_dim = 10
-        self.corruption_values = [15, 30, 45, 60, 75, 90, 105, 120]
+        self.corruption_values = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180]
 
         train = datasets.MNIST(
             root="./data", train=True, download=True, transform=transforms.ToTensor()
@@ -453,7 +399,7 @@ class FMNIST_Dataset(DVIPDataset):
         self.type = "multiclass"
         self.classes = 10
         self.output_dim = 10
-        self.corruption_values = [15, 30, 45, 60, 75, 90, 105, 120]
+        self.corruption_values = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180]
         train = datasets.FashionMNIST(
             root="./data", train=True, download=True, transform=transforms.ToTensor()
         )
@@ -765,6 +711,232 @@ class CIFAR10_Dataset(DVIPDataset):
     def get_ood_datasets(self):
         return self.ood_test
     
+
+
+class CIFAR10_Dataset_2(DVIPDataset):
+    def __init__(self):
+        self.type = "multiclass"
+        self.classes = 10
+        self.output_dim = 10
+        self.corruption_types = 19
+        self.corruption_values = 5
+        train = datasets.CIFAR10(
+            root="./data", train=True, download=True
+        )
+        test = datasets.CIFAR10(
+            root="./data",
+            train=False,
+            download=True,
+        )
+        mean = [0.4914, 0.4822, 0.4465]
+        std = [0.2023, 0.1994, 0.2010]
+
+        train_data = (train.data/255.0 - mean)/std
+        test_data = (test.data/255.0 - mean)/std
+
+        self.input_shape = train_data.shape[1:]
+        n_val = 5000
+        train_data = np.transpose(train_data, (0, 3, 1, 2))
+        test_data = np.transpose(test_data, (0, 3, 1, 2))
+
+        self.input_dim = train_data.shape[1]
+    
+        train_targets = np.array(train.targets).reshape(-1, 1)
+        test_targets = np.array(test.targets).reshape(-1, 1)
+        
+
+        self.train = Training_Dataset(
+            train_data[:-n_val],
+            train_targets[:-n_val],
+            self.output_dim,
+            normalize_targets=False,
+            normalize_inputs=False,
+        )
+
+
+        torch.manual_seed(0)
+
+        valid_dataset = datasets.CIFAR10(root="./data",
+                                        train=True,
+                                        transform=transforms.Compose([
+                                            transforms.RandomResizedCrop(size=32, scale=(0.5, 1)),
+                                            transforms.ToTensor(),
+                                            transforms.Normalize(mean=mean,
+                                                                std=std)
+		                                ]), download=True)
+        num_train = len(train_data)
+        indices = list(range(num_train))
+        valid_idx = indices[-n_val:]
+        valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(valid_idx)
+
+        val_loader = torch.utils.data.DataLoader(
+			valid_dataset, batch_size=100, sampler=valid_sampler, shuffle = False)
+
+
+		# remove the randomness
+        xs, ys = [], []
+        for x, y in val_loader:
+            xs.append(x); ys.append(y)
+        xs = torch.cat(xs); ys = torch.cat(ys)
+
+        self.val = Test_Dataset(
+            xs,
+            self.output_dim,
+            ys,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+        self.test = Test_Dataset(
+            test_data,
+            self.output_dim,
+            test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+        test2 = datasets.SVHN(
+            root="./data",
+            split="test",
+            download=True,
+            transform=transforms.ToTensor(),
+        )
+        mean = np.expand_dims(np.expand_dims(mean, -1),-1)
+        std = np.expand_dims(np.expand_dims(std, -1),-1)
+
+        test2_data = (test2.data/255.0 - mean)/std
+        ood_test_data = np.concatenate([test_data, test2_data])
+        ood_test_targets = np.concatenate(
+            [
+                np.zeros(test_data.shape[0]),
+                np.ones(test2_data.shape[0])
+            ]).reshape(-1, 1)
+
+        self.ood_test = Test_Dataset(
+            ood_test_data,
+            self.output_dim,
+            ood_test_targets,
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def __len__(self):
+        return len(self.train) + len(self.val) + len(self.test)
+
+    def get_split(self, *args):
+        return self.train, self.val, self.test
+    
+    def get_corrupted_split(self, corruption_type, corruption_value):
+        corrupted_data_path = "./data/CIFAR-10-C/"
+        corrupted_data_files = os.listdir(corrupted_data_path)
+        corrupted_data_files.remove('labels.npy')
+
+        if 'README.txt' in corrupted_data_files:
+            corrupted_data_files.remove('README.txt')
+        labels = torch.from_numpy(
+            np.load(os.path.join(corrupted_data_path, 'labels.npy'), allow_pickle=True)).long()
+        
+        corrupted_data_file = corrupted_data_files[corruption_type]
+        map = np.lib.format.open_memmap(corrupted_data_path + corrupted_data_file, mode='r+')
+        subset = map[corruption_value*10000:(corruption_value+1)*10000]
+        
+        mean = [0.4914, 0.4822, 0.4465]
+        std = [0.2023, 0.1994, 0.2010]
+        test_data = (subset/255.0 - mean)/std
+        test_data = np.transpose(test_data, (0, 3, 1, 2))
+
+        return Test_Dataset(
+            test_data,
+            self.output_dim,
+            labels.reshape(-1, 1),
+            self.train.inputs_mean,
+            self.train.inputs_std,
+        )
+
+    def len_train(self):
+        return len(self.train)
+
+    def get_ood_datasets(self):
+        return self.ood_test
+    
+
+
+def imagenet_loaders(args, valid_size=0.01):
+
+    data_dir = "../../proyectos/ada2/ludvins/ImageNet/"
+    from timm.data import create_transform
+    from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                            std=[0.229, 0.224, 0.225])
+    T = transforms.Compose([
+        transforms.Resize(256, transforms.InterpolationMode.BILINEAR),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ])
+
+
+    T_val = transforms.Compose([
+        transforms.Resize(256, transforms.InterpolationMode.BILINEAR),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    
+    print("Loading Test Data...")
+    test_dataset = torchvision.datasets.ImageNet(data_dir, "val", transform = T_val)
+    print("Loading Train Data...")
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True)
+
+    train_dataset = torchvision.datasets.ImageNet(data_dir, "train", transform=T)
+    if valid_size > 0:
+        valid_dataset = torchvision.datasets.ImageNet(data_dir, "train",
+            transform=create_transform(
+                input_size=224,
+                scale=(0.08, 0.1),
+                is_training=True,
+                color_jitter=0.4,
+                auto_augment=None, #'original', #'v0' #'rand-m9-mstd0.5-inc1', #'v0', 'original'
+                interpolation='bicubic',
+                re_prob=0.25, #0.25,
+                re_mode='pixel',
+                re_count=1,
+                mean=IMAGENET_DEFAULT_MEAN,
+                std=IMAGENET_DEFAULT_STD,
+            )
+        )
+        num_train = len(train_dataset)
+        
+        indices = list(range(num_train))
+        split = int(np.floor(valid_size * num_train))
+        np.random.shuffle(indices)
+
+        train_idx, valid_idx = indices[split:], indices[:split]
+        train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_idx)
+        valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(valid_idx)
+        print(len(train_idx))
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=args.batch_size, sampler=train_sampler, pin_memory=False)
+        val_loader = torch.utils.data.DataLoader(
+            valid_dataset, batch_size=args.batch_size, sampler=valid_sampler, pin_memory=False)
+	
+        print("Loading Val Data...")
+        xs, ys = [], []
+        for _ in range(1):
+            for x, y in val_loader:
+                xs.append(x); ys.append(y)
+        xs = torch.cat(xs); ys = torch.cat(ys)
+        valid_dataset = torch.utils.data.TensorDataset(xs, ys)
+        val_loader = torch.utils.data.DataLoader(
+            valid_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True)
+        print("ImageNet Data Prepared")
+        return train_loader, val_loader, test_loader
+    else:
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=False)
+        print(len(train_dataset))
+        return train_loader, test_loader, train_dataset
 
 class Banana_Dataset(DVIPDataset):
     def __init__(self):
@@ -1091,10 +1263,10 @@ def get_dataset(dataset_name):
         "SPGP": SPGP_Dataset,
         "synthetic": Synthetic_Dataset,
         "synthetic2": Synthetic2_Dataset,
-        "syntheticBinary": SyntheticBinary_Dataset,
         "MNIST": MNIST_Dataset,
         "FMNIST": FMNIST_Dataset,
         "CIFAR10": CIFAR10_Dataset,
+        "CIFAR10_2": CIFAR10_Dataset_2,
         #"CIFAR10o": CIFAR10o_Dataset,
         "Banana": Banana_Dataset,
         "Airline": Airline_Dataset,

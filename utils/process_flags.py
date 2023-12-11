@@ -30,7 +30,8 @@ def manage_experiment_configuration(args=None):
         if use_cuda:
             print("Enabling GPU usage")
 
-        args.device = torch.device("cuda:0" if use_cuda else "cpu")
+        args.device = torch.device("cuda" if use_cuda else "cpu")
+        print("Device: ", args.device)
         torch.backends.cudnn.benchmark = True
 
     if args.dtype == "float64":
@@ -38,13 +39,6 @@ def manage_experiment_configuration(args=None):
     if args.dtype == "float32":
         FLAGS["dtype"] = torch.float32   
 
-    args.dataset = get_dataset(args.dataset_name)
-    
-    
-    if args.fixed_prior:
-        args.prior_std = np.sqrt(1/(args.dataset.len_train() * args.weight_decay))
-        print("Prior standard deviation fixed to: ", args.prior_std)
-    
     return args
 
 
@@ -132,6 +126,16 @@ def get_parser():
         "--activation",
         type=str,
         default="tanh",
+        help=(
+            "Activation function to use in the Bayesian NN. Options:"
+            "tanh, relu, sigmoid, cos"
+        ),
+    )
+
+    parser.add_argument(
+        "--resnet",
+        type=str,
+        default="resnet20",
         help=(
             "Activation function to use in the Bayesian NN. Options:"
             "tanh, relu, sigmoid, cos"

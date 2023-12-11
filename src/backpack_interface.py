@@ -14,7 +14,7 @@ class BackPackInterface(CurvatureInterface):
         extend(self._model)
         self.output_size = output_dim
 
-    def jacobians(self, x, enable_back_prop = False):
+    def jacobians(self, x, enable_back_prop=False):
         """Compute Jacobians \\(\\nabla_{\\theta} f(x;\\theta)\\) at current parameter \\(\\theta\\)
         using backpack's BatchGrad per output dimension.
 
@@ -46,17 +46,19 @@ class BackPackInterface(CurvatureInterface):
                 # Reset gradients
                 model.zero_grad()
                 # Compute output
-                out = model(x)
+                out = model(x)  
 
                 # Use Backpack Gradbatch to retain independent gradients for each input.
                 with backpack(BatchGrad()):
                     # Compute backward pass on the corresponding output (if more than one)
                     if self.output_size > 1:
-                        out[:, i].sum().backward(create_graph=enable_back_prop,
-                                                 retain_graph=enable_back_prop)
+                        out[:, i].sum().backward(
+                            create_graph=enable_back_prop, retain_graph=enable_back_prop
+                        )
                     else:
-                        out.sum().backward(create_graph=enable_back_prop,
-                                           retain_graph=enable_back_prop)
+                        out.sum().backward(
+                            create_graph=enable_back_prop, retain_graph=enable_back_prop
+                        )
                     # Auxiliar array
                     to_cat = []
                     # Loop over model parameters, retrieve their gradient and delete it
@@ -66,7 +68,11 @@ class BackPackInterface(CurvatureInterface):
                     # Stack all gradients
                     Jk = torch.cat(to_cat, dim=1)
                 # Append result
-                to_stack.append(Jk)
+                if i == 0:
+                    to_stack = Jk.unsqueeze(0)
+                else:
+                    to_stack = torch.cat([to_stack, Jk.unsqueeze(0)], 0)
+                #to_stack.append(Jk)
 
         # Clean model gradients
         model.zero_grad()
@@ -83,12 +89,12 @@ class BackPackInterface(CurvatureInterface):
         else:
             return Jk.unsqueeze(-1).transpose(1, 2)
 
-    def jacobians_on_outputs(self, x, outputs, enable_back_prop = True):
+    def jacobians_on_outputs(self, x, outputs, enable_back_prop=True):
         """Compute Jacobians \\(\\nabla_{\\theta} f(x;\\theta)\\) at current parameter \\(\\theta\\)
         using backpack's BatchGrad on specific output dimensions for each input.
 
         For example, if outputs[i] = [3, 4], the returned Jacobian at position i
-        will have shape (num_params, 2), where [:, 0] will contain the Jacobians 
+        will have shape (num_params, 2), where [:, 0] will contain the Jacobians
         wrt the 3rd output and [:, 1] the Jacobians wrt the 4th output.
 
         Parameters
@@ -133,8 +139,9 @@ class BackPackInterface(CurvatureInterface):
                     # Gather the desired output for each input
                     o = torch.gather(out, 1, c.unsqueeze(-1)).sum()
                     # Compute Backward pass
-                    o.backward(create_graph=enable_back_prop,
-                               retain_graph=enable_back_prop)
+                    o.backward(
+                        create_graph=enable_back_prop, retain_graph=enable_back_prop
+                    )
                     # Initialize auxiliar array
                     to_cat = []
                     # Loop over model parameters, retrieve their gradient and delete it

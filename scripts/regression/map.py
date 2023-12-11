@@ -39,6 +39,7 @@ f = get_mlp(
 
 # Define optimizer and compile model
 opt = torch.optim.Adam(f.parameters(), lr=args.MAP_lr, weight_decay=args.weight_decay)
+
 criterion = torch.nn.MSELoss()
 
 # Set the number of training samples to generate
@@ -60,6 +61,9 @@ except:
         iterations=args.MAP_iterations,
         device=args.device,
     )
+    import matplotlib.pyplot as plt
+    plt.plot(loss)
+    plt.show()
 
     print("MAP Loss: ", loss[-1])
     end = timer()
@@ -136,8 +140,6 @@ test_metrics["seed"] = args.seed
 test_metrics["time"] = end-start
 
 df = pd.DataFrame.from_dict(test_metrics, orient="index").transpose()
-
-print(df)
 
 
 save_str = "MAP_dataset={}_seed={}".format(

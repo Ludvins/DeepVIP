@@ -17,9 +17,9 @@ mlp_model = get_mlp(
     input_dim, output_dim, [50, 50], torch.nn.Tanh, device="cpu", dtype=torch.float64
 )
 backend = BackPackInterface(mlp_model, mlp_model.output_size)
-ad_jacobians = backend.jacobians(X)[0]
-
-ad_jacobians_z = backend.jacobians(Z)[0]
+ad_jacobians = backend.jacobians(X)
+print(ad_jacobians.shape)
+ad_jacobians_z = backend.jacobians(Z)
 
 
 mlp_model_adhoc = MLP(input_dim, output_dim, 2, 50, device="cpu", dtype=torch.float64)
@@ -82,11 +82,11 @@ x, Kx, Kxz, Kzz = mlp_model_adhoc.get_full_kernels(
 print("Testing both models have the same kernel diagonal: ", end="")
 print(test_equal(torch.diagonal(ad_kernel, dim1=0, dim2=1).permute(2, 0, 1), Kx))
 
-
-x, Kx, Kxz, Kzz = mlp_model_adhoc.get_full_kernels2(X, Z)
+#x, Kx, Kxz, Kzz = mlp_model_adhoc.get_full_kernels2(X, Z)
+Kxz = mlp_model_adhoc.get_kernel(X, Z)
 print("Testing both models have the same kernel: ", end="")
 print(test_equal(ad_kernel_xz, Kxz))
 
-
+Kzz = mlp_model_adhoc.get_kernel(Z, Z)
 print("Testing both models have the same kernel diagonal: ", end="")
-print(test_equal(torch.diagonal(ad_kernel_zz, dim1=-2, dim2=-1), Kzz))
+print(test_equal(ad_kernel_zz, Kzz))

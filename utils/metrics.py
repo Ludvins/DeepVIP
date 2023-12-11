@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import numpy as np
 import torch
+torch.pi = torch.acos(torch.zeros(1)).item() * 2 # which is 3.1415927410125732
 from sklearn.metrics import roc_auc_score
 from properscoring import crps_gaussian
 from scipy.stats import norm
+from src.utils import psd_safe_cholesky
 
 class Metrics:
     def __init__(self, num_data=-1, device=None):
@@ -110,6 +112,10 @@ class Regression(Metrics):
         u = (Fmean + deviation*Fstd)
         l = (Fmean - deviation*Fstd)
         inside = ((y < u) * (y > l)).to(torch.float32)
+
+        #deviation = norm.ppf(alpha)
+        #l = Fmean + deviation * Fstd
+        #inside = (y < l).to(torch.float32)
         return torch.mean(inside)
 
 
@@ -229,7 +235,7 @@ class SoftmaxClassificationNLL(Metrics):
         else:
             scale = batch_size / self.num_data
                
-        chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1], device=self.device).unsqueeze(0))
+        chol = psd_safe_cholesky(Fvar)
         z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, device=self.device, dtype = self.dtype)
         samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)
         
@@ -289,7 +295,7 @@ class SoftmaxClassification(Metrics):
          
         self.loss += scale * loss
         
-        chol = torch.linalg.cholesky(Fvar + 1e-6 * torch.eye(Fvar.shape[-1], device = self.device).unsqueeze(0))
+        chol = psd_safe_cholesky(Fvar)
         z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator, device = self.device,
                             dtype = self.dtype)
         samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)
@@ -377,7 +383,7 @@ class OOD(Metrics):
                      Usable to compute the log likelihood metric.
         """
         with torch.no_grad():            
-            chol = torch.linalg.cholesky(Fvar + 1e-3 * torch.eye(Fvar.shape[-1], device = self.device).unsqueeze(0))
+            chol = psd_safe_cholesky(Fvar)
             z = torch.randn(2048, Fmean.shape[0], Fvar.shape[-1], generator = self.generator,
                             device = self.device, dtype = self.dtype)
             samples = Fmean + torch.einsum("sna, nab -> snb", z, chol)

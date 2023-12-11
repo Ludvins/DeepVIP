@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
+torch.cuda.manual_seed_all(args.seed)
 
 train_dataset, val_dataset, test_dataset = args.dataset.get_split(
     args.test_size, args.seed + args.split
@@ -90,6 +91,7 @@ valla = VaLLAMultiClassBackend(
     num_data=train_dataset.inputs.shape[0],
     output_dim=train_dataset.output_dim,
     track_inducing_locations=True,
+    inducing_classes=classes,
     y_mean=train_dataset.targets_mean,
     y_std=train_dataset.targets_std,
     alpha = args.bb_alpha,

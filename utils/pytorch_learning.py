@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-
+from copy import deepcopy
 
 
 def fit_map(
@@ -200,7 +200,84 @@ def fit(
 
         if val_generator != None and i%val_steps == 0:
             #model.eval()
-            sc = score(model, val_generator, val_metrics, True, device, dtype)["NLL"]
+            sc = score(model, val_generator, val_metrics, use_tqdm, device, dtype)["NLL"]
+            #print("Validation NLL: {}".format(sc))
+            val_losses.append(sc)
+            if val_losses[-1]>val_losses[-2]:
+                #print("Early-stopped at iteration {} with val NLL {}".format(i, val_losses[-1]))
+                return losses, val_losses[1:]
+            #model.train()
+
+    return losses, val_losses[1:]
+
+
+
+def fit(
+    model,
+    training_generator,
+    optimizer,
+    val_generator = None,
+    val_steps = -1,
+    val_metrics = None,
+    iterations=None,
+    use_tqdm=False,
+    return_loss=False,
+    device=None,
+    dtype=None,
+):
+    """
+    Trains the given model using the arguments provided.
+
+    Arguments
+    ---------
+    model : torch.nn.Module
+            Torch model to train.
+    training_generator : iterable
+                         Must return batches of pairs corresponding to the
+                         given inputs and target values.
+    optimizer : torch optimizer
+                The already initialized optimizer.
+    scheduler : torch scheduler
+                Learning rate scheduler.
+    epochs : int
+             Number of epochs to train de model.
+    device : torch device
+             Device in which to perform all computations.
+    """
+    # Set model in training mode
+
+    losses = []
+    val_losses = [np.infty]
+
+    #model.train()
+
+    if use_tqdm:
+        # Initialize TQDM bar
+        iters = tqdm(range(iterations), unit=" iteration")
+        iters.set_description("Training ")
+    else:
+        iters = range(iterations)
+    data_iter = iter(training_generator)
+
+    for i in iters:
+        try:
+            inputs, target = next(data_iter)
+        except StopIteration:
+            # StopIteration is thrown if dataset ends
+            # reinitialize data loader
+            data_iter = iter(training_generator)
+            inputs, target = next(data_iter)
+        inputs = inputs.to(device)
+        target = target.to(device)
+        loss = model.train_step(optimizer, inputs, target)
+        if return_loss:
+            losses.append(loss.detach().cpu().numpy())
+
+        if val_generator != None and i%val_steps == 0:
+            #model.eval()
+            sc = score(model, val_generator, val_metrics, use_tqdm, device, dtype)["NLL"]
+            print("Iteration ", i)
+            print("Validation NLL: {}".format(sc))
             val_losses.append(sc)
             if val_losses[-1]>val_losses[-2]:
                 print("Early-stopped at iteration {} with val NLL {}".format(i, val_losses[-1]))

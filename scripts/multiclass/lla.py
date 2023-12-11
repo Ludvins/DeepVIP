@@ -146,9 +146,6 @@ test_metrics = score(
 )
 
 
-print(test_metrics)
-input()
-
 test_metrics["prior_std"] = prior_std
 test_metrics["iterations"] = args.iterations
 test_metrics["weight_decay"] = args.weight_decay

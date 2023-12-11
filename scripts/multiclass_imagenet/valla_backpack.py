@@ -16,52 +16,44 @@ from utils.pytorch_learning import fit_map_crossentropy, fit, forward, score
 from scripts.filename import create_file_name
 from src.valla import VaLLAMultiClassBackend
 from utils.models import get_resnet
-from utils.dataset import get_dataset
+from utils.dataset import imagenet_loaders
 from utils.metrics import SoftmaxClassification, OOD
 from src.utils import smooth
 import matplotlib.pyplot as plt
 args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
+train_loader, test_loader, train_dataset = imagenet_loaders(args, valid_size=0.0)
 
-train_dataset, val_dataset, test_dataset = args.dataset.get_split(
-    args.test_size, args.seed + args.split
-)
+import torchvision.models as models
 
-# Initialize DataLoader
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
-test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+f = models.__dict__[args.resnet](pretrained=True).to(args.device).to(args.dtype)
+f.eval()
 
-f = get_resnet(args.resnet, 10).to(args.device).to(args.dtype)
+rng = np.random.default_rng(args.seed)
 
+indexes = rng.choice(np.arange(len(train_dataset)), args.num_inducing, replace = False)
 Z = []
 classes = []
-for c in range(train_dataset.output_dim):
-    s = train_dataset.inputs[train_dataset.targets.flatten() == c]
-    z = kmeans2(s.reshape(s.shape[0], -1), 
-                args.num_inducing//train_dataset.output_dim, minit="points", 
-                seed=args.seed)[0]
-    z = z.reshape(args.num_inducing//train_dataset.output_dim, 
-                  *train_dataset.inputs.shape[1:])
-
-    Z.append(z)
-    classes.append(np.ones(args.num_inducing//train_dataset.output_dim) * c)
-Z = np.concatenate(Z)
-classes = np.concatenate(classes)
+for index in indexes:
+    img, label = train_dataset[index]
+    Z.append(img)
+    classes.append(label)
+Z = np.stack(Z, 0)
+classes = np.stack(classes, 0)
 
 from src.backpack_interface import BackPackInterface
 valla = VaLLAMultiClassBackend(
     f,
     Z,
-    backend = BackPackInterface(f, train_dataset.output_dim),
+    backend = BackPackInterface(f, 1000),
     prior_std=args.prior_std,
-    num_data=train_dataset.inputs.shape[0],
-    output_dim=train_dataset.output_dim,
-    track_inducing_locations=True,
+    num_data=len(train_dataset),
+    output_dim=1000,
+    track_inducing_locations=False,
     inducing_classes=classes,
-    y_mean=train_dataset.targets_mean,
-    y_std=train_dataset.targets_std,
+    y_mean=0,
+    y_std=1,
     alpha = args.bb_alpha,
     device=args.device,
     dtype=args.dtype,
@@ -77,8 +69,8 @@ loss, val_loss = fit(
     train_loader,
     opt,
     val_metrics=SoftmaxClassification,
-    val_steps=valla.num_data//args.batch_size,
-    val_generator = val_loader,
+    val_steps=100,
+    val_generator = test_loader,
     use_tqdm=args.verbose,
     return_loss=True,
     iterations=args.iterations,
@@ -89,8 +81,8 @@ print(val_loss)
 end = timer()
 
 
-save_str = "VaLLA_{}_dataset={}_M={}_seed={}".format(
-    args.resnet, args.dataset_name, args.num_inducing, args.seed
+save_str = "VaLLA_{}_dataset=ImageNet_M={}_seed={}".format(
+    args.resnet, args.num_inducing, args.seed
 )
 
 
@@ -104,8 +96,6 @@ test_metrics = score(
     device=args.device,
     dtype=args.dtype,
 )
-
-print(test_metrics)
 
 test_metrics["prior_std"] = np.exp(valla.log_prior_std.detach().cpu().numpy())
 test_metrics["iterations"] = args.iterations

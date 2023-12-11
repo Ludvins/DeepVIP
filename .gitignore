@@ -19,5 +19,7 @@ results/results4
 *.pdf
 demos/data/*
 .venv_laplace/*
-weights/multiclass_weights_Spiral3*
 DeepVIP.zip
+weights/*
+weights_old/*
+weights/multiclass_weights_MNIST
