@@ -200,7 +200,7 @@ class Synthetic_Dataset(DVIPDataset):
         rng = np.random.default_rng(seed=0)
 
         def f(x):
-            return np.sin(4 * x) 
+            return np.sin(10 * x) 
 
         # inputs = rng.standard_normal(300)
         inputs = np.linspace(-2.0,2.0, 300)

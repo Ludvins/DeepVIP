@@ -12,23 +12,24 @@ from utils.process_flags import manage_experiment_configuration
 from utils.pytorch_learning import fit_map_crossentropy, score
 from utils.models import get_mlp
 from utils.metrics import SoftmaxClassification, OOD
+from utils.dataset import get_dataset
 
 args = manage_experiment_configuration()
 
 torch.manual_seed(args.seed)
+dataset = get_dataset(args.dataset_name)
 
-train_dataset, val_dataset, test_dataset = args.dataset.get_split(
+train_dataset, val_dataset, test_dataset = dataset.get_split(
     args.test_size, args.seed + args.split
 )
-
 # Initialize DataLoader
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
 f = get_mlp(
-    args.dataset.input_dim,
-    args.dataset.output_dim,
+    dataset.input_dim,
+    dataset.output_dim,
     args.net_structure,
     args.activation,
     dropout=True,
@@ -109,7 +110,7 @@ test_metrics["seed"] = args.seed
 test_metrics["time"] = 0
 
 if args.test_ood:
-    ood_dataset = args.dataset.get_ood_datasets()
+    ood_dataset = dataset.get_ood_datasets()
     ood_loader = DataLoader(ood_dataset, batch_size=args.batch_size)
     ood_metrics = score(
         f, ood_loader, OOD, use_tqdm=args.verbose, device=args.device, dtype=args.dtype
@@ -118,8 +119,8 @@ if args.test_ood:
     test_metrics["OOD-AUC MC"] = ood_metrics["AUC MC"]
 
 if args.test_corruptions:
-    for corruption_value in args.dataset.corruption_values:
-        corrupted_dataset = args.dataset.get_corrupted_split(corruption_value)
+    for corruption_value in dataset.corruption_values:
+        corrupted_dataset = dataset.get_corrupted_split(corruption_value)
 
         loader = DataLoader(corrupted_dataset, batch_size=args.batch_size)
         corrupted_metrics = score(
